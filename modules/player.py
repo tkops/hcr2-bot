@@ -5,9 +5,15 @@ DB_PATH = "db/hcr2.db"
 
 def handle_command(cmd, args):
     if cmd == "list":
-        show_players(active_only=False)
+        sort = "gp"
+        if args and args[0] == "--sort" and len(args) > 1:
+            sort = args[1]
+        show_players(active_only=False, sort_by=sort)
     elif cmd == "list-active":
-        show_players(active_only=True)
+        sort = "gp"
+        if args and args[0] == "--sort" and len(args) > 1:
+            sort = args[1]
+        show_players(active_only=True, sort_by=sort)
     elif cmd == "add":
         if len(args) < 1:
             print("Usage: player add <name> [alias] [garage_power] [active]")
@@ -32,17 +38,21 @@ def handle_command(cmd, args):
     else:
         print(f"❌ Unknown player command: {cmd}")
 
-def show_players(active_only=False):
+def show_players(active_only=False, sort_by="gp"):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         q = "SELECT id, name, alias, garage_power, active, created_at FROM players"
         if active_only:
             q += " WHERE active = 1"
-        q += " ORDER BY name COLLATE NOCASE"
+
+        if sort_by == "name":
+            q += " ORDER BY name COLLATE NOCASE"
+        else:
+            q += " ORDER BY garage_power DESC"
+
         cur.execute(q)
         rows = cur.fetchall()
 
-        # Anzahl aktiver Spieler holen (unabhängig vom Modus)
         cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
         active_count = cur.fetchone()[0]
 
@@ -51,7 +61,6 @@ def show_players(active_only=False):
     for row in rows:
         pid, name, alias, gp, active, created = row
         print(f"{pid:<5} {name:<20} {alias or '':<20} {gp:>6} {str(bool(active)):>6} {created}")
-
     print("-" * 81)
     print(f"🟢 Active players: {active_count}")
 
@@ -129,10 +138,10 @@ def delete_player(pid):
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
     print("\nAvailable commands:")
-    print("  list                     Show all players")
-    print("  list-active              Show only active players")
-    print("  add <name> [alias] [...] Add player")
-    print("  edit <id> [...]          Edit player (e.g. --gp 80000)")
-    print("  deactivate <id>          Set player inactive")
-    print("  delete <id>              Remove player")
+    print("  list [--sort gp|name]       Show all players")
+    print("  list-active [--sort gp|name] Show only active players")
+    print("  add <name> [alias] [...]    Add player")
+    print("  edit <id> [...]             Edit player (e.g. --gp 80000)")
+    print("  deactivate <id>             Set player inactive")
+    print("  delete <id>                 Remove player")
 
