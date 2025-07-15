@@ -7,7 +7,6 @@ from collections import defaultdict
 
 DB_PATH = "db/hcr2.db"
 ALLOWED_CHANNEL_ID = 1394750333129068564
-GUILD_ID = 930351245703655454
 
 class MyClient(discord.Client):
     def __init__(self):
@@ -16,17 +15,16 @@ class MyClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        guild = discord.Object(id=GUILD_ID)
+        # ⛔ Entfernt alle globalen Commands, um Konflikte zu vermeiden (optional beim Entwickeln)
+        # self.tree.clear_commands()
 
-        self.tree.clear_commands(guild=guild)
-        self.tree.add_command(show_players, guild=guild)
-        self.tree.add_command(show_help, guild=guild)
-        self.tree.add_command(show_matchscores, guild=guild)
-        await self.tree.sync(guild=guild)
-
-        print("✅ Slash-Commands neu synchronisiert")
+        self.tree.add_command(show_players)
+        self.tree.add_command(show_help)
+        self.tree.add_command(show_matchscores)
+        await self.tree.sync()
+        print("✅ Globale Slash-Commands synchronisiert")
         print("📋 Registrierte Befehle:")
-        for cmd in self.tree.get_commands(guild=guild):
+        for cmd in self.tree.get_commands():
             print(f"  - {cmd.name}")
 
 client = MyClient()
@@ -70,7 +68,6 @@ def get_matchscores_grouped():
     return grouped
 
 @app_commands.command(name="pl", description="Zeigt alle aktiven Spieler")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def show_players(interaction: discord.Interaction):
     print("⚙️ /pl wurde getriggert")
     if interaction.channel.id != ALLOWED_CHANNEL_ID:
@@ -95,7 +92,6 @@ async def show_players(interaction: discord.Interaction):
         await interaction.response.send_message("Fehler beim Anzeigen der Spieler.", ephemeral=True)
 
 @app_commands.command(name="ms", description="Zeigt die letzten Matchscores gruppiert")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def show_matchscores(interaction: discord.Interaction):
     print("⚙️ /ms wurde getriggert")
     if interaction.channel.id != ALLOWED_CHANNEL_ID:
@@ -124,7 +120,6 @@ async def show_matchscores(interaction: discord.Interaction):
         await interaction.response.send_message("Fehler beim Anzeigen der Matchscores.", ephemeral=True)
 
 @app_commands.command(name="help", description="Zeigt eine Übersicht aller verfügbaren Befehle")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def show_help(interaction: discord.Interaction):
     print("⚙️ /help wurde getriggert")
     try:
