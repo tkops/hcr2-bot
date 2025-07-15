@@ -42,11 +42,11 @@ def show_players(active_only=False):
         cur.execute(q)
         rows = cur.fetchall()
 
-    print(f"{'ID':<3} {'Name':<20} {'Alias':<10} {'GP':>6} {'Active':<6} {'Created'}")
-    print("-" * 65)
+    print(f"{'ID':<5} {'Name':<20} {'Alias':<20} {'GP':>6} {'Active':<6} {'Created'}")
+    print("-" * 81)
     for row in rows:
         pid, name, alias, gp, active, created = row
-        print(f"{pid:<3} {name:<20} {alias or '':<10} {gp:>6} {str(bool(active)):>6} {created}")
+        print(f"{pid:<5} {name:<20} {alias or '':<20} {gp:>6} {str(bool(active)):>6} {created}")
 
 def add_player(name, alias=None, gp=0, active=True):
     with sqlite3.connect(DB_PATH) as conn:

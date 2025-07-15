@@ -55,6 +55,7 @@ def create_tables():
             match_id INTEGER NOT NULL,
             player_id INTEGER NOT NULL,
             score INTEGER NOT NULL,
+            UNIQUE (match_id, player_id),
             FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
             FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
         );

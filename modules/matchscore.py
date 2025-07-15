@@ -38,11 +38,10 @@ def add_score(args):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Versuche, direkte ID
+        # Spieler-ID ermitteln
         try:
             player_id = int(player_input)
         except ValueError:
-            # Suche nach Name oder Alias (teilweise)
             cur.execute("""
                 SELECT id, name, alias FROM players
                 WHERE name LIKE ? OR alias LIKE ?
@@ -60,13 +59,14 @@ def add_score(args):
             else:
                 player_id = matches[0][0]
 
-        conn.execute(
-            "INSERT INTO matchscore (match_id, player_id, score) VALUES (?, ?, ?)",
-            (match_id, player_id, score)
-        )
+        # Insert oder Update
+        conn.execute("""
+            INSERT INTO matchscore (match_id, player_id, score)
+            VALUES (?, ?, ?)
+            ON CONFLICT(match_id, player_id) DO UPDATE SET score=excluded.score
+        """, (match_id, player_id, score))
 
-    print(f"✅ Score added for player {player_input} in match {match_id}: {score}")
-
+    print(f"✅ Score saved for player {player_input} in match {match_id}: {score}")
 
 def list_scores(*args):
     match_id = None
