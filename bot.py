@@ -13,7 +13,6 @@ class MyClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # Registriert Slash-Commands beim Start
         await self.tree.sync()
         print("✅ Slash-Commands synchronisiert")
 
@@ -29,8 +28,11 @@ def get_active_players():
         """)
         return cur.fetchall()
 
-@client.tree.command(name="player", description="Zeigt alle aktiven Spieler")
-async def show_players(interaction: discord.Interaction):
+# Slash-Command-Gruppe: /player
+player_group = app_commands.Group(name="player", description="Spielerbezogene Befehle")
+
+@player_group.command(name="list", description="Zeigt alle aktiven Spieler")
+async def player_list(interaction: discord.Interaction):
     if interaction.channel.id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
         return
@@ -46,6 +48,9 @@ async def show_players(interaction: discord.Interaction):
         reply += f"{name:<20} {alias or '':<15} {gp:>6}\n"
 
     await interaction.response.send_message(f"```\n{reply}```")
+
+# Gruppe registrieren
+client.tree.add_command(player_group)
 
 client.run(TOKEN)
 
