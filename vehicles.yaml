@@ -1,0 +1,62 @@
+- name: Beast
+  shortname: be
+- name: Bolt
+  shortname: bo
+- name: Bus
+  shortname: bu
+- name: CC-EV
+  shortname: cc
+- name: Chopper
+  shortname: ch
+- name: Dune Buggy
+  shortname: db
+- name: Formula
+  shortname: f1
+- name: Glider
+  shortname: gl
+- name: Hill Climber
+  shortname: hc
+- name: Hill Climber Mk2
+  shortname: mk
+- name: Hot Rod
+  shortname: hr
+- name: Hoverbike
+  shortname: hb
+- name: Lowrider
+  shortname: lr
+- name: Monowheel
+  shortname: mw
+- name: Monster Truck
+  shortname: mt
+- name: Moonlander
+  shortname: ml
+- name: Motocross
+  shortname: mx
+- name: Muscle Car
+  shortname: mc
+- name: Racing Truck
+  shortname: rt
+- name: Raider
+  shortname: rd
+- name: Rally Car
+  shortname: rc
+- name: Rock Bouncer
+  shortname: rb
+- name: Rotator
+  shortname: ro
+- name: Scooter
+  shortname: sq
+- name: Snowmobile
+  shortname: sm
+- name: Sports Car
+  shortname: sp
+- name: Super Diesel
+  shortname: sd
+- name: Superbike
+  shortname: sb
+- name: Supercar
+  shortname: sc
+- name: Tank
+  shortname: tk
+- name: Tractor
+  shortname: tr
