@@ -28,20 +28,45 @@ def print_help():
 
 def add_score(args):
     if len(args) != 3:
-        print("Usage: matchscore add <match_id> <player_id> <score>")
+        print("Usage: matchscore add <match_id> <player_id|name> <score>")
         return
 
     match_id = int(args[0])
-    player_id = int(args[1])
+    player_input = args[1]
     score = int(args[2])
 
     with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Versuche, direkte ID
+        try:
+            player_id = int(player_input)
+        except ValueError:
+            # Suche nach Name oder Alias (teilweise)
+            cur.execute("""
+                SELECT id, name, alias FROM players
+                WHERE name LIKE ? OR alias LIKE ?
+            """, (f"%{player_input}%", f"%{player_input}%"))
+            matches = cur.fetchall()
+
+            if len(matches) == 0:
+                print(f"❌ No player found matching: {player_input}")
+                return
+            elif len(matches) > 1:
+                print(f"⚠️ Multiple players found for '{player_input}':")
+                for pid, name, alias in matches:
+                    print(f"  ID {pid}: {name} (alias: {alias})")
+                return
+            else:
+                player_id = matches[0][0]
+
         conn.execute(
             "INSERT INTO matchscore (match_id, player_id, score) VALUES (?, ?, ?)",
             (match_id, player_id, score)
         )
 
-    print(f"✅ Score added for player {player_id} in match {match_id}: {score}")
+    print(f"✅ Score added for player {player_input} in match {match_id}: {score}")
+
 
 def list_scores(*args):
     match_id = None
