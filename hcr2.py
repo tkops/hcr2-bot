@@ -1,13 +1,15 @@
 import sys
-from modules import vehicle, player, teamevent, season
+from modules import vehicle, player, teamevent, season, match, matchscore
 
 def show_main_help():
     print("Usage: python hcr2.py <entity> <command> [args]")
     print("\nAvailable entities:")
-    print("  vehicle   Manage vehicles")
-    print("  player    Manage players")
-    print("  teamevent Manage teamevents")
-    print("  season    Manage seasons")
+    print("  vehicle     Manage vehicles")
+    print("  player      Manage players")
+    print("  teamevent   Manage teamevents")
+    print("  season      Manage seasons")
+    print("  match       Manage matches")
+    print("  matchscore  Manage matchscores")
 
 def show_entity_help(entity):
     if entity == "vehicle":
@@ -18,6 +20,10 @@ def show_entity_help(entity):
         teamevent.print_help()
     elif entity == "season":
         season.print_help()
+    elif entity == "match":
+        match.print_help()
+    elif entity == "matchscore":
+        matchscore.print_help()
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
@@ -43,6 +49,10 @@ def main():
         player.handle_command(command, args)
     elif entity == "season":
         season.handle_command(command, args)
+    elif entity == "match":
+        match.handle_command(command, args)
+    elif entity == "matchscore":
+        matchscore.handle_command(command, args)
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()

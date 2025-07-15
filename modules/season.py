@@ -7,16 +7,21 @@ def handle_command(cmd, args):
         add_season(args)
     elif cmd == "list":
         list_seasons()
+    elif cmd == "edit":
+        edit_season(args)
     else:
         print(f"❌ Unknown season command: {cmd}")
         print_help()
 
+
 def print_help():
     print("Usage: python hcr2.py season <command> [args]")
     print("\nAvailable commands:")
-    print("  add <number> <name> <start> <division>")
-    print("      e.g. add 51 'Juli 2025' 2025-07-01 CC")
     print("  list")
+    print("  add <number> <name> <start> <division>")
+    print("      e.g. add 51 'Juli 2025' 2025-07-01 Div1")
+    print("      e.g. add 52 'August 2025' 2025-08-01 CC")
+    print("  edit <id> [--number N] [--name TEXT] [--start DATE] [--division TEXT]")
 
 def add_season(args):
     if len(args) != 4:
@@ -39,12 +44,45 @@ def add_season(args):
 def list_seasons():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id, number, name, start, division FROM season ORDER BY start DESC")
+        cur.execute("SELECT number, name, start, division FROM season ORDER BY start DESC")
         rows = cur.fetchall()
 
-    print(f"{'ID':<3} {'No.':<4} {'Start':<10} {'Division':<6} Name")
+    print(f"{'No.':<4} {'Start':<10} {'Division':<8} Name")
     print("-" * 50)
-    for row in rows:
-        sid, number, name, start, division = row
-        print(f"{sid:<3} {number:<4} {start:<10} {division:<6} {name}")
+    for number, name, start, division in rows:
+        print(f"{number:<4} {start:<10} {division:<8} {name}")
+
+def edit_season(args):
+    if len(args) < 2:
+        print("Usage: season edit <number> [--name TEXT] [--start DATE] [--division TEXT]")
+        return
+
+    number = int(args[0])
+    updates = {}
+    i = 1
+    while i < len(args):
+        if args[i] == "--name":
+            updates["name"] = args[i+1]
+            i += 2
+        elif args[i] == "--start":
+            updates["start"] = args[i+1]
+            i += 2
+        elif args[i] == "--division":
+            updates["division"] = args[i+1]
+            i += 2
+        else:
+            print(f"❌ Unknown option: {args[i]}")
+            return
+
+    if not updates:
+        print("❌ Nothing to update.")
+        return
+
+    set_clause = ", ".join(f"{field} = ?" for field in updates)
+    values = list(updates.values()) + [number]
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(f"UPDATE season SET {set_clause} WHERE number = ?", values)
+
+    print(f"✅ Season {number} updated: {', '.join(updates.keys())}")
 

@@ -34,12 +34,31 @@ def create_tables():
         );
 
         CREATE TABLE IF NOT EXISTS season (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            number INTEGER NOT NULL,
+            number INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             start TEXT NOT NULL,
             division TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS match (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            teamevent_id INTEGER NOT NULL,
+            season_number INTEGER NOT NULL,
+            start TEXT NOT NULL,
+            opponent TEXT NOT NULL,
+            FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
+            FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS matchscore (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            player_id INTEGER NOT NULL,
+            score INTEGER NOT NULL,
+            FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
+            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+
 
         """)
     print("✅ All tables created or verified.")
