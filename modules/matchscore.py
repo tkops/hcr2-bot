@@ -76,39 +76,44 @@ def list_scores(*args):
                 print("⚠️ No seasons found.")
                 return
 
+        base_query = """
+            SELECT
+                ms.id,
+                m.id AS match_id,
+                m.start,
+                m.opponent,
+                s.name AS season_name,
+                s.division,
+                p.name AS player_name,
+                ms.score
+            FROM matchscore ms
+            JOIN players p ON ms.player_id = p.id
+            JOIN match m ON ms.match_id = m.id
+            JOIN season s ON m.season_number = s.number
+        """
+
+        where = ""
+        values = ()
+
         if match_id:
-            cur.execute("""
-                SELECT ms.id, ms.score, p.name, m.id
-                FROM matchscore ms
-                JOIN players p ON ms.player_id = p.id
-                JOIN match m ON ms.match_id = m.id
-                WHERE m.id = ?
-                ORDER BY ms.score DESC
-            """, (match_id,))
+            where = "WHERE m.id = ?"
+            values = (match_id,)
         elif season_number:
-            cur.execute("""
-                SELECT ms.id, ms.score, p.name, m.id
-                FROM matchscore ms
-                JOIN players p ON ms.player_id = p.id
-                JOIN match m ON ms.match_id = m.id
-                WHERE m.season_number = ?
-                ORDER BY m.id DESC, ms.score DESC
-            """, (season_number,))
-        else:
-            cur.execute("""
-                SELECT ms.id, ms.score, p.name, m.id
-                FROM matchscore ms
-                JOIN players p ON ms.player_id = p.id
-                JOIN match m ON ms.match_id = m.id
-                ORDER BY m.id DESC, ms.score DESC
-            """)
+            where = "WHERE m.season_number = ?"
+            values = (season_number,)
+
+        cur.execute(f"""
+            {base_query}
+            {where}
+            ORDER BY m.start DESC, ms.score DESC
+        """, values)
 
         rows = cur.fetchall()
 
-    print(f"{'ID':<3} {'Match':<5} {'Player':<20} {'Score'}")
-    print("-" * 50)
-    for rid, score, name, mid in rows:
-        print(f"{rid:<3} {mid:<5} {name:<20} {score}")
+    print(f"{'ID':<3} {'Match':<5} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<5} {'Player':<20} {'Score'}")
+    print("-" * 90)
+    for sid, mid, date, opponent, season, division, player, score in rows:
+        print(f"{sid:<3} {mid:<5} {date:<10} {opponent:<15} {season:<12} {division:<5} {player:<20} {score}")
 
 def delete_score(sid):
     with sqlite3.connect(DB_PATH) as conn:
