@@ -36,10 +36,10 @@ def list_vehicles():
         cur = conn.cursor()
         cur.execute("SELECT id, name, shortname FROM vehicle ORDER BY id")
         rows = cur.fetchall()
-    print(f"{'ID':<3} {'Name':<20} {'Shortname'}")
-    print("-" * 35)
+    print(f"{'ID':<2}   {'Name':<18} {'SN'}")
+    print("-" * 26)
     for vid, name, short in rows:
-        print(f"{vid:<3} {name:<20} {short}")
+        print(f"{vid:>2}.  {name:<18} {short}")
 
 
 def add_vehicle(name, shortname):

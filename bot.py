@@ -15,11 +15,28 @@ class MyClient(discord.Client):
 
     async def setup_hook(self):
         self.tree.add_command(show_stats)
+        self.tree.add_command(show_vehicles)
         await self.tree.sync()
         print("✅ /stats-Befehl synchronisiert")
+        print("✅ /vehicles-Befehl synchronisiert")
 
 
 client = MyClient()
+
+
+def get_vehicle_output():
+    try:
+        result = subprocess.run(
+            ["python3", "hcr2.py", "vehicle", "list"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        print("❌ Fehler beim Aufruf von hcr2.py vehicle list:")
+        print(e)
+        return None
 
 
 def get_stats_output():
@@ -59,6 +76,31 @@ async def show_stats(interaction: discord.Interaction):
         print("❌ Fehler bei /stats:")
         traceback.print_exc()
         await interaction.response.send_message("Fehler beim Anzeigen der Statistik.", ephemeral=True)
+
+
+@app_commands.command(name="vehicles", description="Zeigt alle Fahrzeuge")
+async def show_vehicles(interaction: discord.Interaction):
+    print("⚙️ /vehicles wurde getriggert")
+    if interaction.channel.id != ALLOWED_CHANNEL_ID:
+        await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
+        return
+
+    try:
+        output = get_vehicle_output()
+        if not output:
+            await interaction.response.send_message("Fehler beim Abrufen der Fahrzeuge.", ephemeral=True)
+            return
+
+        if len(output) <= MAX_DISCORD_MSG_LEN:
+            await interaction.response.send_message(f"```\n{output}```")
+        else:
+            await interaction.response.send_message("⚠️ Ausgabe zu lang.", ephemeral=True)
+    except Exception as e:
+        print("❌ Fehler bei /vehicles:")
+        traceback.print_exc()
+        await interaction.response.send_message("Fehler beim Anzeigen der Fahrzeuge.", ephemeral=True)
+
+
 
 
 client.run(TOKEN)
