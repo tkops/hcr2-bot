@@ -29,7 +29,7 @@ def print_help():
     print("  add <match_id> <player_id> <score> <points>")
     print("  list [--match <id>] [--season [<number>]]")
     print("  delete <id>")
-    print("  edit <id> --score <newscore> [--points <newpoints>]")
+    print("  edit <id> [--score <newscore>] [--points <newpoints>]")
     print("  autoadd <match_id>")
 
 def add_score(args):
@@ -157,8 +157,8 @@ def delete_score(sid):
     print(f"🗑️  Matchscore {sid} deleted.")
 
 def edit_score(args):
-    if len(args) < 3 or "--score" not in args:
-        print("Usage: matchscore edit <id> --score <newscore> [--points <newpoints>]")
+    if len(args) < 2:
+        print("Usage: matchscore edit <id> [--score <newscore>] [--points <newpoints>]")
         return
 
     sid = int(args[0])
