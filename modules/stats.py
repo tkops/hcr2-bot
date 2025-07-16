@@ -20,9 +20,10 @@ def print_help():
 
 def format_k(value):
     abs_val = abs(value)
-    if abs_val >= 1000:
+    if abs_val >= 100:
         return f"{'-' if value < 0 else ''}{round(abs_val / 1000, 1)}k"
-    return str(value)
+    else:
+        return f"{'-' if value < 0 else ''}0.0k"
 
 def find_current_season(cur):
     today = datetime.date.today().isoformat()
