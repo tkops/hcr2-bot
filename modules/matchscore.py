@@ -1,5 +1,4 @@
 import sqlite3
-import sys
 
 DB_PATH = "db/hcr2.db"
 
@@ -21,7 +20,7 @@ def handle_command(cmd, args):
             return
         auto_add_scores(int(args[0]))
     else:
-        print(f"\u274c Unknown matchscore command: {cmd}")
+        print(f"❌ Unknown matchscore command: {cmd}")
         print_help()
 
 def print_help():
@@ -33,8 +32,65 @@ def print_help():
     print("  edit <id> --score <newscore> [--points <newpoints>]")
     print("  autoadd <match_id>")
 
+def auto_add_scores(match_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Aktive Spieler im Team PLTE
+        cur.execute("""
+            SELECT id, name FROM players
+            WHERE active = 1 AND team = 'PLTE'
+        """)
+        players = cur.fetchall()
+
+        for pid, name in players:
+            # Prüfen, ob Eintrag schon existiert
+            cur.execute("""
+                SELECT score, points FROM matchscore
+                WHERE match_id = ? AND player_id = ?
+            """, (match_id, pid))
+            if cur.fetchone():
+                print(f"➡️  Spieler {name} (ID {pid}) hat bereits einen Eintrag. Überspringe.")
+                continue
+
+            # Score eingeben
+            score_input = input(f"🔢 Score für {name}: ")
+            if score_input.lower() == "cancel":
+                print("⛔ Vorgang abgebrochen.")
+                return
+            try:
+                score = int(score_input)
+                if not (0 <= score <= 75000):
+                    raise ValueError()
+            except ValueError:
+                print("❌ Ungültiger Score. Vorgang abgebrochen.")
+                return
+
+            # Points eingeben
+            points_input = input(f"⭐ Points für {name}: ")
+            if points_input.lower() == "cancel":
+                print("⛔ Vorgang abgebrochen.")
+                return
+            try:
+                points = int(points_input)
+                if not (0 <= points <= 300):
+                    raise ValueError()
+            except ValueError:
+                print("❌ Ungültige Points. Vorgang abgebrochen.")
+                return
+
+            # Speichern
+            conn.execute("""
+                INSERT INTO matchscore (match_id, player_id, score, points)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(match_id, player_id)
+                DO UPDATE SET score = excluded.score, points = excluded.points
+            """, (match_id, pid, score, points))
+
+            print(f"✅ Gespeichert für {name}: Score {score}, Points {points}")
+
 def add_score(args):
-    if len(args) < 4:
+    if len(args) != 4:
         print("Usage: matchscore add <match_id> <player_id|name> <score> <points>")
         return
 
@@ -43,13 +99,14 @@ def add_score(args):
     score = int(args[2])
     points = int(args[3])
 
-    if not (0 <= score <= 75000 and 0 <= points <= 300):
-        print("\u274c Invalid score or points range")
+    if not (0 <= score <= 75000) or not (0 <= points <= 300):
+        print("❌ Ungültige Werte für Score oder Points.")
         return
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
+        # Spieler-ID ermitteln
         try:
             player_id = int(player_input)
         except ValueError:
@@ -60,24 +117,25 @@ def add_score(args):
             matches = cur.fetchall()
 
             if len(matches) == 0:
-                print(f"\u274c No player found matching: {player_input}")
+                print(f"❌ No player found matching: {player_input}")
                 return
             elif len(matches) > 1:
-                print(f"\u26a0\ufe0f Multiple players found for '{player_input}':")
+                print(f"⚠️ Multiple players found for '{player_input}':")
                 for pid, name, alias in matches:
                     print(f"  ID {pid}: {name} (alias: {alias})")
                 return
             else:
                 player_id = matches[0][0]
 
+        # Insert oder Update
         conn.execute("""
             INSERT INTO matchscore (match_id, player_id, score, points)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(match_id, player_id)
-            DO UPDATE SET score=excluded.score, points=excluded.points
+            ON CONFLICT(match_id, player_id) DO UPDATE
+            SET score = excluded.score, points = excluded.points
         """, (match_id, player_id, score, points))
 
-        print(f"\u2705 Score saved for player {player_id}.")
+        print(f"✅ Score gespeichert für Spieler-ID {player_id}.")
 
 def list_scores(*args):
     match_id = None
@@ -97,7 +155,7 @@ def list_scores(*args):
                 auto_latest_season = True
                 i += 1
         else:
-            print(f"\u274c Unknown option: {args[i]}")
+            print(f"❌ Unknown option: {args[i]}")
             return
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -109,7 +167,7 @@ def list_scores(*args):
             if result and result[0] is not None:
                 season_number = result[0]
             else:
-                print("\u26a0\ufe0f No seasons found.")
+                print("⚠️ No seasons found.")
                 return
 
         base_query = """
@@ -147,37 +205,43 @@ def list_scores(*args):
 
         rows = cur.fetchall()
 
-    print(f"{'ID':<3} {'Match':<5} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<5} {'Player':<20} {'Score':<6} {'Pts'}")
-    print("-" * 95)
+    print(f"{'ID':<3} {'Match':<5} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<5} {'Player':<20} {'Score':<6} {'Points'}")
+    print("-" * 100)
     for sid, mid, date, opponent, season, division, player, score, points in rows:
         print(f"{sid:<3} {mid:<5} {date:<10} {opponent:<15} {season:<12} {division:<5} {player:<20} {score:<6} {points}")
 
 def delete_score(sid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM matchscore WHERE id = ?", (sid,))
-    print(f"\U0001f5d1\ufe0f  Matchscore {sid} deleted.")
+    print(f"🗑️  Matchscore {sid} deleted.")
 
 def edit_score(args):
     if len(args) < 3:
-        print("Usage: matchscore edit <id> --score <newscore> [--points <newpoints>")
+        print("Usage: matchscore edit <id> --score <newscore> [--points <newpoints>]")
         return
 
     sid = int(args[0])
-    score = points = None
+    score = None
+    points = None
 
     i = 1
     while i < len(args):
         if args[i] == "--score":
-            i += 1
-            score = int(args[i])
+            score = int(args[i + 1])
+            i += 2
         elif args[i] == "--points":
-            i += 1
-            points = int(args[i])
-        i += 1
+            points = int(args[i + 1])
+            i += 2
+        else:
+            print(f"❌ Unknown argument: {args[i]}")
+            return
+
+    if score is None and points is None:
+        print("⚠️  Nothing to update.")
+        return
 
     fields = []
     values = []
-
     if score is not None:
         fields.append("score = ?")
         values.append(score)
@@ -185,45 +249,11 @@ def edit_score(args):
         fields.append("points = ?")
         values.append(points)
 
-    if not fields:
-        print("⚠️ Nothing to update.")
-        return
-
     values.append(sid)
+    query = f"UPDATE matchscore SET {', '.join(fields)} WHERE id = ?"
+
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"UPDATE matchscore SET {', '.join(fields)} WHERE id = ?", values)
+        conn.execute(query, values)
 
     print(f"✅ Matchscore {sid} updated.")
-
-def auto_add_scores(match_id):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, name FROM players
-            WHERE active = 1 AND team = 'PLTE'
-            ORDER BY name
-        """)
-        players = cur.fetchall()
-
-    for pid, name in players:
-        try:
-            score = int(input(f"Score für {name} (0–75000): "))
-            points = int(input(f"Points für {name} (0–300): "))
-        except ValueError:
-            print("❌ Ungültige Eingabe. Überspringe Spieler.")
-            continue
-
-        if not (0 <= score <= 75000 and 0 <= points <= 300):
-            print("❌ Werte außerhalb des gültigen Bereichs. Überspringe Spieler.")
-            continue
-
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO matchscore (match_id, player_id, score, points)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(match_id, player_id)
-                DO UPDATE SET score=excluded.score, points=excluded.points
-            """, (match_id, pid, score, points))
-
-        print(f"✅ {name} gespeichert.")
 
