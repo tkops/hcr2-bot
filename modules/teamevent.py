@@ -2,6 +2,7 @@ import sqlite3
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "add":
         add_teamevent(args)
@@ -16,12 +17,14 @@ def handle_command(cmd, args):
         print(f"❌ Unknown teamevent command: {cmd}")
         print_help()
 
+
 def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
     print("  add <name> <start-date> <vehicle_ids>")
     print("  list")
     print("  delete <id>")
+
 
 def add_teamevent(args):
     if len(args) < 3:
@@ -30,11 +33,13 @@ def add_teamevent(args):
 
     name = args[0]
     start = args[1]
-    vehicle_ids = [int(v.strip()) for v in args[2].split(",") if v.strip().isdigit()]
+    vehicle_ids = [int(v.strip())
+                   for v in args[2].split(",") if v.strip().isdigit()]
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute("INSERT INTO teamevent (name, start) VALUES (?, ?)", (name, start))
+        cur.execute(
+            "INSERT INTO teamevent (name, start) VALUES (?, ?)", (name, start))
         teamevent_id = cur.lastrowid
 
         for vid in vehicle_ids:
@@ -44,9 +49,11 @@ def add_teamevent(args):
                     (teamevent_id, vid)
                 )
             except sqlite3.IntegrityError:
-                print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
+                print(
+                    f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
     print(f"✅ Teamevent '{name}' created with vehicles: {vehicle_ids}")
+
 
 def list_teamevents():
     with sqlite3.connect(DB_PATH) as conn:
@@ -65,13 +72,15 @@ def list_teamevents():
             """, (eid,))
             vehicles = cur.fetchall()
             if vehicles:
-                print("   Vehicles:", ", ".join(f"{vid}:{vname}" for vid, vname in vehicles))
+                print("   Vehicles:", ", ".join(
+                    f"{vid}:{vname}" for vid, vname in vehicles))
             else:
                 print("   Vehicles: (none)")
 
+
 def delete_teamevent(eid):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
+        conn.execute(
+            "DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
         conn.execute("DELETE FROM teamevent WHERE id = ?", (eid,))
     print(f"🗑️  Teamevent {eid} deleted.")
-

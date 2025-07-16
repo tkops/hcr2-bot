@@ -5,6 +5,7 @@ from datetime import datetime
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "list":
         sort = "gp"
@@ -18,7 +19,8 @@ def handle_command(cmd, args):
         show_players(active_only=True, sort_by=sort)
     elif cmd == "add":
         if len(args) < 1:
-            print("Usage: player add <name> [alias] [garage_power] [active] [birthday: dd.mm.] [team]")
+            print(
+                "Usage: player add <name> [alias] [garage_power] [active] [birthday: dd.mm.] [team]")
             return
         name = args[0]
         alias = args[1] if len(args) > 1 else None
@@ -29,12 +31,14 @@ def handle_command(cmd, args):
 
         birthday = parse_birthday(birthday_raw) if birthday_raw else None
         if birthday_raw and not birthday:
-            print(f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
+            print(
+                f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
             return
 
         team = team_raw if team_raw else None
         if team and not is_valid_team(team):
-            print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+            print(
+                f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
             return
 
         add_player(name, alias, gp, active, birthday, team)
@@ -54,6 +58,7 @@ def handle_command(cmd, args):
         print(f"❌ Unknown player command: {cmd}")
         print_help()
 
+
 def parse_birthday(raw):
     if not raw:
         return None
@@ -62,6 +67,7 @@ def parse_birthday(raw):
         return dt.strftime("%m-%d")
     except ValueError:
         return None
+
 
 def format_birthday(stored):
     if not stored:
@@ -72,8 +78,10 @@ def format_birthday(stored):
     except ValueError:
         return stored
 
+
 def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
+
 
 def show_players(active_only=False, sort_by="gp"):
     with sqlite3.connect(DB_PATH) as conn:
@@ -105,6 +113,7 @@ def show_players(active_only=False, sort_by="gp"):
     print("-" * 85)
     print(f"🟢 Active players: {active_count}")
 
+
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -116,9 +125,11 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
         )
     print(f"✅ Player '{name}' added.")
 
+
 def edit_player(args):
     if len(args) < 1:
-        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM]")
+        print(
+            "Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM]")
         return
 
     pid = int(args[0])
@@ -144,13 +155,15 @@ def edit_player(args):
             raw = args[i]
             birthday = parse_birthday(raw)
             if not birthday:
-                print(f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
+                print(
+                    f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
                 return
         elif args[i] == "--team":
             i += 1
             team = args[i]
             if not is_valid_team(team):
-                print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+                print(
+                    f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
                 return
         i += 1
 
@@ -188,15 +201,18 @@ def edit_player(args):
 
     print(f"✅ Player {pid} updated.")
 
+
 def deactivate_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("UPDATE players SET active = 0 WHERE id = ?", (pid,))
     print(f"🟡 Player {pid} deactivated.")
 
+
 def delete_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM players WHERE id = ?", (pid,))
     print(f"🗑️  Player {pid} deleted.")
+
 
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
@@ -207,4 +223,3 @@ def print_help():
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
-

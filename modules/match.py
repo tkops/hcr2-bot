@@ -2,6 +2,7 @@ import sqlite3
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "add":
         add_match(args)
@@ -19,12 +20,14 @@ def handle_command(cmd, args):
         print(f"❌ Unknown match command: {cmd}")
         print_help()
 
+
 def print_help():
     print("Usage: python hcr2.py match <command> [args]")
     print("\nAvailable commands:")
     print("  add <teamevent_id> <season_number> <start> <opponent>")
     print("  list [season_number]")
     print("  delete <id>")
+
 
 def add_match(args):
     if len(args) < 4:
@@ -42,7 +45,9 @@ def add_match(args):
             (teamevent_id, season_number, start, opponent)
         )
 
-    print(f"✅ Match added: Event {teamevent_id}, Season {season_number}, vs {opponent} on {start}")
+    print(
+        f"✅ Match added: Event {teamevent_id}, Season {season_number}, vs {opponent} on {start}")
+
 
 def list_matches(season_number=None):
     with sqlite3.connect(DB_PATH) as conn:
@@ -71,8 +76,8 @@ def list_matches(season_number=None):
     for mid, start, opp, event_name, season_name in matches:
         print(f"{mid:<3} {start:<10} {opp:<12} {event_name:<20} {season_name}")
 
+
 def delete_match(mid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM match WHERE id = ?", (mid,))
     print(f"🗑️  Match {mid} deleted.")
-

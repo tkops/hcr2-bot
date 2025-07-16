@@ -2,6 +2,7 @@ import sqlite3
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "add":
         add_season(args)
@@ -21,7 +22,9 @@ def print_help():
     print("  add <number> <name> <start> <division>")
     print("      e.g. add 51 'Juli 2025' 2025-07-01 Div1")
     print("      e.g. add 52 'August 2025' 2025-08-01 CC")
-    print("  edit <id> [--number N] [--name TEXT] [--start DATE] [--division TEXT]")
+    print(
+        "  edit <id> [--number N] [--name TEXT] [--start DATE] [--division TEXT]")
+
 
 def add_season(args):
     if len(args) != 4:
@@ -41,10 +44,12 @@ def add_season(args):
 
     print(f"✅ Season {number} ('{name}') added in division {division}")
 
+
 def list_seasons():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT number, name, start, division FROM season ORDER BY start DESC")
+        cur.execute(
+            "SELECT number, name, start, division FROM season ORDER BY start DESC")
         rows = cur.fetchall()
 
     print(f"{'No.':<4} {'Start':<10} {'Division':<8} Name")
@@ -52,9 +57,11 @@ def list_seasons():
     for number, name, start, division in rows:
         print(f"{number:<4} {start:<10} {division:<8} {name}")
 
+
 def edit_season(args):
     if len(args) < 2:
-        print("Usage: season edit <number> [--name TEXT] [--start DATE] [--division TEXT]")
+        print(
+            "Usage: season edit <number> [--name TEXT] [--start DATE] [--division TEXT]")
         return
 
     number = int(args[0])
@@ -82,7 +89,7 @@ def edit_season(args):
     values = list(updates.values()) + [number]
 
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"UPDATE season SET {set_clause} WHERE number = ?", values)
+        conn.execute(
+            f"UPDATE season SET {set_clause} WHERE number = ?", values)
 
     print(f"✅ Season {number} updated: {', '.join(updates.keys())}")
-

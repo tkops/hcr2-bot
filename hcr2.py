@@ -1,6 +1,7 @@
 import sys
 from modules import vehicle, player, teamevent, season, match, matchscore
 
+
 def show_main_help():
     print("Usage: python hcr2.py <entity> <command> [args]")
     print("\nAvailable entities:")
@@ -10,6 +11,7 @@ def show_main_help():
     print("  season      Manage seasons")
     print("  match       Manage matches")
     print("  matchscore  Manage matchscores")
+
 
 def show_entity_help(entity):
     if entity == "vehicle":
@@ -27,6 +29,7 @@ def show_entity_help(entity):
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
+
 
 def main():
     if len(sys.argv) < 2:
@@ -57,6 +60,6 @@ def main():
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
 
+
 if __name__ == "__main__":
     main()
-

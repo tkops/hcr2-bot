@@ -2,6 +2,7 @@ import sqlite3
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "add":
         add_score(args)
@@ -18,6 +19,7 @@ def handle_command(cmd, args):
         print(f"❌ Unknown matchscore command: {cmd}")
         print_help()
 
+
 def print_help():
     print("Usage: python hcr2.py matchscore <command> [args]")
     print("\nAvailable commands:")
@@ -25,6 +27,7 @@ def print_help():
     print("  list [--match <id>] [--season [<number>]]")
     print("  delete <id>")
     print("  edit <id> --score <newscore>")
+
 
 def add_score(args):
     if len(args) != 3:
@@ -82,7 +85,8 @@ def add_score(args):
         print(f"\n✅ Score saved:")
         print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score'}")
         print("-" * 90)
-        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]}")
+        print(
+            f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]}")
 
 
 def list_scores(*args):
@@ -157,10 +161,12 @@ def list_scores(*args):
     for sid, mid, date, opponent, season, division, player, score in rows:
         print(f"{sid:<3} {mid:<5} {date:<10} {opponent:<15} {season:<12} {division:<5} {player:<20} {score}")
 
+
 def delete_score(sid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM matchscore WHERE id = ?", (sid,))
     print(f"🗑️  Matchscore {sid} deleted.")
+
 
 def edit_score(args):
     if len(args) != 3 or args[1] != "--score":
@@ -171,7 +177,7 @@ def edit_score(args):
     new_score = int(args[2])
 
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("UPDATE matchscore SET score = ? WHERE id = ?", (new_score, sid))
+        conn.execute(
+            "UPDATE matchscore SET score = ? WHERE id = ?", (new_score, sid))
 
     print(f"✅ Score updated for matchscore {sid}: {new_score}")
-

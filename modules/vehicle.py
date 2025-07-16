@@ -5,6 +5,7 @@ import os
 
 DB_PATH = "db/hcr2.db"
 
+
 def handle_command(cmd, args):
     if cmd == "list":
         list_vehicles()
@@ -29,6 +30,7 @@ def handle_command(cmd, args):
     else:
         print(f"❌ Unknown vehicle command: {cmd}")
 
+
 def list_vehicles():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -39,10 +41,13 @@ def list_vehicles():
     for vid, name, short in rows:
         print(f"{vid:<3} {name:<20} {short}")
 
+
 def add_vehicle(name, shortname):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("INSERT INTO vehicle (name, shortname) VALUES (?, ?)", (name, shortname))
+        conn.execute(
+            "INSERT INTO vehicle (name, shortname) VALUES (?, ?)", (name, shortname))
     print(f"✅ Added vehicle '{name}' as '{shortname}'.")
+
 
 def edit_vehicle(args):
     if len(args) < 1:
@@ -76,14 +81,17 @@ def edit_vehicle(args):
             fields.append("shortname = ?")
             values.append(short)
         values.append(vehicle_id)
-        conn.execute(f"UPDATE vehicle SET {', '.join(fields)} WHERE id = ?", values)
+        conn.execute(
+            f"UPDATE vehicle SET {', '.join(fields)} WHERE id = ?", values)
 
     print(f"✅ Vehicle {vehicle_id} updated.")
+
 
 def delete_vehicle(vid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM vehicle WHERE id = ?", (vid,))
     print(f"🗑️  Vehicle {vid} deleted.")
+
 
 def import_vehicles(file):
     if not file or not os.path.exists(file):
@@ -97,16 +105,19 @@ def import_vehicles(file):
     with sqlite3.connect(DB_PATH) as conn:
         for v in data:
             try:
-                conn.execute("INSERT INTO vehicle (name, shortname) VALUES (?, ?)", (v["name"], v["shortname"]))
+                conn.execute(
+                    "INSERT INTO vehicle (name, shortname) VALUES (?, ?)", (v["name"], v["shortname"]))
                 count += 1
             except sqlite3.IntegrityError:
                 pass
     print(f"✅ Imported {count} new vehicles.")
 
+
 def export_vehicles(file=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute("SELECT name, shortname FROM vehicle ORDER BY name COLLATE NOCASE")
+        cur.execute(
+            "SELECT name, shortname FROM vehicle ORDER BY name COLLATE NOCASE")
         data = [{"name": n, "shortname": s} for n, s in cur.fetchall()]
 
     yaml_str = yaml.dump(data, sort_keys=False, allow_unicode=True)
@@ -117,10 +128,12 @@ def export_vehicles(file=None):
     else:
         print(yaml_str)
 
+
 def drop_table():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DROP TABLE IF EXISTS vehicle;")
     print("🗑️  Vehicle table dropped.")
+
 
 def print_help():
     print("Usage: python hcr2.py vehicle <command> [args]")
@@ -132,4 +145,3 @@ def print_help():
     print("  import <file>         Import from YAML file")
     print("  export [file]         Export to YAML or stdout")
     print("  drop                  Drop (delete) the entire vehicle table")
-

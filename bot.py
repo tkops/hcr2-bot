@@ -8,6 +8,7 @@ from collections import defaultdict
 DB_PATH = "db/hcr2.db"
 ALLOWED_CHANNEL_ID = 1394750333129068564
 
+
 class MyClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -27,7 +28,9 @@ class MyClient(discord.Client):
         for cmd in self.tree.get_commands():
             print(f"  - {cmd.name}")
 
+
 client = MyClient()
+
 
 def get_active_players():
     with sqlite3.connect(DB_PATH) as conn:
@@ -38,6 +41,7 @@ def get_active_players():
             ORDER BY garage_power DESC
         """)
         return cur.fetchall()
+
 
 def get_matchscores_grouped():
     with sqlite3.connect(DB_PATH) as conn:
@@ -67,6 +71,7 @@ def get_matchscores_grouped():
         grouped[key].append((sid, player, score))
     return grouped
 
+
 @app_commands.command(name="pl", description="Zeigt alle aktiven Spieler")
 async def show_players(interaction: discord.Interaction):
     print("⚙️ /pl wurde getriggert")
@@ -90,6 +95,7 @@ async def show_players(interaction: discord.Interaction):
         print("❌ Fehler bei /pl:")
         traceback.print_exc()
         await interaction.response.send_message("Fehler beim Anzeigen der Spieler.", ephemeral=True)
+
 
 @app_commands.command(name="ms", description="Zeigt die letzten Matchscores gruppiert")
 async def show_matchscores(interaction: discord.Interaction):
@@ -119,6 +125,7 @@ async def show_matchscores(interaction: discord.Interaction):
         traceback.print_exc()
         await interaction.response.send_message("Fehler beim Anzeigen der Matchscores.", ephemeral=True)
 
+
 @app_commands.command(name="help", description="Zeigt eine Übersicht aller verfügbaren Befehle")
 async def show_help(interaction: discord.Interaction):
     print("⚙️ /help wurde getriggert")
@@ -136,4 +143,3 @@ async def show_help(interaction: discord.Interaction):
         await interaction.response.send_message("Fehler bei /help", ephemeral=True)
 
 client.run(TOKEN)
-

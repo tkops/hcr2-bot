@@ -2,6 +2,7 @@ import sqlite3
 
 DB_PATH = "db/hcr2.db"
 
+
 def create_tables():
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript("""
@@ -66,6 +67,6 @@ def create_tables():
         """)
     print("✅ All tables created or verified.")
 
+
 if __name__ == "__main__":
     create_tables()
-
