@@ -19,8 +19,9 @@ def print_help():
     print("  avg [season]              Show player averages for current or given season")
 
 def format_k(value):
-    if value >= 1000:
-        return f"{round(value / 1000, 1)}k"
+    abs_val = abs(value)
+    if abs_val >= 1000:
+        return f"{'-' if value < 0 else ''}{round(abs_val / 1000, 1)}k"
     return str(value)
 
 def find_current_season(cur):
@@ -65,6 +66,7 @@ def show_average(season_number=None):
 
         player_scores = {}
         player_names = {}
+        player_counts = {}
 
         for match_id, entries in scores_by_match.items():
             scores = [score for _, _, score in entries]
@@ -78,13 +80,14 @@ def show_average(season_number=None):
                 delta = score - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_names[pid] = name
+                player_counts[pid] = player_counts.get(pid, 0) + 1
 
         cur.execute("SELECT id FROM players WHERE active = 1")
         active_ids = {row[0] for row in cur.fetchall()}
 
         print(f"\n📊 Durchschnittliche Abweichung (Saison {season_number} — 0 = Durchschnitt, positiv = besser)")
         print("-" * 70)
-        print(f"{'Player':<20} {'Ø-Delta':>20}")
+        print(f"{'Player':<30} {'Ø-Delta':>10} {'Matches':>10}")
         print("-" * 70)
 
         entries = []
@@ -92,8 +95,9 @@ def show_average(season_number=None):
             if pid not in active_ids:
                 continue
             avg_delta = round(sum(deltas) / len(deltas))
-            entries.append((player_names[pid], avg_delta))
+            count = player_counts.get(pid, 0)
+            entries.append((player_names[pid], avg_delta, count))
 
-        for name, delta in sorted(entries, key=lambda x: x[1], reverse=True):
-            print(f"{name:<20} {format_k(delta):>20}")
+        for name, delta, count in sorted(entries, key=lambda x: x[1], reverse=True):
+            print(f"{name:<30} {format_k(delta):>10} {count:>10}")
 
