@@ -25,11 +25,18 @@ def handle_command(cmd, args):
         gp = int(args[2]) if len(args) > 2 else 0
         active = args[3].lower() != "false" if len(args) > 3 else True
         birthday_raw = args[4] if len(args) > 4 else None
-        team = args[5] if len(args) > 5 else None
+        team_raw = args[5] if len(args) > 5 else None
+
         birthday = parse_birthday(birthday_raw) if birthday_raw else None
         if birthday_raw and not birthday:
             print(f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
             return
+
+        team = team_raw if team_raw else None
+        if team and not is_valid_team(team):
+            print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+            return
+
         add_player(name, alias, gp, active, birthday, team)
     elif cmd == "edit":
         edit_player(args)
@@ -63,7 +70,10 @@ def format_birthday(stored):
         dt = datetime.strptime(stored, "%m-%d")
         return dt.strftime("%d.%m.")
     except ValueError:
-        return stored  # fallback
+        return stored
+
+def is_valid_team(team):
+    return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
 
 def show_players(active_only=False, sort_by="gp"):
     with sqlite3.connect(DB_PATH) as conn:
@@ -86,13 +96,13 @@ def show_players(active_only=False, sort_by="gp"):
         cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
         active_count = cur.fetchone()[0]
 
-    print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Geburtstag':<10} {'Team':<12} {'Erstellt'}")
-    print("-" * 90)
+    print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Geburtstag':<10} {'Team':<6} {'Erstellt'}")
+    print("-" * 85)
     for row in rows:
         pid, name, alias, gp, active, created, birthday, team = row
         bday_fmt = format_birthday(birthday)
-        print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<12} {created}")
-    print("-" * 90)
+        print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {created}")
+    print("-" * 85)
     print(f"🟢 Active players: {active_count}")
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
@@ -139,6 +149,9 @@ def edit_player(args):
         elif args[i] == "--team":
             i += 1
             team = args[i]
+            if not is_valid_team(team):
+                print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+                return
         i += 1
 
     fields = []
@@ -191,7 +204,7 @@ def print_help():
     print("  list [--sort gp|name]         Show all players")
     print("  list-active [--sort gp|name]  Show only active players")
     print("  add <name> [alias] [gp] [active] [birthday: dd.mm.] [team]")
-    print("  edit <id> --gp 90000 --team XYZ --birthday 15.07. ...")
+    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
 
