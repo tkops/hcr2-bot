@@ -71,10 +71,10 @@ def list_matches(season_number=None):
             """)
         matches = cur.fetchall()
 
-    print(f"{'ID':<3} {'Start':<10} {'Opponent':<12} {'Event':<20} {'Season'}")
-    print("-" * 65)
+    print(f"{'ID':<5} {'Start':<12} {'Opponent':<25} {'Event':<20} {'Season'}")
+    print("-" * 75)
     for mid, start, opp, event_name, season_name in matches:
-        print(f"{mid:<3} {start:<10} {opp:<12} {event_name:<20} {season_name}")
+        print(f"{mid:<5} {start:<12} {opp:<25} {event_name:<20} {season_name}")
 
 
 def delete_match(mid):

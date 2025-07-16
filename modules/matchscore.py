@@ -76,7 +76,6 @@ def add_score(args):
             DO UPDATE SET score = excluded.score, points = excluded.points
         """, (match_id, player_id, score, points))
 
-        # Einzelnen Matchscore-Eintrag anzeigen
         cur.execute("""
             SELECT ms.id, m.id, m.start, m.opponent,
                    s.name, s.division, p.name, ms.score, ms.points
@@ -93,129 +92,6 @@ def add_score(args):
         print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
         print("-" * 100)
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
-
-def list_scores(*args):
-    match_id = None
-    season_number = None
-    auto_latest_season = False
-
-    i = 0
-    while i < len(args):
-        if args[i] == "--match":
-            match_id = int(args[i + 1])
-            i += 2
-        elif args[i] == "--season":
-            if i + 1 < len(args) and args[i + 1].isdigit():
-                season_number = int(args[i + 1])
-                i += 2
-            else:
-                auto_latest_season = True
-                i += 1
-        else:
-            print(f"❌ Unknown option: {args[i]}")
-            return
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-
-        if auto_latest_season:
-            cur.execute("SELECT MAX(number) FROM season")
-            result = cur.fetchone()
-            if result and result[0] is not None:
-                season_number = result[0]
-            else:
-                print("⚠️ No seasons found.")
-                return
-
-        base_query = """
-            SELECT
-                ms.id,
-                m.id AS match_id,
-                m.start,
-                m.opponent,
-                s.name AS season_name,
-                s.division,
-                p.name AS player_name,
-                ms.score,
-                ms.points
-            FROM matchscore ms
-            JOIN players p ON ms.player_id = p.id
-            JOIN match m ON ms.match_id = m.id
-            JOIN season s ON m.season_number = s.number
-        """
-
-        where = ""
-        values = ()
-
-        if match_id:
-            where = "WHERE m.id = ?"
-            values = (match_id,)
-        elif season_number:
-            where = "WHERE m.season_number = ?"
-            values = (season_number,)
-
-        cur.execute(f"""
-            {base_query}
-            {where}
-            ORDER BY m.start DESC, ms.score DESC
-        """, values)
-
-        rows = cur.fetchall()
-
-    print(f"{'ID':<3} {'Match':<5} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<5} {'Player':<20} {'Score':<6} {'Points'}")
-    print("-" * 100)
-    for sid, mid, date, opponent, season, division, player, score, points in rows:
-        print(f"{sid:<3} {mid:<5} {date:<10} {opponent:<15} {season:<12} {division:<5} {player:<20} {score:<6} {points}")
-
-def delete_score(sid):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM matchscore WHERE id = ?", (sid,))
-    print(f"🗑️  Matchscore {sid} deleted.")
-
-def edit_score(args):
-    if len(args) < 2:
-        print("Usage: matchscore edit <id> [--score <newscore>] [--points <newpoints>]")
-        return
-
-    sid = int(args[0])
-    score = points = None
-
-    i = 1
-    while i < len(args):
-        if args[i] == "--score":
-            i += 1
-            score = int(args[i])
-        elif args[i] == "--points":
-            i += 1
-            points = int(args[i])
-        i += 1
-
-    if score is not None and not (0 <= score <= 75000):
-        print("❌ Ungültiger Score.")
-        return
-    if points is not None and not (0 <= points <= 300):
-        print("❌ Ungültige Points.")
-        return
-
-    fields = []
-    values = []
-
-    if score is not None:
-        fields.append("score = ?")
-        values.append(score)
-    if points is not None:
-        fields.append("points = ?")
-        values.append(points)
-
-    if not fields:
-        print("⚠️  Nothing to update.")
-        return
-
-    values.append(sid)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"UPDATE matchscore SET {', '.join(fields)} WHERE id = ?", values)
-
-    print(f"✅ Matchscore {sid} updated.")
 
 def auto_add_scores(match_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -241,6 +117,9 @@ def auto_add_scores(match_id):
                 if score_input.lower() == "cancel":
                     print("⛔ Vorgang abgebrochen.")
                     return
+                if score_input.lower() == "skip":
+                    print(f"↪️  Überspringe {name}.")
+                    break
                 try:
                     score = int(score_input)
                     if 0 <= score <= 75000:
@@ -249,11 +128,17 @@ def auto_add_scores(match_id):
                     pass
                 print("❌ Ungültiger Score. Bitte erneut eingeben.")
 
+            if score_input.lower() == "skip":
+                continue
+
             while True:
                 points_input = input(f"⭐ Points für {name}: ")
                 if points_input.lower() == "cancel":
                     print("⛔ Vorgang abgebrochen.")
                     return
+                if points_input.lower() == "skip":
+                    print(f"↪️  Überspringe {name}.")
+                    break
                 try:
                     points = int(points_input)
                     if 0 <= points <= 300:
@@ -261,6 +146,9 @@ def auto_add_scores(match_id):
                 except ValueError:
                     pass
                 print("❌ Ungültige Points. Bitte erneut eingeben.")
+
+            if points_input.lower() == "skip":
+                continue
 
             conn.execute("""
                 INSERT INTO matchscore (match_id, player_id, score, points)
