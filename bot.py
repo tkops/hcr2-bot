@@ -23,6 +23,7 @@ class MyClient(discord.Client):
         self.tree.add_command(show_teamevents)
         self.tree.add_command(show_seasons)
         self.tree.add_command(show_matches)
+        self.tree.add_command(autoadd)
         await self.tree.sync()
         print("✅ Alle Slash-Befehle synchronisiert")
 
@@ -95,6 +96,11 @@ async def show_seasons(interaction: discord.Interaction):
 @app_commands.command(name="match", description="Zeigt alle Matches")
 async def show_matches(interaction: discord.Interaction):
     await run_list_command(interaction, lambda: run_hcr2(["match", "list"]))
+
+@app_commands.command(name="autoadd", description="Berechnet und speichert Punkte automatisch")
+async def autoadd(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["matchscore", "autoadd"]))
+
 
 
 client.run(TOKEN)
