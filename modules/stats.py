@@ -1,14 +1,14 @@
 import sqlite3
 import statistics
+import datetime
+import sys
 
 DB_PATH = "db/hcr2.db"
 
 def handle_command(cmd, args):
     if cmd == "avg":
-        season = None
-        if args and args[0].isdigit():
-            season = int(args[0])
-        show_avg_scores(season)
+        season_arg = int(args[0]) if args else None
+        show_average(season_arg)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -16,76 +16,84 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py stats <command> [args]")
     print("\nAvailable commands:")
-    print("  avg [season]    Show average median-relative scores per player")
+    print("  avg [season]              Show player averages for current or given season")
 
-def show_avg_scores(season=None):
+def format_k(value):
+    if value >= 1000:
+        return f"{round(value / 1000, 1)}k"
+    return str(value)
+
+def find_current_season(cur):
+    today = datetime.date.today().isoformat()
+    cur.execute("SELECT number FROM season WHERE start <= ? ORDER BY start DESC LIMIT 1", (today,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+def show_average(season_number=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        if not season:
-            cur.execute("SELECT MAX(number) FROM season")
-            result = cur.fetchone()
-            if result and result[0]:
-                season = result[0]
-            else:
-                print("⚠️ No season found.")
-                return
+        if season_number is None:
+            season_number = find_current_season(cur)
 
-        # Aktive Spieler laden
-        cur.execute("SELECT id, name FROM players WHERE active = 1")
-        active_players = {pid: name for pid, name in cur.fetchall()}
+        if not season_number:
+            print("⚠️ Keine passende Saison gefunden.")
+            return
 
-        # Matchdaten und Scores abrufen
         cur.execute("""
             SELECT
                 ms.player_id,
+                p.name,
                 ms.score,
-                m.id as match_id
+                m.id
             FROM matchscore ms
+            JOIN players p ON ms.player_id = p.id
             JOIN match m ON ms.match_id = m.id
             WHERE m.season_number = ?
-        """, (season,))
+        """, (season_number,))
+        rows = cur.fetchall()
 
-        data = cur.fetchall()
-
-        if not data:
-            print("❌ Keine Scores gefunden.")
+        if not rows:
+            print("⚠️ Keine Matchscores gefunden.")
             return
 
-        # Scores pro Match sammeln
-        match_scores = {}
-        for pid, score, mid in data:
-            match_scores.setdefault(mid, []).append((pid, score))
+        scores_by_match = {}
+        for pid, name, score, match_id in rows:
+            if score is None:
+                continue
+            scores_by_match.setdefault(match_id, []).append((pid, name, score))
 
-        player_deltas = {pid: [] for pid in active_players}
+        player_scores = {}
+        player_names = {}
 
-        for match_id, entries in match_scores.items():
-            scores = [score for _, score in entries]
+        for match_id, entries in scores_by_match.items():
+            scores = [score for _, _, score in entries]
             if not scores:
                 continue
-            median = statistics.median(scores)
-            for pid, score in entries:
-                if pid in player_deltas:
-                    delta = score - median
-                    player_deltas[pid].append(delta)
+            try:
+                median = statistics.median(scores)
+            except statistics.StatisticsError:
+                continue
+            for pid, name, score in entries:
+                delta = score - median
+                player_scores.setdefault(pid, []).append(delta)
+                player_names[pid] = name
 
-        # Durchschnittliche Abweichungen berechnen
-        player_avg = []
-        for pid, deltas in player_deltas.items():
-            if deltas:
-                avg = round(sum(deltas) / len(deltas), 1)
-                player_avg.append((active_players[pid], avg, len(deltas)))
+        cur.execute("SELECT id FROM players WHERE active = 1")
+        active_ids = {row[0] for row in cur.fetchall()}
 
-        if not player_avg:
-            print("❌ Keine gültigen Scores für aktive Spieler.")
-            return
+        print(f"\n📊 Durchschnittliche Abweichung (Saison {season_number} — 0 = Durchschnitt, positiv = besser)")
+        print("-" * 70)
+        print(f"{'Player':<20} {'Ø-Delta':>20}")
+        print("-" * 70)
 
-        # Nach Durchschnitt absteigend sortieren
-        player_avg.sort(key=lambda x: x[1], reverse=True)
+        entries = []
+        for pid, deltas in player_scores.items():
+            if pid not in active_ids:
+                continue
+            avg_delta = round(sum(deltas) / len(deltas))
+            entries.append((player_names[pid], avg_delta))
 
-        print(f"📊 Durchschnittliche Abweichung vom Median (Season {season})")
-        print(f"{'#':<3} {'Player':<20} {'ØDelta':>8} {'Matches'}")
-        print("-" * 40)
-        for i, (name, avg, count) in enumerate(player_avg, 1):
-            print(f"{i:<3} {name:<20} {avg:>8} {count}")
+        for name, delta in sorted(entries, key=lambda x: x[1], reverse=True):
+            print(f"{name:<20} {format_k(delta):>20}")
 
