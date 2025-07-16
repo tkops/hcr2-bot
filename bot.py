@@ -5,7 +5,10 @@ import subprocess
 import traceback
 
 ALLOWED_CHANNEL_ID = 1394750333129068564
-MAX_DISCORD_MSG_LEN = 1990  
+MAX_DISCORD_MSG_LEN = 1990
+
+ADMINS = set()  # optional für spätere Erweiterung
+
 
 class MyClient(discord.Client):
     def __init__(self):
@@ -16,91 +19,82 @@ class MyClient(discord.Client):
     async def setup_hook(self):
         self.tree.add_command(show_stats)
         self.tree.add_command(show_vehicles)
+        self.tree.add_command(show_players)
+        self.tree.add_command(show_teamevents)
+        self.tree.add_command(show_seasons)
+        self.tree.add_command(show_matches)
         await self.tree.sync()
-        print("✅ /stats-Befehl synchronisiert")
-        print("✅ /vehicles-Befehl synchronisiert")
+        print("✅ Alle Slash-Befehle synchronisiert")
 
 
 client = MyClient()
 
 
-def get_vehicle_output():
+def run_hcr2(args):
     try:
         result = subprocess.run(
-            ["python3", "hcr2.py", "vehicle", "list"],
+            ["python3", "hcr2.py"] + args,
             capture_output=True,
             text=True,
             check=True
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
-        print("❌ Fehler beim Aufruf von hcr2.py vehicle list:")
+        print(f"❌ Fehler bei hcr2.py {' '.join(args)}:")
         print(e)
         return None
 
 
-def get_stats_output():
-    try:
-        result = subprocess.run(
-            ["python3", "hcr2.py", "stats", "avg"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print("❌ Fehler beim Aufruf von hcr2.py stats avg:")
-        print(e)
-        return None
-
-
-@app_commands.command(name="stats", description="Zeigt Rangliste mit Median-Delta der aktuellen Saison")
-async def show_stats(interaction: discord.Interaction):
-    print("⚙️ /stats wurde getriggert")
+async def run_list_command(interaction, get_output_func):
     if interaction.channel.id != ALLOWED_CHANNEL_ID:
         await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
         return
 
     try:
-        output = get_stats_output()
+        output = get_output_func()
         if not output:
-            await interaction.response.send_message("Fehler beim Abrufen der Statistik.", ephemeral=True)
-            return
-
-        if len(output) <= MAX_DISCORD_MSG_LEN:
-            await interaction.response.send_message(f"```\n{output}```")
-        else:
-            await interaction.response.send_message("⚠️ Ausgabe zu lang. Bitte Ausgabe kürzen.", ephemeral=True)
-
-    except Exception as e:
-        print("❌ Fehler bei /stats:")
-        traceback.print_exc()
-        await interaction.response.send_message("Fehler beim Anzeigen der Statistik.", ephemeral=True)
-
-
-@app_commands.command(name="vehicles", description="Zeigt alle Fahrzeuge")
-async def show_vehicles(interaction: discord.Interaction):
-    print("⚙️ /vehicles wurde getriggert")
-    if interaction.channel.id != ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
-        return
-
-    try:
-        output = get_vehicle_output()
-        if not output:
-            await interaction.response.send_message("Fehler beim Abrufen der Fahrzeuge.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Keine Daten gefunden.", ephemeral=True)
             return
 
         if len(output) <= MAX_DISCORD_MSG_LEN:
             await interaction.response.send_message(f"```\n{output}```")
         else:
             await interaction.response.send_message("⚠️ Ausgabe zu lang.", ephemeral=True)
-    except Exception as e:
-        print("❌ Fehler bei /vehicles:")
+    except Exception:
         traceback.print_exc()
-        await interaction.response.send_message("Fehler beim Anzeigen der Fahrzeuge.", ephemeral=True)
+        await interaction.response.send_message("❌ Fehler bei der Anzeige.", ephemeral=True)
 
 
+# ---- Slash-Befehle ----
+
+@app_commands.command(name="stats", description="Zeigt die aktuelle Rangliste")
+async def show_stats(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["stats", "avg"]))
+
+
+@app_commands.command(name="vehicles", description="Zeigt alle Fahrzeuge")
+async def show_vehicles(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["vehicle", "list"]))
+
+
+@app_commands.command(name="player", description="Zeigt alle Spieler")
+async def show_players(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["player", "list"]))
+
+
+@app_commands.command(name="teamevent", description="Zeigt alle Teamevents")
+async def show_teamevents(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["teamevent", "list"]))
+
+
+@app_commands.command(name="season", description="Zeigt alle Seasons")
+async def show_seasons(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["season", "list"]))
+
+
+@app_commands.command(name="match", description="Zeigt alle Matches")
+async def show_matches(interaction: discord.Interaction):
+    await run_list_command(interaction, lambda: run_hcr2(["match", "list"]))
 
 
 client.run(TOKEN)

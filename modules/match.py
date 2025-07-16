@@ -54,27 +54,27 @@ def list_matches(season_number=None):
         cur = conn.cursor()
         if season_number:
             cur.execute("""
-                SELECT m.id, m.start, m.opponent, t.name, s.name
+                SELECT m.id, m.start, m.opponent, t.name
                 FROM match m
                 JOIN teamevent t ON m.teamevent_id = t.id
-                JOIN season s ON m.season_number = s.number
                 WHERE m.season_number = ?
                 ORDER BY m.start DESC
+                LIMIT 15
             """, (season_number,))
         else:
             cur.execute("""
-                SELECT m.id, m.start, m.opponent, t.name, s.name
+                SELECT m.id, m.start, m.opponent, t.name
                 FROM match m
                 JOIN teamevent t ON m.teamevent_id = t.id
-                JOIN season s ON m.season_number = s.number
                 ORDER BY m.start DESC
+                LIMIT 15
             """)
         matches = cur.fetchall()
 
-    print(f"{'ID':<5} {'Start':<12} {'Opponent':<25} {'Event':<20} {'Season'}")
-    print("-" * 75)
-    for mid, start, opp, event_name, season_name in matches:
-        print(f"{mid:<5} {start:<12} {opp:<25} {event_name:<20} {season_name}")
+    print(f"{'ID':<5}   {'Start':<12} {'Opponent':<25} {'Event'}")
+    print("-" * 65)
+    for mid, start, opp, event_name in matches:
+        print(f"{mid:>5}.  {start:<12} {opp:<25} {event_name}")
 
 
 def delete_match(mid):

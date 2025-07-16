@@ -52,10 +52,10 @@ def list_seasons():
             "SELECT number, name, start, division FROM season ORDER BY start DESC")
         rows = cur.fetchall()
 
-    print(f"{'No.':<4} {'Start':<10} {'Division':<8} Name")
-    print("-" * 50)
+    print(f"{'No.':3}   {'Start':<12} {'Div':<6} Name")
+    print("-" * 40)
     for number, name, start, division in rows:
-        print(f"{number:<4} {start:<10} {division:<8} {name}")
+        print(f"{number:>3}.  {start:<12} {division:<6} {name}")
 
 
 def edit_season(args):
