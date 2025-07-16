@@ -76,7 +76,23 @@ def add_score(args):
             DO UPDATE SET score = excluded.score, points = excluded.points
         """, (match_id, player_id, score, points))
 
-        print(f"✅ Score saved for match {match_id}, player {player_id}.")
+        # Einzelnen Matchscore-Eintrag anzeigen
+        cur.execute("""
+            SELECT ms.id, m.id, m.start, m.opponent,
+                   s.name, s.division, p.name, ms.score, ms.points
+            FROM matchscore ms
+            JOIN match m ON ms.match_id = m.id
+            JOIN season s ON m.season_number = s.number
+            JOIN players p ON ms.player_id = p.id
+            WHERE ms.match_id = ? AND ms.player_id = ?
+        """, (match_id, player_id))
+
+        row = cur.fetchone()
+
+        print(f"\n✅ Score saved:")
+        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
+        print("-" * 100)
+        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
 
 def list_scores(*args):
     match_id = None
