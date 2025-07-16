@@ -32,130 +32,76 @@ def print_help():
     print("  edit <id> [--score <newscore>] [--points <newpoints>]")
     print("  autoadd <match_id>")
 
-def add_score(args):
-    if len(args) != 4:
-        print("Usage: matchscore add <match_id> <player_id|name> <score> <points>")
-        return
+def list_scores(*args):
+    match_id = None
+    season_number = None
+    auto_latest_season = False
 
-    match_id = int(args[0])
-    player_input = args[1]
-    score = int(args[2])
-    points = int(args[3])
-
-    if not (0 <= score <= 75000 and 0 <= points <= 300):
-        print("❌ Score oder Points außerhalb des gültigen Bereichs.")
-        return
+    i = 0
+    while i < len(args):
+        if args[i] == "--match":
+            match_id = int(args[i + 1])
+            i += 2
+        elif args[i] == "--season":
+            if i + 1 < len(args) and args[i + 1].isdigit():
+                season_number = int(args[i + 1])
+                i += 2
+            else:
+                auto_latest_season = True
+                i += 1
+        else:
+            print(f"❌ Unknown option: {args[i]}")
+            return
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        try:
-            player_id = int(player_input)
-        except ValueError:
-            cur.execute("""
-                SELECT id, name, alias FROM players
-                WHERE name LIKE ? OR alias LIKE ?
-            """, (f"%{player_input}%", f"%{player_input}%"))
-            matches = cur.fetchall()
-
-            if len(matches) == 0:
-                print(f"❌ No player found matching: {player_input}")
-                return
-            elif len(matches) > 1:
-                print(f"⚠️ Multiple players found for '{player_input}':")
-                for pid, name, alias in matches:
-                    print(f"  ID {pid}: {name} (alias: {alias})")
-                return
+        if auto_latest_season:
+            cur.execute("SELECT MAX(number) FROM season")
+            result = cur.fetchone()
+            if result and result[0] is not None:
+                season_number = result[0]
             else:
-                player_id = matches[0][0]
+                print("⚠️ No seasons found.")
+                return
 
-        conn.execute("""
-            INSERT INTO matchscore (match_id, player_id, score, points)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(match_id, player_id)
-            DO UPDATE SET score = excluded.score, points = excluded.points
-        """, (match_id, player_id, score, points))
-
-        cur.execute("""
-            SELECT ms.id, m.id, m.start, m.opponent,
-                   s.name, s.division, p.name, ms.score, ms.points
+        base_query = """
+            SELECT
+                ms.id,
+                m.id AS match_id,
+                m.start,
+                m.opponent,
+                s.name AS season_name,
+                s.division,
+                p.name AS player_name,
+                ms.score,
+                ms.points
             FROM matchscore ms
+            JOIN players p ON ms.player_id = p.id
             JOIN match m ON ms.match_id = m.id
             JOIN season s ON m.season_number = s.number
-            JOIN players p ON ms.player_id = p.id
-            WHERE ms.match_id = ? AND ms.player_id = ?
-        """, (match_id, player_id))
+        """
 
-        row = cur.fetchone()
+        where = ""
+        values = ()
 
-        print(f"\n✅ Score saved:")
-        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
-        print("-" * 100)
-        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+        if match_id:
+            where = "WHERE m.id = ?"
+            values = (match_id,)
+        elif season_number:
+            where = "WHERE m.season_number = ?"
+            values = (season_number,)
 
-def auto_add_scores(match_id):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
+        cur.execute(f"""
+            {base_query}
+            {where}
+            ORDER BY m.start DESC, ms.score DESC
+        """, values)
 
-        cur.execute("""
-            SELECT id, name FROM players
-            WHERE active = 1 AND team = 'PLTE'
-        """)
-        players = cur.fetchall()
+        rows = cur.fetchall()
 
-        for pid, name in players:
-            cur.execute("""
-                SELECT score, points FROM matchscore
-                WHERE match_id = ? AND player_id = ?
-            """, (match_id, pid))
-            if cur.fetchone():
-                print(f"➡️  Spieler {name} (ID {pid}) hat bereits einen Eintrag. Überspringe.")
-                continue
-
-            while True:
-                score_input = input(f"🔢 Score für {name}: ")
-                if score_input.lower() == "cancel":
-                    print("⛔ Vorgang abgebrochen.")
-                    return
-                if score_input.lower() == "skip":
-                    print(f"↪️  Überspringe {name}.")
-                    break
-                try:
-                    score = int(score_input)
-                    if 0 <= score <= 75000:
-                        break
-                except ValueError:
-                    pass
-                print("❌ Ungültiger Score. Bitte erneut eingeben.")
-
-            if score_input.lower() == "skip":
-                continue
-
-            while True:
-                points_input = input(f"⭐ Points für {name}: ")
-                if points_input.lower() == "cancel":
-                    print("⛔ Vorgang abgebrochen.")
-                    return
-                if points_input.lower() == "skip":
-                    print(f"↪️  Überspringe {name}.")
-                    break
-                try:
-                    points = int(points_input)
-                    if 0 <= points <= 300:
-                        break
-                except ValueError:
-                    pass
-                print("❌ Ungültige Points. Bitte erneut eingeben.")
-
-            if points_input.lower() == "skip":
-                continue
-
-            conn.execute("""
-                INSERT INTO matchscore (match_id, player_id, score, points)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(match_id, player_id)
-                DO UPDATE SET score = excluded.score, points = excluded.points
-            """, (match_id, pid, score, points))
-
-            print(f"✅ Gespeichert für {name}: Score {score}, Points {points}")
+    print(f"{'ID':<3} {'Match':<5} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<5} {'Player':<20} {'Score':<6} {'Points'}")
+    print("-" * 100)
+    for sid, mid, date, opponent, season, division, player, score, points in rows:
+        print(f"{sid:<3} {mid:<5} {date:<10} {opponent:<15} {season:<12} {division:<5} {player:<20} {score:<6} {points}")
 
