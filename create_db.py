@@ -12,10 +12,10 @@ def create_tables():
             alias TEXT,
             garage_power INTEGER DEFAULT 0,
             active BOOLEAN DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            birthday TEXT,
+            team TEXT
         );
-        ALTER TABLE players ADD COLUMN birthday TEXT;
-        ALTER TABLE players ADD COLUMN team TEXT;
 
         CREATE TABLE IF NOT EXISTS vehicle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +57,8 @@ def create_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             match_id INTEGER NOT NULL,
             player_id INTEGER NOT NULL,
-            score INTEGER NOT NULL,
+            score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 75000),
+            points INTEGER NOT NULL DEFAULT 0 CHECK(points BETWEEN 0 AND 300),
             UNIQUE (match_id, player_id),
             FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
             FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
