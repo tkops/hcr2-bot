@@ -15,10 +15,14 @@ def handle_command(cmd, args):
     elif cmd == "edit":
         edit_score(args)
     elif cmd == "autoadd":
-        if len(args) != 1:
-            print("Usage: matchscore autoadd <match_id>")
+        if len(args) > 1:
+            print("Usage: matchscore autoadd [<match_id>]")
             return
-        auto_add_scores(int(args[0]))
+        match_id = int(args[0]) if args else get_latest_match_id()
+        if match_id is None:
+            print("❌ Kein Match gefunden.")
+            return
+        auto_add_scores(match_id)
     else:
         print(f"❌ Unknown matchscore command: {cmd}")
         print_help()
@@ -26,11 +30,18 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py matchscore <command> [args]")
     print("\nAvailable commands:")
-    print("  add <match_id> <player_id> <score> <points>")
+    print("  add <match_id> <player_id|name> <score> <points>")
     print("  list [--match <id>] [--season [<number>]]")
     print("  delete <id>")
     print("  edit <id> [--score <newscore>] [--points <newpoints>]")
-    print("  autoadd <match_id>")
+    print("  autoadd [<match_id>]")
+
+def get_latest_match_id():
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(id) FROM match")
+        row = cur.fetchone()
+        return row[0] if row and row[0] is not None else None
 
 def add_score(args):
     if len(args) != 4:
