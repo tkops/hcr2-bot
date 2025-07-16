@@ -13,6 +13,8 @@ def create_tables():
             active BOOLEAN DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE players ADD COLUMN birthday TEXT;
+        ALTER TABLE players ADD COLUMN team TEXT;
 
         CREATE TABLE IF NOT EXISTS vehicle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

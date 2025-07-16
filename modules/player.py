@@ -1,5 +1,7 @@
 import sqlite3
 import sys
+import re
+from datetime import datetime
 
 DB_PATH = "db/hcr2.db"
 
@@ -16,13 +18,19 @@ def handle_command(cmd, args):
         show_players(active_only=True, sort_by=sort)
     elif cmd == "add":
         if len(args) < 1:
-            print("Usage: player add <name> [alias] [garage_power] [active]")
+            print("Usage: player add <name> [alias] [garage_power] [active] [birthday: dd.mm.] [team]")
             return
         name = args[0]
         alias = args[1] if len(args) > 1 else None
         gp = int(args[2]) if len(args) > 2 else 0
         active = args[3].lower() != "false" if len(args) > 3 else True
-        add_player(name, alias, gp, active)
+        birthday_raw = args[4] if len(args) > 4 else None
+        team = args[5] if len(args) > 5 else None
+        birthday = parse_birthday(birthday_raw) if birthday_raw else None
+        if birthday_raw and not birthday:
+            print(f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
+            return
+        add_player(name, alias, gp, active, birthday, team)
     elif cmd == "edit":
         edit_player(args)
     elif cmd == "deactivate":
@@ -37,11 +45,33 @@ def handle_command(cmd, args):
         delete_player(int(args[0]))
     else:
         print(f"❌ Unknown player command: {cmd}")
+        print_help()
+
+def parse_birthday(raw):
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(raw.strip("."), "%d.%m")
+        return dt.strftime("%m-%d")
+    except ValueError:
+        return None
+
+def format_birthday(stored):
+    if not stored:
+        return "-"
+    try:
+        dt = datetime.strptime(stored, "%m-%d")
+        return dt.strftime("%d.%m.")
+    except ValueError:
+        return stored  # fallback
 
 def show_players(active_only=False, sort_by="gp"):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        q = "SELECT id, name, alias, garage_power, active, created_at FROM players"
+        q = """
+            SELECT id, name, alias, garage_power, active, created_at, birthday, team
+            FROM players
+        """
         if active_only:
             q += " WHERE active = 1"
 
@@ -56,29 +86,33 @@ def show_players(active_only=False, sort_by="gp"):
         cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
         active_count = cur.fetchone()[0]
 
-    print(f"{'ID':<5} {'Name':<20} {'Alias':<20} {'GP':>6} {'Active':<6} {'Created'}")
-    print("-" * 81)
+    print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Geburtstag':<10} {'Team':<12} {'Erstellt'}")
+    print("-" * 90)
     for row in rows:
-        pid, name, alias, gp, active, created = row
-        print(f"{pid:<5} {name:<20} {alias or '':<20} {gp:>6} {str(bool(active)):>6} {created}")
-    print("-" * 81)
+        pid, name, alias, gp, active, created, birthday, team = row
+        bday_fmt = format_birthday(birthday)
+        print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<12} {created}")
+    print("-" * 90)
     print(f"🟢 Active players: {active_count}")
 
-def add_player(name, alias=None, gp=0, active=True):
+def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO players (name, alias, garage_power, active) VALUES (?, ?, ?, ?)",
-            (name, alias, gp, int(active))
+            """
+            INSERT INTO players (name, alias, garage_power, active, birthday, team)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (name, alias, gp, int(active), birthday, team)
         )
     print(f"✅ Player '{name}' added.")
 
 def edit_player(args):
     if len(args) < 1:
-        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false]")
+        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM]")
         return
 
     pid = int(args[0])
-    name = alias = None
+    name = alias = birthday = team = None
     gp = active = None
 
     i = 1
@@ -95,6 +129,16 @@ def edit_player(args):
         elif args[i] == "--active":
             i += 1
             active = args[i].lower() == "true"
+        elif args[i] == "--birthday":
+            i += 1
+            raw = args[i]
+            birthday = parse_birthday(raw)
+            if not birthday:
+                print(f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
+                return
+        elif args[i] == "--team":
+            i += 1
+            team = args[i]
         i += 1
 
     fields = []
@@ -112,6 +156,12 @@ def edit_player(args):
     if active is not None:
         fields.append("active = ?")
         values.append(1 if active else 0)
+    if birthday is not None:
+        fields.append("birthday = ?")
+        values.append(birthday)
+    if team is not None:
+        fields.append("team = ?")
+        values.append(team)
 
     if not fields:
         print("⚠️  Nothing to update.")
@@ -138,10 +188,10 @@ def delete_player(pid):
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
     print("\nAvailable commands:")
-    print("  list [--sort gp|name]       Show all players")
-    print("  list-active [--sort gp|name] Show only active players")
-    print("  add <name> [alias] [...]    Add player")
-    print("  edit <id> [...]             Edit player (e.g. --gp 80000)")
-    print("  deactivate <id>             Set player inactive")
-    print("  delete <id>                 Remove player")
+    print("  list [--sort gp|name]         Show all players")
+    print("  list-active [--sort gp|name]  Show only active players")
+    print("  add <name> [alias] [gp] [active] [birthday: dd.mm.] [team]")
+    print("  edit <id> --gp 90000 --team XYZ --birthday 15.07. ...")
+    print("  deactivate <id>               Set player inactive")
+    print("  delete <id>                   Remove player")
 
