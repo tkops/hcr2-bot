@@ -86,11 +86,6 @@ def show_average(season_number=None):
         cur.execute("SELECT id FROM players WHERE active = 1")
         active_ids = {row[0] for row in cur.fetchall()}
 
-        print(f"\n📊 Durchschnittliche Abweichung (Saison {season_number} — 0 = Durchschnitt, positiv = besser)")
-        print("-" * 70)
-        print(f"{'Player':<30} {'Ø-Delta':>10} {'Matches':>10}")
-        print("-" * 70)
-
         entries = []
         for pid, deltas in player_scores.items():
             if pid not in active_ids:
@@ -98,7 +93,13 @@ def show_average(season_number=None):
             avg_delta = round(sum(deltas) / len(deltas))
             count = player_counts.get(pid, 0)
             entries.append((player_names[pid], avg_delta, count))
+        
+        print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
+        print("-" * 31)
 
-        for name, delta, count in sorted(entries, key=lambda x: x[1], reverse=True):
-            print(f"{name:<30} {format_k(delta):>10} {count:>10}")
+        for i, (name, delta, count) in enumerate(sorted(entries, key=lambda x: x[1], reverse=True), 1):
+            if i > 50:
+                break
+            print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
 
