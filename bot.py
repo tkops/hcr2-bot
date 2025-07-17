@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from secrets import TOKEN
+from secrets_config import TOKEN
 import subprocess
 import traceback
 
@@ -112,25 +112,31 @@ async def on_message(message):
     if message.channel.id != ALLOWED_CHANNEL_ID:
         return
 
-    content = message.content.strip()
-    if not content:
+    lines = message.content.strip().splitlines()
+    if not lines:
         return
 
-    parts = content.split(";")
-    if len(parts) != 4:
-        await message.add_reaction("❌")
-        return
+    failed_lines = []
 
-    match_id, player_name, score, points = parts
-    match_id = match_id.strip()
-    player_name = player_name.strip()
-    points = points.strip()
-    score = score.strip()
+    for line in lines:
+        parts = line.strip().split(";")
+        if len(parts) != 4:
+            failed_lines.append(line)
+            continue
 
-    output = run_hcr2(["matchscore", "add", match_id, player_name, score, points])
-    if output and "✅" in output:
-        await message.add_reaction("✅")
+        match_id, player_name, score, points = map(str.strip, parts)
+
+        output = run_hcr2(["matchscore", "add", match_id, player_name, score, points])
+        if not output or "✅" not in output:
+            failed_lines.append(line)
+
+    if failed_lines:
+        await message.add_reaction("❗")
+        await message.channel.send(
+            "❌ Nicht verarbeitet:\n```" + "\n".join(failed_lines) + "```"
+        )
     else:
-        await message.add_reaction("❌")
+        await message.add_reaction("✅")
+
 
 client.run(TOKEN)
