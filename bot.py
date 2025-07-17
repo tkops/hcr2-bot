@@ -7,12 +7,12 @@ import traceback
 ALLOWED_CHANNEL_ID = 1394750333129068564
 MAX_DISCORD_MSG_LEN = 1990
 
-ADMINS = set()  # optional für spätere Erweiterung
-
 
 class MyClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
+        intents.messages = True
+        intents.message_content = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
@@ -43,6 +43,7 @@ def run_hcr2(args):
     except subprocess.CalledProcessError as e:
         print(f"❌ Fehler bei hcr2.py {' '.join(args)}:")
         print(e)
+        print(e.stderr)
         return None
 
 
@@ -66,7 +67,7 @@ async def run_list_command(interaction, get_output_func):
         await interaction.response.send_message("❌ Fehler bei der Anzeige.", ephemeral=True)
 
 
-# ---- Slash-Befehle ----
+# 🔽 Slash-Befehle
 
 @app_commands.command(name="stats", description="Zeigt die aktuelle Rangliste")
 async def show_stats(interaction: discord.Interaction):
@@ -97,11 +98,39 @@ async def show_seasons(interaction: discord.Interaction):
 async def show_matches(interaction: discord.Interaction):
     await run_list_command(interaction, lambda: run_hcr2(["match", "list"]))
 
+
 @app_commands.command(name="autoadd", description="Berechnet und speichert Punkte automatisch")
 async def autoadd(interaction: discord.Interaction):
     await run_list_command(interaction, lambda: run_hcr2(["matchscore", "autoadd"]))
 
 
+# 🔽 Nachrichtenauswertung für Auto-Import
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    if message.channel.id != ALLOWED_CHANNEL_ID:
+        return
+
+    content = message.content.strip()
+    if not content:
+        return
+
+    parts = content.split(";")
+    if len(parts) != 4:
+        await message.add_reaction("❌")
+        return
+
+    match_id, player_name, points, score = parts
+    match_id = match_id.strip()
+    player_name = player_name.strip()
+    points = points.strip()
+    score = score.strip()
+
+    output = run_hcr2(["matchscore", "add", match_id, player_name, score, points])
+    if output and "✅" in output:
+        await message.add_reaction("✅")
+    else:
+        await message.add_reaction("❌")
 
 client.run(TOKEN)
-
