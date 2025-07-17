@@ -121,7 +121,7 @@ async def on_message(message):
         await message.add_reaction("❌")
         return
 
-    match_id, player_name, points, score = parts
+    match_id, player_name, score, points = parts
     match_id = match_id.strip()
     player_name = player_name.strip()
     points = points.strip()
