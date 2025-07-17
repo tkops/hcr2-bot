@@ -170,3 +170,110 @@ def auto_add_scores(match_id):
 
             print(f"✅ Gespeichert für {name}: Score {score}, Points {points}")
 
+def list_scores(*args):
+    match_filter = None
+    season_filter = None
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--match" and i + 1 < len(args):
+            match_filter = int(args[i + 1])
+            i += 2
+        elif args[i] == "--season":
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                season_filter = args[i + 1]
+                i += 2
+            else:
+                season_filter = "%"
+                i += 1
+        else:
+            i += 1
+
+    query = """
+        SELECT ms.id, m.id, m.start, m.opponent,
+               s.name, s.division, p.name, ms.score, ms.points
+        FROM matchscore ms
+        JOIN match m ON ms.match_id = m.id
+        JOIN season s ON m.season_number = s.number
+        JOIN players p ON ms.player_id = p.id
+    """
+    filters = []
+    values = []
+
+    if match_filter:
+        filters.append("m.id = ?")
+        values.append(match_filter)
+    if season_filter:
+        filters.append("s.name LIKE ?")
+        values.append(season_filter)
+
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+
+    query += " ORDER BY m.id DESC, ms.score DESC"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute(query, values)
+        rows = cur.fetchall()
+
+    if not rows:
+        print("⚠️ Keine Scores gefunden.")
+        return
+
+    print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
+    print("-" * 100)
+    for row in rows:
+        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+
+
+def edit_score(args):
+    if not args or not args[0].isdigit():
+        print("Usage: matchscore edit <id> [--score <newscore>] [--points <newpoints>]")
+        return
+
+    score_id = int(args[0])
+    new_score = None
+    new_points = None
+
+    i = 1
+    while i < len(args):
+        if args[i] == "--score" and i + 1 < len(args):
+            new_score = int(args[i + 1])
+            i += 2
+        elif args[i] == "--points" and i + 1 < len(args):
+            new_points = int(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    if new_score is None and new_points is None:
+        print("⚠️ Nichts zu ändern angegeben.")
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        if new_score is not None:
+            cur.execute("UPDATE matchscore SET score = ? WHERE id = ?", (new_score, score_id))
+        if new_points is not None:
+            cur.execute("UPDATE matchscore SET points = ? WHERE id = ?", (new_points, score_id))
+
+        conn.commit()
+
+        cur.execute("""
+            SELECT ms.id, m.id, m.start, m.opponent,
+                   s.name, s.division, p.name, ms.score, ms.points
+            FROM matchscore ms
+            JOIN match m ON ms.match_id = m.id
+            JOIN season s ON m.season_number = s.number
+            JOIN players p ON ms.player_id = p.id
+            WHERE ms.id = ?
+        """, (score_id,))
+        row = cur.fetchone()
+
+        print(f"\n✅ Score aktualisiert:")
+        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
+        print("-" * 100)
+        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+
