@@ -4,7 +4,7 @@ from secrets_config import TOKEN
 import subprocess
 import traceback
 
-ALLOWED_CHANNEL_ID = 1394750333129068564
+ALLOWED_CHANNEL_ID = [ 1394750333129068564 , 1394909975238934659 ]
 MAX_DISCORD_MSG_LEN = 1990
 
 
@@ -48,7 +48,7 @@ def run_hcr2(args):
 
 
 async def run_list_command(interaction, get_output_func):
-    if interaction.channel.id != ALLOWED_CHANNEL_ID:
+    if interaction.channel.id not in ALLOWED_CHANNEL_ID:
         await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
         return
 
@@ -109,7 +109,7 @@ async def autoadd(interaction: discord.Interaction):
 async def on_message(message):
     if message.author.bot:
         return
-    if message.channel.id != ALLOWED_CHANNEL_ID:
+    if message.channel.id not in ALLOWED_CHANNEL_ID:
         return
 
     lines = message.content.strip().splitlines()
@@ -137,6 +137,8 @@ async def on_message(message):
         )
     else:
         await message.add_reaction("✅")
+
+    await client.process_commands(message)
 
 
 client.run(TOKEN)
