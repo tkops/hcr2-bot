@@ -20,28 +20,32 @@ def handle_command(cmd, args):
     elif cmd == "add":
         if len(args) < 1:
             print(
-                "Usage: player add <name> [alias] [garage_power] [active] [birthday: dd.mm.] [team]")
+                "Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
+            print(
+                "       alias ist ein Pflichtfeld für PLTE und muss eindeutig sein")
             return
-        name = args[0]
-        alias = args[1] if len(args) > 1 else None
-        gp = int(args[2]) if len(args) > 2 else 0
-        active = args[3].lower() != "false" if len(args) > 3 else True
-        birthday_raw = args[4] if len(args) > 4 else None
-        team_raw = args[5] if len(args) > 5 else None
+
+        team_raw = args[0]
+        name = args[1] if len(args) > 1 else None
+        alias = args[2] if len(args) > 2 else None
+        gp = int(args[3]) if len(args) > 3 else 0
+        active = args[4].lower() != "false" if len(args) > 4 else True
+        birthday_raw = args[5] if len(args) > 5 else None
+
+        if not name:
+            print("❌ Name ist erforderlich.")
+            return
+
+        if not is_valid_team(team_raw):
+            print("❌ Ungültiger Teamname. Erlaubt: PLTE oder PL1–PL9")
+            return
 
         birthday = parse_birthday(birthday_raw) if birthday_raw else None
         if birthday_raw and not birthday:
-            print(
-                f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
+            print(f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
             return
 
-        team = team_raw if team_raw else None
-        if team and not is_valid_team(team):
-            print(
-                f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
-            return
-
-        add_player(name, alias, gp, active, birthday, team)
+        add_player(name=name, alias=alias, gp=gp, active=active, birthday=birthday, team=team_raw)
     elif cmd == "edit":
         edit_player(args)
     elif cmd == "deactivate":
@@ -114,15 +118,47 @@ def show_players(active_only=False, sort_by="gp"):
     print(f"🟢 Active players: {active_count}")
 
 
+
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            INSERT INTO players (name, alias, garage_power, active, birthday, team)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (name, alias, gp, int(active), birthday, team)
-        )
+    alias = alias.strip() if alias else None
+
+    if team == "PLTE":
+        if not alias:
+            print("❌ Alias ist für Team PLTE Pflicht.")
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            # LIKE-sichere Eindeutigkeit prüfen
+            cur.execute("""
+                SELECT alias FROM players
+                WHERE team = 'PLTE' AND (
+                    alias LIKE ? OR ? LIKE alias
+                )
+            """, (alias + '%', alias))
+            conflict = cur.fetchone()
+            if conflict:
+                print(f"❌ Alias-Konflikt im Team PLTE: '{alias}' ist zu ähnlich zu '{conflict[0]}'")
+                return
+
+            # Insert nur bei Erfolg
+            cur.execute(
+                """
+                INSERT INTO players (name, alias, garage_power, active, birthday, team)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (name, alias, gp, int(active), birthday, team)
+            )
+    else:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO players (name, alias, garage_power, active, birthday, team)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (name, alias, gp, int(active), birthday, team)
+            )
+
     print(f"✅ Player '{name}' added.")
 
 
@@ -219,7 +255,7 @@ def print_help():
     print("\nAvailable commands:")
     print("  list [--sort gp|name]         Show all players")
     print("  list-active [--sort gp|name]  Show only active players")
-    print("  add <name> [alias] [gp] [active] [birthday: dd.mm.] [team]")
+    print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
