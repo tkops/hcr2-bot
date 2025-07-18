@@ -131,11 +131,12 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
             cur = conn.cursor()
             # LIKE-sichere Eindeutigkeit prüfen
             cur.execute("""
-                SELECT alias FROM players
-                WHERE team = 'PLTE' AND (
+                SELECT id, alias FROM players
+                WHERE team = 'PLTE' AND id != ? AND (
                     alias LIKE ? OR ? LIKE alias
                 )
-            """, (alias + '%', alias))
+            """, (pid, target_alias + '%', target_alias + '%'))
+
             conflict = cur.fetchone()
             if conflict:
                 print(f"❌ Alias-Konflikt im Team PLTE: '{alias}' ist zu ähnlich zu '{conflict[0]}'")
@@ -160,7 +161,6 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
             )
 
     print(f"✅ Player '{name}' added.")
-
 
 def edit_player(args):
     if len(args) < 1:
@@ -191,48 +191,78 @@ def edit_player(args):
             raw = args[i]
             birthday = parse_birthday(raw)
             if not birthday:
-                print(
-                    f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
+                print(f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
                 return
         elif args[i] == "--team":
             i += 1
             team = args[i]
             if not is_valid_team(team):
-                print(
-                    f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+                print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
                 return
         i += 1
 
-    fields = []
-    values = []
-
-    if name:
-        fields.append("name = ?")
-        values.append(name)
-    if alias:
-        fields.append("alias = ?")
-        values.append(alias)
-    if gp is not None:
-        fields.append("garage_power = ?")
-        values.append(gp)
-    if active is not None:
-        fields.append("active = ?")
-        values.append(1 if active else 0)
-    if birthday is not None:
-        fields.append("birthday = ?")
-        values.append(birthday)
-    if team is not None:
-        fields.append("team = ?")
-        values.append(team)
-
-    if not fields:
-        print("⚠️  Nothing to update.")
-        return
-
-    values.append(pid)
-    query = f"UPDATE players SET {', '.join(fields)} WHERE id = ?"
+    if alias is not None:
+        alias = alias.strip()
 
     with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Aktuelle Spielerinfos laden
+        cur.execute("SELECT team, alias FROM players WHERE id = ?", (pid,))
+        row = cur.fetchone()
+        if not row:
+            print(f"❌ Kein Spieler mit ID {pid} gefunden.")
+            return
+        current_team, current_alias = row
+        target_team = team or current_team
+        target_alias = alias if alias is not None else current_alias
+
+        # Alias-Pflicht und Konfliktprüfung für PLTE
+        if target_team == "PLTE":
+            if not target_alias:
+                print("❌ Alias ist für Team PLTE Pflicht.")
+                return
+
+            cur.execute("""
+                SELECT id, alias FROM players
+                WHERE team = 'PLTE' AND id != ?
+            """, (pid,))
+            conflict_rows = cur.fetchall()
+
+            for cid, calias in conflict_rows:
+                if target_alias in calias or calias in target_alias:
+                    print(f"❌ Alias-Konflikt in PLTE: '{target_alias}' vs '{calias}' (ID {cid})")
+                    return
+
+        # Felder vorbereiten
+        fields = []
+        values = []
+
+        if name:
+            fields.append("name = ?")
+            values.append(name)
+        if alias is not None:
+            fields.append("alias = ?")
+            values.append(alias)
+        if gp is not None:
+            fields.append("garage_power = ?")
+            values.append(gp)
+        if active is not None:
+            fields.append("active = ?")
+            values.append(1 if active else 0)
+        if birthday is not None:
+            fields.append("birthday = ?")
+            values.append(birthday)
+        if team is not None:
+            fields.append("team = ?")
+            values.append(team)
+
+        if not fields:
+            print("⚠️  Nothing to update.")
+            return
+
+        values.append(pid)
+        query = f"UPDATE players SET {', '.join(fields)} WHERE id = ?"
         conn.execute(query, values)
 
     print(f"✅ Player {pid} updated.")
