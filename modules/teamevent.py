@@ -61,8 +61,10 @@ def list_teamevents():
         cur.execute("SELECT id, name, start FROM teamevent ORDER BY start DESC")
         events = cur.fetchall()
 
+        print(f"{'ID.':>4} {'Start':<10}  {'Name':<25}  {'Vehicles'}")
+        print("-" * 130)
+
         for eid, name, start in events:
-            print(f"[{eid}] {name} – {start}")
             cur.execute("""
                 SELECT v.id, v.name
                 FROM teamevent_vehicle tv
@@ -71,11 +73,8 @@ def list_teamevents():
                 ORDER BY v.id
             """, (eid,))
             vehicles = cur.fetchall()
-            if vehicles:
-                print("   Vehicles:", ", ".join(
-                    f"{vid}:{vname}" for vid, vname in vehicles))
-            else:
-                print("   Vehicles: (none)")
+            vstr = ", ".join(f"{vid}:{vname}" for vid, vname in vehicles) if vehicles else "-"
+            print(f"{eid:>3}. {start:<10}  {name:<25}  {vstr}")
 
 
 def delete_teamevent(eid):
