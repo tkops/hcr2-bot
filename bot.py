@@ -1,11 +1,21 @@
 import discord
-from discord import app_commands
 from secrets_config import TOKEN
 import subprocess
 import traceback
 
-ALLOWED_CHANNEL_ID = [ 1394750333129068564 , 1394909975238934659 ]
+ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]
 MAX_DISCORD_MSG_LEN = 1990
+
+COMMANDS = {
+    ".s": ["stats", "avg"],
+    ".S": ["season", "list"],
+    ".a": ["stats", "alias"],
+    ".v": ["vehicle", "list"],
+    ".p": ["player", "list"],
+    ".t": ["teamevent", "list"],
+    ".m": ["match", "list"],
+    ".h": None,  # help
+}
 
 
 class MyClient(discord.Client):
@@ -14,19 +24,6 @@ class MyClient(discord.Client):
         intents.messages = True
         intents.message_content = True
         super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        self.tree.add_command(show_stats)
-        self.tree.add_command(show_vehicles)
-        self.tree.add_command(show_players)
-        self.tree.add_command(show_teamevents)
-        self.tree.add_command(show_seasons)
-        self.tree.add_command(show_matches)
-        self.tree.add_command(show_plte)
-        self.tree.add_command(autoadd)
-        await self.tree.sync()
-        print("✅ Alle Slash-Befehle synchronisiert")
 
 
 client = MyClient()
@@ -42,75 +39,12 @@ def run_hcr2(args):
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
-        print(f"❌ Fehler bei hcr2.py {' '.join(args)}:")
+        print(f"❌ Error while running: hcr2.py {' '.join(args)}")
         print(e)
         print(e.stderr)
         return None
 
 
-async def run_list_command(interaction, get_output_func):
-    if interaction.channel.id not in ALLOWED_CHANNEL_ID:
-        await interaction.response.send_message("⛔ Nicht erlaubt in diesem Kanal.", ephemeral=True)
-        return
-
-    try:
-        output = get_output_func()
-        if not output:
-            await interaction.response.send_message("⚠️ Keine Daten gefunden.", ephemeral=True)
-            return
-
-        if len(output) <= MAX_DISCORD_MSG_LEN:
-            await interaction.response.send_message(f"```\n{output}```")
-        else:
-            await interaction.response.send_message("⚠️ Ausgabe zu lang.", ephemeral=True)
-    except Exception:
-        traceback.print_exc()
-        await interaction.response.send_message("❌ Fehler bei der Anzeige.", ephemeral=True)
-
-
-# 🔽 Slash-Befehle
-
-@app_commands.command(name="stats", description="Zeigt die aktuelle Rangliste")
-async def show_stats(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["stats", "avg"]))
-
-
-@app_commands.command(name="vehicles", description="Zeigt alle Fahrzeuge")
-async def show_vehicles(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["vehicle", "list"]))
-
-
-@app_commands.command(name="player", description="Zeigt alle Spieler")
-async def show_players(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["player", "list"]))
-
-
-@app_commands.command(name="teamevent", description="Zeigt alle Teamevents")
-async def show_teamevents(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["teamevent", "list"]))
-
-
-@app_commands.command(name="season", description="Zeigt alle Seasons")
-async def show_seasons(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["season", "list"]))
-
-
-@app_commands.command(name="match", description="Zeigt alle Matches")
-async def show_matches(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["match", "list"]))
-
-
-@app_commands.command(name="plte", description="Zeigt Aliase der PLTE Mitgliedern")
-async def show_plte(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["stats", "alias"]))
-
-
-@app_commands.command(name="autoadd", description="Berechnet und speichert Punkte automatisch")
-async def autoadd(interaction: discord.Interaction):
-    await run_list_command(interaction, lambda: run_hcr2(["matchscore", "autoadd"]))
-
-
-# 🔽 Nachrichtenauswertung für Auto-Import
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -118,10 +52,45 @@ async def on_message(message):
     if message.channel.id not in ALLOWED_CHANNEL_ID:
         return
 
-    lines = message.content.strip().splitlines()
-    if not lines:
-        return
+    content = message.content.strip()
 
+    # Prefix commands like ".s", ".p", etc.
+    if content.startswith("."):
+        parts = content.split()
+        cmd = parts[0]
+        args = parts[1:] if len(parts) > 1 else []
+
+        if cmd == ".h":
+            help_text = (
+                "**Available Commands:**\n"
+                "`.s` → Stats (current season)\n"
+                "`.S` → List all seasons\n"
+                "`.a` → List aliases for PLTE team\n"
+                "`.p` → List all players\n"
+                "`.v` → List vehicles\n"
+                "`.t` → List teamevents\n"
+                "`.m` → List matches\n"
+                "`.h` → Show this help\n"
+            )
+            await message.channel.send(help_text)
+            return
+
+        if cmd in COMMANDS:
+            base_cmd = COMMANDS[cmd]
+            if base_cmd is None:
+                return
+            full_args = base_cmd + args
+            output = run_hcr2(full_args)
+            if not output:
+                await message.channel.send("⚠️ No data returned or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
+
+    # Semicolon-separated score lines
+    lines = content.splitlines()
     failed_lines = []
 
     for line in lines:
@@ -131,20 +100,16 @@ async def on_message(message):
             continue
 
         match_id, player_name, score, points = map(str.strip, parts)
-
         output = run_hcr2(["matchscore", "add", match_id, player_name, score, points])
         if not output or "✅" not in output:
             failed_lines.append(line)
 
     if failed_lines:
         await message.add_reaction("❗")
-        await message.channel.send(
-            "❌ Nicht verarbeitet:\n```" + "\n".join(failed_lines) + "```"
-        )
-    else:
+        await message.channel.send("❌ Failed to process the following lines:\n```" + "\n".join(failed_lines) + "```")
+    elif lines and not failed_lines:
         await message.add_reaction("✅")
-
-    await client.process_commands(message)
 
 
 client.run(TOKEN)
+
