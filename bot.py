@@ -93,17 +93,15 @@ async def on_message(message):
 
         if cmd == ".h":
             help_text = (
-                "**Available Commands:**\n"
-                "`.s` → Stats (current season)\n"
-                "`.s <season>` → Stats for given season\n"
-                "`.S` → List all seasons\n"
-                "`.a` → List aliases for PLTE team\n"
-                "`.p` → List active PLTE players\n"
-                "`.p <id>` → Show player details\n"
-                "`.v` → List vehicles\n"
-                "`.t` → List teamevents\n"
-                "`.m` → List matches\n"
-                "`.h` → Show this help\n"
+                "**`Available Commands:`**\n"
+                "`.s [season] → Show average stats (default: current season)`\n"
+                "`.p [id]     → List PLTE players or show details by ID`\n"
+                "`.S          → List all seasons`\n"
+                "`.a          → List aliases for PLTE team`\n"
+                "`.v          → List vehicles`\n"
+                "`.t          → List teamevents`\n"
+                "`.m          → List matches`\n"
+                "`.h          → Show this help`\n"
             )
             await message.channel.send(help_text)
             return
