@@ -9,23 +9,31 @@ DB_PATH = "db/hcr2.db"
 def handle_command(cmd, args):
     if cmd == "list":
         sort = "gp"
-        if args and args[0] == "--sort" and len(args) > 1:
-            sort = args[1]
-        show_players(active_only=False, sort_by=sort)
+        team = get_arg_value(args, "--team")
+        if team:
+            team = team.upper()
+        if "--sort" in args:
+            sort = get_arg_value(args, "--sort") or sort
+        show_players(active_only=False, sort_by=sort, team_filter=team)
+
     elif cmd == "list-active":
         sort = "gp"
-        if args and args[0] == "--sort" and len(args) > 1:
-            sort = args[1]
-        show_players(active_only=True, sort_by=sort)
+        team = get_arg_value(args, "--team")
+        if team:
+            team = team.upper()
+        if "--sort" in args:
+            sort = get_arg_value(args, "--sort") or sort
+        show_players(active_only=True, sort_by=sort, team_filter=team)
+
     elif cmd == "add":
         if len(args) < 1:
             print(
                 "Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
             print(
-                "       alias ist ein Pflichtfeld für PLTE und muss eindeutig sein")
+                "       alias is required for PLTE and must be unique")
             return
 
-        team_raw = args[0]
+        team_raw = args[0].upper()
         name = args[1] if len(args) > 1 else None
         alias = args[2] if len(args) > 2 else None
         gp = int(args[3]) if len(args) > 3 else 0
@@ -33,34 +41,46 @@ def handle_command(cmd, args):
         birthday_raw = args[5] if len(args) > 5 else None
 
         if not name:
-            print("❌ Name ist erforderlich.")
+            print("❌ Name is required.")
             return
 
         if not is_valid_team(team_raw):
-            print("❌ Ungültiger Teamname. Erlaubt: PLTE oder PL1–PL9")
+            print("❌ Invalid team name. Allowed: PLTE or PL1–PL9")
             return
 
         birthday = parse_birthday(birthday_raw) if birthday_raw else None
         if birthday_raw and not birthday:
-            print(f"❌ Ungültiges Geburtstag-Format: {birthday_raw} (erlaubt: DD.MM.)")
+            print(f"❌ Invalid birthday format: {birthday_raw} (use DD.MM.)")
             return
 
         add_player(name=name, alias=alias, gp=gp, active=active, birthday=birthday, team=team_raw)
+
     elif cmd == "edit":
         edit_player(args)
+
     elif cmd == "deactivate":
         if len(args) != 1:
             print("Usage: player deactivate <id>")
             return
         deactivate_player(int(args[0]))
+
     elif cmd == "delete":
         if len(args) != 1:
             print("Usage: player delete <id>")
             return
         delete_player(int(args[0]))
+
     else:
         print(f"❌ Unknown player command: {cmd}")
         print_help()
+
+
+def get_arg_value(args, key):
+    if key in args:
+        idx = args.index(key)
+        if idx + 1 < len(args):
+            return args[idx + 1]
+    return None
 
 
 def parse_birthday(raw):
@@ -87,36 +107,49 @@ def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
 
 
-def show_players(active_only=False, sort_by="gp"):
+def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         q = """
             SELECT id, name, alias, garage_power, active, created_at, birthday, team
             FROM players
         """
+        conditions = []
         if active_only:
-            q += " WHERE active = 1"
+            conditions.append("active = 1")
+        if team_filter:
+            conditions.append("UPPER(team) = ?")
+
+        if conditions:
+            q += " WHERE " + " AND ".join(conditions)
 
         if sort_by == "name":
             q += " ORDER BY name COLLATE NOCASE"
         else:
             q += " ORDER BY garage_power DESC"
 
-        cur.execute(q)
+        cur.execute(q, (team_filter,) if team_filter else ())
         rows = cur.fetchall()
 
-        cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
-        active_count = cur.fetchone()[0]
+        if team_filter:
+            print(f"{'ID':<3} {'Name':<20} {'Alias'}")
+            print("-" * 40)
+            for pid, name, alias, *_ in rows:
+                print(f"{pid:<3} {name:<20} {alias or '-'}")
+            print("-" * 40)
+            print(f"🧩 Players in team {team_filter}: {len(rows)}")
+        else:
+            cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
+            active_count = cur.fetchone()[0]
 
-    print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Geburtstag':<10} {'Team':<6} {'Erstellt'}")
-    print("-" * 85)
-    for row in rows:
-        pid, name, alias, gp, active, created, birthday, team = row
-        bday_fmt = format_birthday(birthday)
-        print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {created}")
-    print("-" * 85)
-    print(f"🟢 Active players: {active_count}")
-
+            print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Birthday':<10} {'Team':<6} {'Created'}")
+            print("-" * 85)
+            for row in rows:
+                pid, name, alias, gp, active, created, birthday, team = row
+                bday_fmt = format_birthday(birthday)
+                print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {created}")
+            print("-" * 85)
+            print(f"🟢 Active players: {active_count}")
 
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
@@ -124,25 +157,20 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
 
     if team == "PLTE":
         if not alias:
-            print("❌ Alias ist für Team PLTE Pflicht.")
+            print("❌ Alias is required for team PLTE.")
             return
 
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
-            # LIKE-sichere Eindeutigkeit prüfen
             cur.execute("""
                 SELECT id, alias FROM players
-                WHERE team = 'PLTE' AND id != ? AND (
-                    alias LIKE ? OR ? LIKE alias
-                )
-            """, (pid, target_alias + '%', target_alias + '%'))
+                WHERE team = 'PLTE'
+            """)
+            for pid, existing_alias in cur.fetchall():
+                if alias in existing_alias or existing_alias in alias:
+                    print(f"❌ Alias conflict: '{alias}' vs '{existing_alias}' (ID {pid})")
+                    return
 
-            conflict = cur.fetchone()
-            if conflict:
-                print(f"❌ Alias-Konflikt im Team PLTE: '{alias}' ist zu ähnlich zu '{conflict[0]}'")
-                return
-
-            # Insert nur bei Erfolg
             cur.execute(
                 """
                 INSERT INTO players (name, alias, garage_power, active, birthday, team)
@@ -161,6 +189,7 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
             )
 
     print(f"✅ Player '{name}' added.")
+
 
 def edit_player(args):
     if len(args) < 1:
@@ -191,13 +220,13 @@ def edit_player(args):
             raw = args[i]
             birthday = parse_birthday(raw)
             if not birthday:
-                print(f"❌ Ungültiges Geburtstag-Format: {raw} (erlaubt: DD.MM.)")
+                print(f"❌ Invalid birthday format: {raw} (use DD.MM.)")
                 return
         elif args[i] == "--team":
             i += 1
-            team = args[i]
+            team = args[i].upper()
             if not is_valid_team(team):
-                print(f"❌ Ungültiger Teamname: {team} (nur PLTE oder PL1–PL9 erlaubt)")
+                print(f"❌ Invalid team name: {team} (allowed: PLTE or PL1–PL9)")
                 return
         i += 1
 
@@ -207,34 +236,29 @@ def edit_player(args):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Aktuelle Spielerinfos laden
         cur.execute("SELECT team, alias FROM players WHERE id = ?", (pid,))
         row = cur.fetchone()
         if not row:
-            print(f"❌ Kein Spieler mit ID {pid} gefunden.")
+            print(f"❌ Player ID {pid} not found.")
             return
         current_team, current_alias = row
         target_team = team or current_team
         target_alias = alias if alias is not None else current_alias
 
-        # Alias-Pflicht und Konfliktprüfung für PLTE
         if target_team == "PLTE":
             if not target_alias:
-                print("❌ Alias ist für Team PLTE Pflicht.")
+                print("❌ Alias is required for team PLTE.")
                 return
 
             cur.execute("""
                 SELECT id, alias FROM players
                 WHERE team = 'PLTE' AND id != ?
             """, (pid,))
-            conflict_rows = cur.fetchall()
-
-            for cid, calias in conflict_rows:
+            for cid, calias in cur.fetchall():
                 if target_alias in calias or calias in target_alias:
-                    print(f"❌ Alias-Konflikt in PLTE: '{target_alias}' vs '{calias}' (ID {cid})")
+                    print(f"❌ Alias conflict: '{target_alias}' vs '{calias}' (ID {cid})")
                     return
 
-        # Felder vorbereiten
         fields = []
         values = []
 
@@ -283,9 +307,10 @@ def delete_player(pid):
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
     print("\nAvailable commands:")
-    print("  list [--sort gp|name]         Show all players")
-    print("  list-active [--sort gp|name]  Show only active players")
+    print("  list [--sort gp|name] [--team TEAM]         Show all players")
+    print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
+
