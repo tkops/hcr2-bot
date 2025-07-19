@@ -15,6 +15,8 @@ def handle_command(cmd, args):
             print("Usage: teamevent delete <id>")
             return
         delete_teamevent(int(args[0]))
+    elif cmd == "show":
+        show_teamevent(args)
     else:
         print(f"❌ Unknown teamevent command: {cmd}")
         print_help()
@@ -24,7 +26,9 @@ def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
     print("  add <name> <start-date> <track-count> <vehicle_ids> [max-score]")
-    print("  list")
+    print("  list                        Show latest 10 teamevents (no vehicles)")
+    print("  show all                   Show all teamevents (no vehicles)")
+    print("  show <id>                  Show single teamevent with vehicles")
     print("  edit <id> [--name NAME] [--start DATE] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
 
@@ -64,25 +68,76 @@ def list_teamevents():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, start, tracks, max_score_per_track
-            FROM teamevent ORDER BY start DESC
+            SELECT id, name, start
+            FROM teamevent ORDER BY start DESC LIMIT 10
         """)
         events = cur.fetchall()
 
-        print(f"{'ID.':>4} {'Start':<10}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}  {'Vehicles'}")
-        print("-" * 140)
+        print(f"{'ID.':>4} {'Start':<10}  {'Name'}")
+        print("-" * 40)
 
-        for eid, name, start, tracks, score in events:
+        for eid, name, start in events:
+            print(f"{eid:>3}. {start:<10}  {name}")
+
+
+def show_teamevent(args):
+    if not args:
+        print("Usage: teamevent show all | <id>")
+        return
+
+    if args[0] == "all":
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, name, start, tracks, max_score_per_track
+                FROM teamevent ORDER BY start DESC
+            """)
+            events = cur.fetchall()
+
+            print(f"{'ID.':>4} {'Start':<10}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
+            print("-" * 65)
+
+            for eid, name, start, tracks, score in events:
+                print(f"{eid:>3}. {start:<10}  {name:<25}  {tracks:<6}  {score:<12}")
+    else:
+        try:
+            eid = int(args[0])
+        except ValueError:
+            print("❌ Invalid ID")
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, name, start, tracks, max_score_per_track
+                FROM teamevent WHERE id = ?
+            """, (eid,))
+            row = cur.fetchone()
+            if not row:
+                print(f"❌ Teamevent {eid} not found.")
+                return
+
+            te_id, name, start, tracks, score = row
+            print(f"\nTeamevent {te_id}:")
+            print(f"  Name         : {name}")
+            print(f"  Start        : {start}")
+            print(f"  Tracks       : {tracks}")
+            print(f"  Score/Track  : {score}")
+            print(f"  Vehicles     :")
+
             cur.execute("""
                 SELECT v.id, v.name
                 FROM teamevent_vehicle tv
                 JOIN vehicle v ON tv.vehicle_id = v.id
                 WHERE tv.teamevent_id = ?
                 ORDER BY v.id
-            """, (eid,))
+            """, (te_id,))
             vehicles = cur.fetchall()
-            vstr = ", ".join(f"{vid}:{vname}" for vid, vname in vehicles) if vehicles else "-"
-            print(f"{eid:>3}. {start:<10}  {name:<25}  {tracks:<6}  {score:<12}  {vstr}")
+            if vehicles:
+                for vid, vname in vehicles:
+                    print(f"    - {vid}: {vname}")
+            else:
+                print("    (none)")
 
 
 def edit_teamevent(args):
