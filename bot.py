@@ -1,16 +1,15 @@
 import discord
 from secrets_config import TOKEN
 import subprocess
-import traceback
 
 ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
-    ".s": ["stats", "avg"],
     ".S": ["season", "list"],
     ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
+    ".p": ["player", "list"],  # wird bei .p <id> dynamisch ersetzt
     ".t": ["teamevent", "list"],
     ".m": ["match", "list"],
     ".h": None,  # help
@@ -53,7 +52,6 @@ async def on_message(message):
 
     content = message.content.strip()
 
-    # Prefix commands like ".s", ".p", etc.
     if content.startswith("."):
         parts = content.split()
         cmd = parts[0]
@@ -70,8 +68,8 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-        # special case: .p → list-active for PLTE team
-        if cmd == ".p" and len(args) == 0:
+        # special case: .p → player list-active --team PLTE
+        if cmd == ".p" and not args:
             output = run_hcr2(["player", "list-active", "--team", "PLTE"])
             if not output:
                 await message.channel.send("⚠️ No data found or error occurred.")
@@ -81,14 +79,26 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-        # standard help
+        # special case: .s [<season>] → stats avg [<season>]
+        if cmd == ".s":
+            full_args = ["stats", "avg"] + args
+            output = run_hcr2(full_args)
+            if not output:
+                await message.channel.send("⚠️ No data found or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
+
         if cmd == ".h":
             help_text = (
                 "**Available Commands:**\n"
                 "`.s` → Stats (current season)\n"
+                "`.s <season>` → Stats for given season\n"
                 "`.S` → List all seasons\n"
                 "`.a` → List aliases for PLTE team\n"
-                "`.p` → List all active PLTE players\n"
+                "`.p` → List active PLTE players\n"
                 "`.p <id>` → Show player details\n"
                 "`.v` → List vehicles\n"
                 "`.t` → List teamevents\n"
@@ -98,7 +108,6 @@ async def on_message(message):
             await message.channel.send(help_text)
             return
 
-        # generic mapped commands
         if cmd in COMMANDS:
             base_cmd = COMMANDS[cmd]
             if base_cmd is None:
