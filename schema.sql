@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS teamevent_vehicle (
         );
 
 CREATE TABLE IF NOT EXISTS season (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            number INTEGER NOT NULL,
+            number INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             start TEXT NOT NULL,
             division TEXT NOT NULL
