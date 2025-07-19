@@ -142,12 +142,11 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
         rows = cur.fetchall()
 
         if team_filter:
-            print(f"{'ID':<3} {'Name':<20} {'Alias'}")
-            print("-" * 40)
-            for pid, name, alias, *_ in rows:
-                print(f"{pid:<3} {name:<20} {alias or '-'}")
-            print("-" * 40)
-            print(f"🧩 Players in team {team_filter}: {len(rows)}")
+            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias'}")
+            print("-" * 50)
+            for i, (pid, name, alias, *_) in enumerate(rows, start=1):
+                print(f"{i:<3} {pid:<4} {name:<20} {alias or '-'}")
+            print("-" * 50)
         else:
             cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
             active_count = cur.fetchone()[0]
