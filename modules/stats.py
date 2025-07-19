@@ -1,7 +1,6 @@
 import sqlite3
 import statistics
 import datetime
-import sys
 
 DB_PATH = "db/hcr2.db"
 
@@ -50,10 +49,13 @@ def show_average(season_number=None):
                 ms.player_id,
                 p.name,
                 ms.score,
-                m.id
+                m.id,
+                t.tracks,
+                t.max_score_per_track
             FROM matchscore ms
             JOIN players p ON ms.player_id = p.id
             JOIN match m ON ms.match_id = m.id
+            JOIN teamevent t ON m.teamevent_id = t.id
             WHERE m.season_number = ?
         """, (season_number,))
         rows = cur.fetchall()
@@ -63,10 +65,11 @@ def show_average(season_number=None):
             return
 
         scores_by_match = {}
-        for pid, name, score, match_id in rows:
+        for pid, name, score, match_id, tracks, max_score in rows:
             if score is None:
                 continue
-            scores_by_match.setdefault(match_id, []).append((pid, name, score))
+            scaled_score = score * 4 / tracks if tracks else score
+            scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
         player_scores = {}
         player_names = {}
@@ -96,7 +99,7 @@ def show_average(season_number=None):
             avg_delta = round(sum(deltas) / len(deltas))
             count = player_counts.get(pid, 0)
             entries.append((player_names[pid], avg_delta, count))
-        
+
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
         print("-" * 31)
 
@@ -104,6 +107,7 @@ def show_average(season_number=None):
             if i > 50:
                 break
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
 def show_plte_alias():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -118,10 +122,13 @@ def show_plte_alias():
                 p.alias,
                 ms.score,
                 m.id,
-                p.team
+                p.team,
+                t.tracks,
+                t.max_score_per_track
             FROM matchscore ms
             JOIN players p ON ms.player_id = p.id
             JOIN match m ON ms.match_id = m.id
+            JOIN teamevent t ON m.teamevent_id = t.id
             WHERE m.season_number = ?
         """, (season_number,))
         rows = cur.fetchall()
@@ -130,26 +137,25 @@ def show_plte_alias():
             return
 
         scores_by_match = {}
-        for pid, alias, score, match_id, team in rows:
-            if score is None:
+        for pid, alias, score, match_id, team, tracks, max_score in rows:
+            if score is None or team != "PLTE":
                 continue
-            scores_by_match.setdefault(match_id, []).append((pid, alias, score, team))
+            scaled_score = score * 4 / tracks if tracks else score
+            scores_by_match.setdefault(match_id, []).append((pid, alias, scaled_score))
 
         player_scores = {}
         player_alias = {}
         player_counts = {}
 
         for match_id, entries in scores_by_match.items():
-            scores = [score for _, _, score, _ in entries]
+            scores = [score for _, _, score in entries]
             if not scores:
                 continue
             try:
                 median = statistics.median(scores)
             except statistics.StatisticsError:
                 continue
-            for pid, alias, score, team in entries:
-                if team != "PLTE":
-                    continue
+            for pid, alias, score in entries:
                 delta = score - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_alias[pid] = alias
@@ -167,3 +173,4 @@ def show_plte_alias():
 
         for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True):
             print(alias)
+
