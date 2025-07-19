@@ -11,7 +11,7 @@ COMMANDS = {
     ".S": ["season", "list"],
     ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
-    ".p": ["player", "list"],
+    ".p": ["player", "list"],  # wird bei .p <id> dynamisch ersetzt
     ".t": ["teamevent", "list"],
     ".m": ["match", "list"],
     ".h": None,  # help
@@ -58,7 +58,18 @@ async def on_message(message):
     if content.startswith("."):
         parts = content.split()
         cmd = parts[0]
-        args = parts[1:] if len(parts) > 1 else []
+        args = parts[1:] if len(parts) > 0 else []
+
+        # special case: .p <id> → show player details
+        if cmd == ".p" and len(args) == 1 and args[0].isdigit():
+            output = run_hcr2(["player", "show", args[0]])
+            if not output:
+                await message.channel.send("⚠️ No data found or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
 
         if cmd == ".h":
             help_text = (
@@ -67,6 +78,7 @@ async def on_message(message):
                 "`.S` → List all seasons\n"
                 "`.a` → List aliases for PLTE team\n"
                 "`.p` → List all players\n"
+                "`.p <id>` → Show player details\n"
                 "`.v` → List vehicles\n"
                 "`.t` → List teamevents\n"
                 "`.m` → List matches\n"

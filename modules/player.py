@@ -25,6 +25,16 @@ def handle_command(cmd, args):
             sort = get_arg_value(args, "--sort") or sort
         show_players(active_only=True, sort_by=sort, team_filter=team)
 
+    elif cmd == "show":
+        if len(args) != 1:
+            print("Usage: player show <id>")
+            return
+        try:
+            pid = int(args[0])
+            show_player(pid)
+        except ValueError:
+            print("❌ Invalid ID.")
+
     elif cmd == "add":
         if len(args) < 1:
             print(
@@ -313,4 +323,30 @@ def print_help():
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
+    print("  show <id>                     Show player details")
+
+def show_player(pid):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, alias, garage_power, active, birthday, team, created_at
+            FROM players WHERE id = ?
+        """, (pid,))
+        row = cur.fetchone()
+
+        if not row:
+            print(f"❌ Player with ID {pid} not found.")
+            return
+
+        pid, name, alias, gp, active, birthday, team, created = row
+        birthday_fmt = format_birthday(birthday)
+
+        print(f"\n🎮 Player ID {pid}")
+        print(f"Name       : {name}")
+        print(f"Alias      : {alias or '-'}")
+        print(f"Team       : {team or '-'}")
+        print(f"GP         : {gp}")
+        print(f"Active     : {'Yes' if active else 'No'}")
+        print(f"Birthday   : {birthday_fmt}")
+        print(f"Created at : {created}\n")
 
