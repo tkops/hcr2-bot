@@ -41,7 +41,7 @@ def show_average(season_number=None):
             season_number = find_current_season(cur)
 
         if not season_number:
-            print("⚠️ Keine passende Saison gefunden.")
+            print("⚠️ No matching season found.")
             return
 
         cur.execute("""
