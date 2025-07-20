@@ -40,7 +40,7 @@ def run_hcr2(args):
 
 def parse_teamevent_add_args(args):
     """
-    Trennt automatisch name und rest anhand Jahr/Woche (2025/38 oder 2025-38)
+    Automatically splits name and rest based on year/week (e.g. 2025/38 or 2025-38)
     """
     for i, val in enumerate(args):
         if re.match(r"^\d{4}[/\-]\d{1,2}$", val):
