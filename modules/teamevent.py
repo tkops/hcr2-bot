@@ -25,7 +25,7 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
-    print('  add "<name>" <Jahr>/<KW> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
+    print('  add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
     print("  list                        Show latest 10 teamevents (no vehicles)")
     print("  show all                   Show all teamevents (no vehicles)")
     print("  show <id>                  Show single teamevent with vehicles")
@@ -35,16 +35,16 @@ def print_help():
 
 def add_teamevent(args):
     if len(args) < 2:
-        print('Usage: teamevent add "<name>" <Jahr>/<KW> [vehicle_ids] [track-count] [max-score]')
+        print('Usage: teamevent add "<name>" <year>/W<week> [vehicle_ids] [track-count] [max-score]')
         return
 
     name = args[0]
     try:
-        year_str, week_str = args[1].split("/")
+        year_str, week_str = args[1].replace("W", "").split("/")
         iso_year = int(year_str)
         iso_week = int(week_str)
     except Exception:
-        print("❌ Ungültiges Format für Jahr/KW. Beispiel: 2025/30")
+        print("❌ Invalid year/week format. Example: 2025/30 or 2025/W30")
         return
 
     tracks = 4
@@ -72,7 +72,7 @@ def add_teamevent(args):
                 if row:
                     resolved_ids.append(row[0])
                 else:
-                    print(f"⚠️  Fahrzeug '{val}' nicht gefunden (weder ID noch shortname).")
+                    print(f"⚠️  Vehicle '{val}' not found (neither ID nor shortname).")
 
         try:
             cur.execute(
@@ -93,12 +93,12 @@ def add_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
-            # Statt einfachem print → gleich Teamevent anzeigen
             conn.commit()
+            print("✅ Teamevent added:")
             show_teamevent([str(teamevent_id)])
 
         except sqlite3.IntegrityError:
-            print(f"❌ Teamevent für KW {iso_week}/{iso_year} existiert bereits.")
+            print(f"❌ Teamevent for week {iso_week}/{iso_year} already exists.")
 
 
 def list_teamevents():
@@ -110,11 +110,12 @@ def list_teamevents():
         """)
         events = cur.fetchall()
 
-        print(f"{'ID.':>4} {'Jahr':<6} {'KW':<4}  {'Name'}")
+        print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name'}")
         print("-" * 40)
 
         for eid, name, iso_year, iso_week in events:
             print(f"{eid:>3}. {iso_year:<6} {iso_week:<4}  {name}")
+
 
 def show_teamevent(args):
     if not args:
@@ -130,7 +131,7 @@ def show_teamevent(args):
             """)
             events = cur.fetchall()
 
-            print(f"{'ID.':>4} {'Jahr':<6} {'KW':<4}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
+            print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
             print("-" * 70)
 
             for eid, name, year, week, tracks, score in events:
@@ -156,7 +157,7 @@ def show_teamevent(args):
             te_id, name, year, week, tracks, score = row
             print(f"\nTeamevent {te_id}:")
             print(f"  Name         : {name}")
-            print(f"  Jahr/KW      : {year}/KW{week}")
+            print(f"  Year/Wk      : {year}/W{week}")
             print(f"  Tracks       : {tracks}")
             print(f"  Score/Track  : {score}")
             print(f"  Vehicles     :")
@@ -174,6 +175,7 @@ def show_teamevent(args):
                     print(f"    - {vid}: {vname}")
             else:
                 print("    (none)")
+
 
 def edit_teamevent(args):
     if len(args) < 1:
@@ -232,6 +234,7 @@ def edit_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
             print(f"✅ Updated vehicles for Teamevent {eid}.")
+
 
 def delete_teamevent(eid):
     with sqlite3.connect(DB_PATH) as conn:
