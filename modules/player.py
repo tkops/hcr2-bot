@@ -5,7 +5,6 @@ from datetime import datetime
 
 DB_PATH = "db/hcr2.db"
 
-
 def handle_command(cmd, args):
     if cmd == "list":
         sort = "gp"
@@ -37,10 +36,8 @@ def handle_command(cmd, args):
 
     elif cmd == "add":
         if len(args) < 1:
-            print(
-                "Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
-            print(
-                "       alias is required for PLTE and must be unique")
+            print("Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
+            print("       alias is required for PLTE and must be unique")
             return
 
         team_raw = args[0].upper()
@@ -49,6 +46,7 @@ def handle_command(cmd, args):
         gp = int(args[3]) if len(args) > 3 else 0
         active = args[4].lower() != "false" if len(args) > 4 else True
         birthday_raw = args[5] if len(args) > 5 else None
+        discord_name = args[6] if len(args) > 6 else None
 
         if not name:
             print("❌ Name is required.")
@@ -63,7 +61,7 @@ def handle_command(cmd, args):
             print(f"❌ Invalid birthday format: {birthday_raw} (use DD.MM.)")
             return
 
-        add_player(name=name, alias=alias, gp=gp, active=active, birthday=birthday, team=team_raw)
+        add_player(name=name, alias=alias, gp=gp, active=active, birthday=birthday, team=team_raw, discord_name=discord_name)
 
     elif cmd == "edit":
         edit_player(args)
@@ -84,14 +82,12 @@ def handle_command(cmd, args):
         print(f"❌ Unknown player command: {cmd}")
         print_help()
 
-
 def get_arg_value(args, key):
     if key in args:
         idx = args.index(key)
         if idx + 1 < len(args):
             return args[idx + 1]
     return None
-
 
 def parse_birthday(raw):
     if not raw:
@@ -102,7 +98,6 @@ def parse_birthday(raw):
     except ValueError:
         return None
 
-
 def format_birthday(stored):
     if not stored:
         return "-"
@@ -112,16 +107,14 @@ def format_birthday(stored):
     except ValueError:
         return stored
 
-
 def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
-
 
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         q = """
-            SELECT id, name, alias, garage_power, active, created_at, birthday, team
+            SELECT id, name, alias, garage_power, active, created_at, birthday, team, discord_name
             FROM players
         """
         conditions = []
@@ -151,17 +144,16 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
             cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
             active_count = cur.fetchone()[0]
 
-            print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Birthday':<10} {'Team':<6} {'Created'}")
-            print("-" * 85)
+            print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Birthday':<10} {'Team':<6} {'Discord':<16} {'Created'}")
+            print("-" * 105)
             for row in rows:
-                pid, name, alias, gp, active, created, birthday, team = row
+                pid, name, alias, gp, active, created, birthday, team, discord_name = row
                 bday_fmt = format_birthday(birthday)
-                print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {created}")
-            print("-" * 85)
+                print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {discord_name or '-':<16} {created}")
+            print("-" * 105)
             print(f"🟢 Active players: {active_count}")
 
-
-def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
+def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
 
     if team == "PLTE":
@@ -182,32 +174,30 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None):
 
             cur.execute(
                 """
-                INSERT INTO players (name, alias, garage_power, active, birthday, team)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (name, alias, gp, int(active), birthday, team)
+                (name, alias, gp, int(active), birthday, team, discord_name)
             )
     else:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 """
-                INSERT INTO players (name, alias, garage_power, active, birthday, team)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (name, alias, gp, int(active), birthday, team)
+                (name, alias, gp, int(active), birthday, team, discord_name)
             )
 
     print(f"✅ Player '{name}' added.")
 
-
 def edit_player(args):
     if len(args) < 1:
-        print(
-            "Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM]")
+        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord DISCORD]")
         return
 
     pid = int(args[0])
-    name = alias = birthday = team = None
+    name = alias = birthday = team = discord = None
     gp = active = None
 
     i = 1
@@ -237,6 +227,9 @@ def edit_player(args):
             if not is_valid_team(team):
                 print(f"❌ Invalid team name: {team} (allowed: PLTE or PL1–PL9)")
                 return
+        elif args[i] == "--discord":
+            i += 1
+            discord = args[i]
         i += 1
 
     if alias is not None:
@@ -289,6 +282,9 @@ def edit_player(args):
         if team is not None:
             fields.append("team = ?")
             values.append(team)
+        if discord is not None:
+            fields.append("discord_name = ?")
+            values.append(discord)
 
         if not fields:
             print("⚠️  Nothing to update.")
@@ -300,26 +296,23 @@ def edit_player(args):
 
     print(f"✅ Player {pid} updated.")
 
-
 def deactivate_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("UPDATE players SET active = 0 WHERE id = ?", (pid,))
     print(f"🟡 Player {pid} deactivated.")
-
 
 def delete_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM players WHERE id = ?", (pid,))
     print(f"🗑️  Player {pid} deleted.")
 
-
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
     print("\nAvailable commands:")
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
-    print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.]")
-    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. ...")
+    print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
+    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
     print("  show <id>                     Show player details")
@@ -328,7 +321,7 @@ def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, alias, garage_power, active, birthday, team, created_at
+            SELECT id, name, alias, garage_power, active, birthday, team, created_at, discord_name
             FROM players WHERE id = ?
         """, (pid,))
         row = cur.fetchone()
@@ -337,15 +330,16 @@ def show_player(pid):
             print(f"❌ Player with ID {pid} not found.")
             return
 
-        pid, name, alias, gp, active, birthday, team, created = row
+        pid, name, alias, gp, active, birthday, team, created, discord_name = row
         birthday_fmt = format_birthday(birthday)
 
         print(f"\n🎮 Player ID {pid}")
-        print(f"Name       : {name}")
-        print(f"Alias      : {alias or '-'}")
-        print(f"Team       : {team or '-'}")
-        print(f"GP         : {gp}")
-        print(f"Active     : {'Yes' if active else 'No'}")
-        print(f"Birthday   : {birthday_fmt}")
-        print(f"Created at : {created}\n")
+        print(f"Name        : {name}")
+        print(f"Alias       : {alias or '-'}")
+        print(f"Team        : {team or '-'}")
+        print(f"GP          : {gp}")
+        print(f"Active      : {'Yes' if active else 'No'}")
+        print(f"Birthday    : {birthday_fmt}")
+        print(f"Discord     : {discord_name or '-'}")
+        print(f"Created at  : {created}\n")
 
