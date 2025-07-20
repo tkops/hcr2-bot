@@ -13,11 +13,17 @@ CREATE TABLE IF NOT EXISTS vehicle (
             shortname TEXT NOT NULL UNIQUE
         );
 
-CREATE TABLE IF NOT EXISTS teamevent (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            start TEXT NOT NULL
-        , tracks INTEGER DEFAULT 4, max_score_per_track INTEGER DEFAULT 15000);
+
+CREATE TABLE teamevent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    iso_year INTEGER NOT NULL,
+    iso_week INTEGER NOT NULL,
+    tracks INTEGER DEFAULT 4,
+    max_score_per_track INTEGER DEFAULT 15000,
+    UNIQUE(iso_year, iso_week)
+);
+
 
 CREATE TABLE IF NOT EXISTS teamevent_vehicle (
             teamevent_id INTEGER NOT NULL,

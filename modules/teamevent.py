@@ -1,7 +1,7 @@
 import sqlite3
+from datetime import datetime
 
 DB_PATH = "db/hcr2.db"
-
 
 def handle_command(cmd, args):
     if cmd == "add":
@@ -21,7 +21,6 @@ def handle_command(cmd, args):
         print(f"❌ Unknown teamevent command: {cmd}")
         print_help()
 
-
 def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
@@ -29,9 +28,8 @@ def print_help():
     print("  list                        Show latest 10 teamevents (no vehicles)")
     print("  show all                   Show all teamevents (no vehicles)")
     print("  show <id>                  Show single teamevent with vehicles")
-    print("  edit <id> [--name NAME] [--start DATE] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
+    print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
-
 
 def add_teamevent(args):
     if len(args) < 4:
@@ -44,41 +42,52 @@ def add_teamevent(args):
     vehicle_ids = [int(v.strip()) for v in args[3].split(",") if v.strip().isdigit()]
     max_score = int(args[4]) if len(args) > 4 else 15000
 
+    try:
+        dt = datetime.strptime(start, "%Y-%m-%d")
+        iso_year, iso_week, _ = dt.isocalendar()
+    except ValueError:
+        print("❌ Ungültiges Datum.")
+        return
+
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO teamevent (name, start, tracks, max_score_per_track) VALUES (?, ?, ?, ?)",
-            (name, start, tracks, max_score)
-        )
-        teamevent_id = cur.lastrowid
+        try:
+            cur.execute(
+                """
+                INSERT INTO teamevent (name, iso_year, iso_week, tracks, max_score_per_track)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (name, iso_year, iso_week, tracks, max_score)
+            )
+            teamevent_id = cur.lastrowid
 
-        for vid in vehicle_ids:
-            try:
-                cur.execute(
-                    "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
-                    (teamevent_id, vid)
-                )
-            except sqlite3.IntegrityError:
-                print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
+            for vid in vehicle_ids:
+                try:
+                    cur.execute(
+                        "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
+                        (teamevent_id, vid)
+                    )
+                except sqlite3.IntegrityError:
+                    print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
-    print(f"✅ Teamevent '{name}' created with {tracks} tracks and vehicles: {vehicle_ids}")
-
+            print(f"✅ Teamevent '{name}' created with {tracks} tracks and vehicles: {vehicle_ids}")
+        except sqlite3.IntegrityError:
+            print(f"❌ Teamevent in ISO-Woche {iso_week}/{iso_year} existiert bereits.")
 
 def list_teamevents():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, start
-            FROM teamevent ORDER BY start DESC LIMIT 10
+            SELECT id, name, iso_year, iso_week
+            FROM teamevent ORDER BY iso_year DESC, iso_week DESC LIMIT 10
         """)
         events = cur.fetchall()
 
-        print(f"{'ID.':>4} {'Start':<10}  {'Name'}")
+        print(f"{'ID.':>4} {'Jahr':<6} {'KW':<4}  {'Name'}")
         print("-" * 40)
 
-        for eid, name, start in events:
-            print(f"{eid:>3}. {start:<10}  {name}")
-
+        for eid, name, iso_year, iso_week in events:
+            print(f"{eid:>3}. {iso_year:<6} {iso_week:<4}  {name}")
 
 def show_teamevent(args):
     if not args:
@@ -89,16 +98,16 @@ def show_teamevent(args):
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT id, name, start, tracks, max_score_per_track
-                FROM teamevent ORDER BY start DESC
+                SELECT id, name, iso_year, iso_week, tracks, max_score_per_track
+                FROM teamevent ORDER BY iso_year DESC, iso_week DESC
             """)
             events = cur.fetchall()
 
-            print(f"{'ID.':>4} {'Start':<10}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
-            print("-" * 65)
+            print(f"{'ID.':>4} {'Jahr':<6} {'KW':<4}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
+            print("-" * 70)
 
-            for eid, name, start, tracks, score in events:
-                print(f"{eid:>3}. {start:<10}  {name:<25}  {tracks:<6}  {score:<12}")
+            for eid, name, year, week, tracks, score in events:
+                print(f"{eid:>3}. {year:<6} {week:<4}  {name:<25}  {tracks:<6}  {score:<12}")
     else:
         try:
             eid = int(args[0])
@@ -109,7 +118,7 @@ def show_teamevent(args):
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT id, name, start, tracks, max_score_per_track
+                SELECT id, name, iso_year, iso_week, tracks, max_score_per_track
                 FROM teamevent WHERE id = ?
             """, (eid,))
             row = cur.fetchone()
@@ -117,10 +126,10 @@ def show_teamevent(args):
                 print(f"❌ Teamevent {eid} not found.")
                 return
 
-            te_id, name, start, tracks, score = row
+            te_id, name, year, week, tracks, score = row
             print(f"\nTeamevent {te_id}:")
             print(f"  Name         : {name}")
-            print(f"  Start        : {start}")
+            print(f"  Jahr/KW      : {year}/KW{week}")
             print(f"  Tracks       : {tracks}")
             print(f"  Score/Track  : {score}")
             print(f"  Vehicles     :")
@@ -139,14 +148,13 @@ def show_teamevent(args):
             else:
                 print("    (none)")
 
-
 def edit_teamevent(args):
     if len(args) < 1:
-        print("Usage: teamevent edit <id> [--name NAME] [--start DATE] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
+        print("Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
         return
 
     eid = int(args[0])
-    name = start = None
+    name = None
     tracks = max_score = None
     vehicle_ids = None
 
@@ -155,9 +163,6 @@ def edit_teamevent(args):
         if args[i] == "--name":
             i += 1
             name = args[i]
-        elif args[i] == "--start":
-            i += 1
-            start = args[i]
         elif args[i] == "--tracks":
             i += 1
             tracks = int(args[i])
@@ -175,9 +180,6 @@ def edit_teamevent(args):
     if name:
         fields.append("name = ?")
         values.append(name)
-    if start:
-        fields.append("start = ?")
-        values.append(start)
     if tracks is not None:
         fields.append("tracks = ?")
         values.append(tracks)
@@ -203,7 +205,6 @@ def edit_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
             print(f"✅ Updated vehicles for Teamevent {eid}.")
-
 
 def delete_teamevent(eid):
     with sqlite3.connect(DB_PATH) as conn:
