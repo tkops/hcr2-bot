@@ -14,7 +14,6 @@ def backup_schema():
             for name, sql in tables:
                 if not sql:
                     continue
-                # Ersetze "CREATE TABLE ..." durch "CREATE TABLE IF NOT EXISTS ..."
                 modified_sql = sql.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
                 f.write(modified_sql.strip() + ";\n\n")
 
