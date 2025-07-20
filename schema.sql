@@ -4,15 +4,17 @@ CREATE TABLE IF NOT EXISTS vehicle (
             shortname TEXT NOT NULL UNIQUE
         );
 
-CREATE TABLE IF NOT EXISTS match (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            teamevent_id INTEGER NOT NULL,
-            season_number INTEGER NOT NULL,
-            start TEXT NOT NULL,
-            opponent TEXT NOT NULL,
-            FOREIGN KEY (teamevent_id) REFERENCES "teamevent_old"(id) ON DELETE CASCADE,
-            FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
-        );
+
+CREATE TABLE match (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teamevent_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    start TEXT NOT NULL,
+    opponent TEXT NOT NULL,
+    FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
+    FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
+);
+
 
 CREATE TABLE IF NOT EXISTS matchscore (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
