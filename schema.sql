@@ -1,12 +1,3 @@
-CREATE TABLE IF NOT EXISTS players (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    alias TEXT,
-    garage_power INTEGER DEFAULT 0,
-    active BOOLEAN DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-, birthday TEXT, team TEXT, discord_name TEXT);
-
 CREATE TABLE IF NOT EXISTS vehicle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -58,4 +49,13 @@ CREATE TABLE IF NOT EXISTS teamevent_vehicle (
             FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
             FOREIGN KEY (vehicle_id) REFERENCES vehicle(id) ON DELETE CASCADE
         );
+
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    alias TEXT,
+    garage_power INTEGER DEFAULT 0,
+    active BOOLEAN DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+, birthday TEXT, team TEXT, discord_name TEXT, country_code TEXT);
 
