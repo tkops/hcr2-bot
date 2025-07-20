@@ -15,6 +15,12 @@ def handle_command(cmd, args):
             sort = get_arg_value(args, "--sort") or sort
         show_players(active_only=False, sort_by=sort, team_filter=team)
 
+    elif cmd == "activate":
+        if len(args) != 1:
+            print("Usage: player activate <id>")
+            return
+        activate_player(int(args[0]))
+
     elif cmd == "list-active":
         sort = "gp"
         team = get_arg_value(args, "--team")
@@ -312,12 +318,13 @@ def delete_player(pid):
         conn.execute("DELETE FROM players WHERE id = ?", (pid,))
     print(f"🗑️  Player {pid} deleted.")
 
+
 def grep_players(term):
     pattern = f"%{term.lower()}%"
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, alias
+            SELECT id, name, alias, garage_power, active, created_at, birthday, team, discord_name
             FROM players
             WHERE LOWER(name) LIKE ? OR LOWER(alias) LIKE ?
             ORDER BY name COLLATE NOCASE
@@ -328,10 +335,20 @@ def grep_players(term):
         print(f"❌ No players found matching '{term}'")
         return
 
-    print(f"{'ID':<4} {'Name':<20} {'Alias'}")
-    print("-" * 40)
-    for pid, name, alias in rows:
-        print(f"{pid:<4} {name:<20} {alias or '-'}")
+    print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
+    print("-" * 120)
+    for row in rows:
+        pid, name, alias, gp, active, created, birthday, team, discord_name = row
+        bday_fmt = format_birthday(birthday)
+        print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
+    print("-" * 120)
+
+
+def activate_player(pid):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE players SET active = 1 WHERE id = ?", (pid,))
+    print(f"🟢 Player {pid} activated.")
+
 
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
@@ -344,4 +361,6 @@ def print_help():
     print("  delete <id>                   Remove player")
     print("  show <id>                     Show player details")
     print("  grep <term>                   Search players by name or alias (case-insensitive)")
+    print("  activate <id>                 Set player active")
+
 
