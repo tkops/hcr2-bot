@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
         );
 
 
-CREATE TABLE teamevent (
+CREATE TABLE IF NOT EXISTS teamevent (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     iso_year INTEGER NOT NULL,
