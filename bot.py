@@ -8,10 +8,9 @@ MAX_DISCORD_MSG_LEN = 1990
 COMMANDS = {
     ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
-    ".p": ["player", "list"],  # wird bei .p <id> dynamisch ersetzt
-    ".t": ["teamevent", "list"],
+    ".p": ["player", "list"],
     ".m": ["match", "list"],
-    ".h": None,  # help
+    ".h": None,
 }
 
 
@@ -105,6 +104,28 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
+        # .t <id> → teamevent show <id>
+        if cmd == ".t" and len(args) == 1 and args[0].isdigit():
+            output = run_hcr2(["teamevent", "show", args[0]])
+            if not output:
+                await message.channel.send("⚠️ No data found or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
+
+        # .t → teamevent list
+        if cmd == ".t" and not args:
+            output = run_hcr2(["teamevent", "list"])
+            if not output:
+                await message.channel.send("⚠️ No data found or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
+
         # .h → help
         if cmd == ".h":
             help_text = (
@@ -116,6 +137,7 @@ async def on_message(message):
                 "`.a               → List aliases for PLTE team`\n"
                 "`.v               → List vehicles`\n"
                 "`.t               → List teamevents`\n"
+                "`.t <id>          → Show teamevent with vehicles`\n"
                 "`.m               → List matches`\n"
                 "`.h               → Show this help`\n"
             )
