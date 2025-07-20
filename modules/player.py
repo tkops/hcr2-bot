@@ -122,6 +122,7 @@ def format_birthday(stored):
 def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
 
+
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -147,23 +148,24 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
         rows = cur.fetchall()
 
         if team_filter:
-            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias'}")
-            print("-" * 50)
+            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15}")
+            print("-" * 60)
             for i, (pid, name, alias, *_) in enumerate(rows, start=1):
-                print(f"{i:<3} {pid:<4} {name:<20} {alias or '-'}")
-            print("-" * 50)
+                print(f"{i:<3} {pid:<4} {name:<20} {alias or '-':<15}")
+            print("-" * 60)
         else:
             cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
             active_count = cur.fetchone()[0]
 
-            print(f"{'ID':<3} {'Name':<15} {'Alias':<12} {'GP':>6} {'Act':<4} {'Birthday':<10} {'Team':<6} {'Discord':<16} {'Created'}")
-            print("-" * 105)
+            print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
+            print("-" * 120)
             for row in rows:
                 pid, name, alias, gp, active, created, birthday, team, discord_name = row
                 bday_fmt = format_birthday(birthday)
-                print(f"{pid:<3} {name:<15} {alias or '':<12} {gp:>6} {str(bool(active)):>4} {bday_fmt:<10} {team or '-':<6} {discord_name or '-':<16} {created}")
-            print("-" * 105)
+                print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
+            print("-" * 120)
             print(f"🟢 Active players: {active_count}")
+
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
