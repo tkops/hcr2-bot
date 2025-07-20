@@ -78,6 +78,12 @@ def handle_command(cmd, args):
             return
         delete_player(int(args[0]))
 
+    elif cmd == "grep":
+        if len(args) != 1:
+            print("Usage: player grep <term>")
+            return
+        grep_players(args[0])
+
     else:
         print(f"❌ Unknown player command: {cmd}")
         print_help()
@@ -306,6 +312,27 @@ def delete_player(pid):
         conn.execute("DELETE FROM players WHERE id = ?", (pid,))
     print(f"🗑️  Player {pid} deleted.")
 
+def grep_players(term):
+    pattern = f"%{term.lower()}%"
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, alias
+            FROM players
+            WHERE LOWER(name) LIKE ? OR LOWER(alias) LIKE ?
+            ORDER BY name COLLATE NOCASE
+        """, (pattern, pattern))
+        rows = cur.fetchall()
+
+    if not rows:
+        print(f"❌ No players found matching '{term}'")
+        return
+
+    print(f"{'ID':<4} {'Name':<20} {'Alias'}")
+    print("-" * 40)
+    for pid, name, alias in rows:
+        print(f"{pid:<4} {name:<20} {alias or '-'}")
+
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
     print("\nAvailable commands:")
@@ -316,30 +343,5 @@ def print_help():
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
     print("  show <id>                     Show player details")
-
-def show_player(pid):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, name, alias, garage_power, active, birthday, team, created_at, discord_name
-            FROM players WHERE id = ?
-        """, (pid,))
-        row = cur.fetchone()
-
-        if not row:
-            print(f"❌ Player with ID {pid} not found.")
-            return
-
-        pid, name, alias, gp, active, birthday, team, created, discord_name = row
-        birthday_fmt = format_birthday(birthday)
-
-        print(f"\n🎮 Player ID {pid}")
-        print(f"Name        : {name}")
-        print(f"Alias       : {alias or '-'}")
-        print(f"Team        : {team or '-'}")
-        print(f"GP          : {gp}")
-        print(f"Active      : {'Yes' if active else 'No'}")
-        print(f"Birthday    : {birthday_fmt}")
-        print(f"Discord     : {discord_name or '-'}")
-        print(f"Created at  : {created}\n")
+    print("  grep <term>                   Search players by name or alias (case-insensitive)")
 
