@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import subprocess
 import os
 import argparse
-import calendar
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--import", action="store_true", dest="do_import", help="Führe Import aus")
@@ -36,17 +35,14 @@ with open(tsv_path, newline='', encoding="utf-8") as f:
         ref_date = match_date - timedelta(days=7)
         iso_year, iso_week, _ = ref_date.isocalendar()
 
-        # Teamevent-Start = Freitag der Ziel-KW
-        monday = datetime.fromisocalendar(iso_year, iso_week, 1)
-        friday = monday + timedelta(days=4)
-
         key = (iso_year, iso_week)
         if key not in events or match_date < events[key]["date"]:
             events[key] = {
                 "event": event,
                 "date": match_date,
-                "start": friday,
-                "tracks": int(tracks_str)
+                "tracks": int(tracks_str),
+                "year": iso_year,
+                "week": iso_week
             }
 
 # Ausgabe
@@ -54,9 +50,8 @@ for (year, week), data in sorted(events.items(), key=lambda x: x[1]["date"]):
     cmd = [
         "python", "hcr2.py", "teamevent", "add",
         f'"{data["event"]}"',
-        data["start"].strftime("%Y-%m-%d"),
+        f"{data['year']}/{data['week']}",
         str(data["tracks"]),
-        '""',
         "15000"
     ]
 
