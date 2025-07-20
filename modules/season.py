@@ -11,6 +11,8 @@ def handle_command(cmd, args):
         add_or_update_season(args)
     elif cmd == "list":
         list_seasons(args)
+    elif cmd == "delete":
+        delete_season(args)
     else:
         print(f"❌ Unknown season command: {cmd}")
         print_help()
@@ -24,6 +26,7 @@ def print_help():
     print("  list <number>         → show season by number")
     print("  list <division>       → show seasons in division (CC, DIV1–DIV7)")
     print("  add <number> [div]    → add/update season")
+    print("  delete <number>       → delete season")
 
 
 def add_or_update_season(args):
@@ -58,6 +61,23 @@ def add_or_update_season(args):
                 (number, name, start, division or "")
             )
             print(f"✅ Season {number} ('{name}') added with start {start}")
+
+
+def delete_season(args):
+    if not args or not args[0].isdigit():
+        print("Usage: season delete <number>")
+        return
+
+    number = int(args[0])
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM season WHERE number = ?", (number,))
+        if not cur.fetchone():
+            print(f"⚠️ Season {number} does not exist.")
+            return
+
+        conn.execute("DELETE FROM season WHERE number = ?", (number,))
+        print(f"🗑️ Season {number} deleted.")
 
 
 def get_start_date(number):
@@ -100,8 +120,8 @@ def list_seasons(args):
         cur.execute(query, params)
         rows = cur.fetchall()
 
-    print(f"{'No.':3}   {'Start':<12} {'Div':<6} Name")
-    print("-" * 40)
-    for number, name, start, division in rows:
-        print(f"{number:>3}.  {start:<12} {division:<6} {name}")
+    print(f"{'No.':3}   {'Name':<8} {'Div':<6}")
+    print("-" * 25)
+    for number, name, _, division in rows:
+        print(f"{number:>3}.  {name:<8} {division:<6}")
 

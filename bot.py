@@ -6,7 +6,6 @@ ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
-    ".S": ["season", "list"],
     ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
     ".p": ["player", "list"],  # wird bei .p <id> dynamisch ersetzt
@@ -57,7 +56,7 @@ async def on_message(message):
         cmd = parts[0]
         args = parts[1:] if len(parts) > 0 else []
 
-        # special case: .p <id> → show player details
+        # .p <id> → show player details
         if cmd == ".p" and len(args) == 1 and args[0].isdigit():
             output = run_hcr2(["player", "show", args[0]])
             if not output:
@@ -68,7 +67,7 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-        # special case: .p → player list-active --team PLTE
+        # .p → list-active --team PLTE
         if cmd == ".p" and not args:
             output = run_hcr2(["player", "list-active", "--team", "PLTE"])
             if not output:
@@ -79,7 +78,7 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-        # special case: .s [<season>] → stats avg [<season>]
+        # .s [<season>] → stats avg
         if cmd == ".s":
             full_args = ["stats", "avg"] + args
             output = run_hcr2(full_args)
@@ -91,21 +90,39 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
+        # .S → list seasons oder .S <number> [division] → add/update
+        if cmd == ".S":
+            if not args:
+                output = run_hcr2(["season", "list"])
+            else:
+                output = run_hcr2(["season", "add"] + args)
+
+            if not output:
+                await message.channel.send("⚠️ No data found or error occurred.")
+            elif len(output) <= MAX_DISCORD_MSG_LEN:
+                await message.channel.send(f"```\n{output}```")
+            else:
+                await message.channel.send("⚠️ Output too long to display.")
+            return
+
+        # .h → help
         if cmd == ".h":
             help_text = (
                 "**`Available Commands:`**\n"
-                "`.s [season] → Show average stats (default: current season)`\n"
-                "`.p [id]     → List PLTE players or show details by ID`\n"
-                "`.S          → List all seasons`\n"
-                "`.a          → List aliases for PLTE team`\n"
-                "`.v          → List vehicles`\n"
-                "`.t          → List teamevents`\n"
-                "`.m          → List matches`\n"
-                "`.h          → Show this help`\n"
+                "`.s [season]      → Show average stats (default: current season)`\n"
+                "`.p [id]          → List PLTE players or show details by ID`\n"
+                "`.S               → List last 10 seasons`\n"
+                "`.S <num> [div]   → Add/update season`\n"
+                "`.a               → List aliases for PLTE team`\n"
+                "`.v               → List vehicles`\n"
+                "`.t               → List teamevents`\n"
+                "`.m               → List matches`\n"
+                "`.h               → Show this help`\n"
             )
             await message.channel.send(help_text)
             return
 
+        # generische Commands aus COMMANDS
         if cmd in COMMANDS:
             base_cmd = COMMANDS[cmd]
             if base_cmd is None:
@@ -120,7 +137,7 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-    # Semicolon-separated score lines
+    # Semikolon-getrennte Scorezeilen verarbeiten
     lines = content.splitlines()
     failed_lines = []
 
