@@ -25,13 +25,12 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
-    print('  add "<name>" <Jahr>/<KW> [vehicle_ids] [track-count] [max-score]')
+    print('  add "<name>" <Jahr>/<KW> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
     print("  list                        Show latest 10 teamevents (no vehicles)")
     print("  show all                   Show all teamevents (no vehicles)")
     print("  show <id>                  Show single teamevent with vehicles")
     print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
-
 
 def add_teamevent(args):
     if len(args) < 2:
@@ -49,7 +48,7 @@ def add_teamevent(args):
 
     tracks = 4
     max_score = 15000
-    vehicle_ids = []
+    vehicle_inputs = []
 
     tail = args[2:]
 
@@ -59,10 +58,24 @@ def add_teamevent(args):
     if tail and tail[-1].isdigit():
         tracks = int(tail.pop())
     if tail:
-        vehicle_ids = [int(v.strip()) for v in tail[0].split(",") if v.strip().isdigit()]
+        vehicle_inputs = [v.strip() for v in tail[0].split(",") if v.strip()]
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
+
+        # vehicle_inputs in echte IDs umwandeln
+        resolved_ids = []
+        for val in vehicle_inputs:
+            if val.isdigit():
+                resolved_ids.append(int(val))
+            else:
+                cur.execute("SELECT id FROM vehicle WHERE shortname = ?", (val,))
+                row = cur.fetchone()
+                if row:
+                    resolved_ids.append(row[0])
+                else:
+                    print(f"⚠️  Fahrzeug '{val}' nicht gefunden (weder ID noch shortname).")
+
         try:
             cur.execute(
                 """
@@ -73,7 +86,7 @@ def add_teamevent(args):
             )
             teamevent_id = cur.lastrowid
 
-            for vid in vehicle_ids:
+            for vid in resolved_ids:
                 try:
                     cur.execute(
                         "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
@@ -82,7 +95,7 @@ def add_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
-            print(f"✅ Teamevent '{name}' erstellt für KW {iso_week}/{iso_year} mit {tracks} Tracks, max {max_score} Punkten, Fahrzeuge: {vehicle_ids}")
+            print(f"✅ Teamevent '{name}' erstellt für KW {iso_week}/{iso_year} mit {tracks} Tracks, max {max_score} Punkten, Fahrzeuge: {resolved_ids}")
         except sqlite3.IntegrityError:
             print(f"❌ Teamevent für KW {iso_week}/{iso_year} existiert bereits.")
 
