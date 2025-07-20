@@ -21,33 +21,45 @@ def handle_command(cmd, args):
         print(f"❌ Unknown teamevent command: {cmd}")
         print_help()
 
+
 def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
-    print("  add <name> <start-date> <track-count> <vehicle_ids> [max-score]")
+    print('  add "<name>" <Jahr>/<KW> [vehicle_ids] [track-count] [max-score]')
     print("  list                        Show latest 10 teamevents (no vehicles)")
     print("  show all                   Show all teamevents (no vehicles)")
     print("  show <id>                  Show single teamevent with vehicles")
     print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
 
+
 def add_teamevent(args):
-    if len(args) < 4:
-        print("Usage: teamevent add <name> <start-date> <track-count> <vehicle_ids> [max-score]")
+    if len(args) < 2:
+        print('Usage: teamevent add "<name>" <Jahr>/<KW> [vehicle_ids] [track-count] [max-score]')
         return
 
     name = args[0]
-    start = args[1]
-    tracks = int(args[2])
-    vehicle_ids = [int(v.strip()) for v in args[3].split(",") if v.strip().isdigit()]
-    max_score = int(args[4]) if len(args) > 4 else 15000
-
     try:
-        dt = datetime.strptime(start, "%Y-%m-%d")
-        iso_year, iso_week, _ = dt.isocalendar()
-    except ValueError:
-        print("❌ Ungültiges Datum.")
+        year_str, week_str = args[1].split("/")
+        iso_year = int(year_str)
+        iso_week = int(week_str)
+    except Exception:
+        print("❌ Ungültiges Format für Jahr/KW. Beispiel: 2025/30")
         return
+
+    tracks = 4
+    max_score = 15000
+    vehicle_ids = []
+
+    tail = args[2:]
+
+    # Optionales Parsen von hinten nach vorn
+    if tail and tail[-1].isdigit():
+        max_score = int(tail.pop())
+    if tail and tail[-1].isdigit():
+        tracks = int(tail.pop())
+    if tail:
+        vehicle_ids = [int(v.strip()) for v in tail[0].split(",") if v.strip().isdigit()]
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -70,9 +82,10 @@ def add_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
-            print(f"✅ Teamevent '{name}' created with {tracks} tracks and vehicles: {vehicle_ids}")
+            print(f"✅ Teamevent '{name}' erstellt für KW {iso_week}/{iso_year} mit {tracks} Tracks, max {max_score} Punkten, Fahrzeuge: {vehicle_ids}")
         except sqlite3.IntegrityError:
-            print(f"❌ Teamevent in ISO-Woche {iso_week}/{iso_year} existiert bereits.")
+            print(f"❌ Teamevent für KW {iso_week}/{iso_year} existiert bereits.")
+
 
 def list_teamevents():
     with sqlite3.connect(DB_PATH) as conn:
