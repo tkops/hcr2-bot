@@ -104,8 +104,15 @@ async def on_message(message):
         if cmd == ".t":
             if not args:
                 output = run_hcr2(["teamevent", "list"])
-            elif args[0] == "add":
+            elif args[0].lower() == "add":
                 output = run_hcr2(["teamevent", "add"] + args[1:])
+                if not output:
+                    await message.channel.send("⚠️ No data found or error occurred.")
+                elif "✅ Teamevent" in output:
+                    await message.channel.send("✅ Teamevent added:\n```\n" + output + "```")
+                else:
+                    await message.channel.send("```\n" + output + "```")
+                return
             elif len(args) == 1 and args[0].isdigit():
                 output = run_hcr2(["teamevent", "show", args[0]])
             else:
