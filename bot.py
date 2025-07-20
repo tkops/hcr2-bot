@@ -13,7 +13,6 @@ COMMANDS = {
     ".h": None,
 }
 
-
 class MyClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -21,9 +20,7 @@ class MyClient(discord.Client):
         intents.message_content = True
         super().__init__(intents=intents)
 
-
 client = MyClient()
-
 
 def run_hcr2(args):
     try:
@@ -39,7 +36,6 @@ def run_hcr2(args):
         print(e)
         print(e.stderr)
         return None
-
 
 @client.event
 async def on_message(message):
@@ -104,20 +100,18 @@ async def on_message(message):
                 await message.channel.send("⚠️ Output too long to display.")
             return
 
-        # .t <id> → teamevent show <id>
-        if cmd == ".t" and len(args) == 1 and args[0].isdigit():
-            output = run_hcr2(["teamevent", "show", args[0]])
-            if not output:
-                await message.channel.send("⚠️ No data found or error occurred.")
-            elif len(output) <= MAX_DISCORD_MSG_LEN:
-                await message.channel.send(f"```\n{output}```")
+        # .t → add or show/list teamevents
+        if cmd == ".t":
+            if not args:
+                output = run_hcr2(["teamevent", "list"])
+            elif args[0] == "add":
+                output = run_hcr2(["teamevent", "add"] + args[1:])
+            elif len(args) == 1 and args[0].isdigit():
+                output = run_hcr2(["teamevent", "show", args[0]])
             else:
-                await message.channel.send("⚠️ Output too long to display.")
-            return
+                await message.channel.send("⚠️ Ungültiges .t-Format. Nutze `.t`, `.t <id>`, oder `.t add ...`")
+                return
 
-        # .t → teamevent list
-        if cmd == ".t" and not args:
-            output = run_hcr2(["teamevent", "list"])
             if not output:
                 await message.channel.send("⚠️ No data found or error occurred.")
             elif len(output) <= MAX_DISCORD_MSG_LEN:
@@ -138,6 +132,7 @@ async def on_message(message):
                 "`.v               → List vehicles`\n"
                 "`.t               → List teamevents`\n"
                 "`.t <id>          → Show teamevent with vehicles`\n"
+                "`.t add ...       → Add teamevent (name, KW, vehicles, etc)`\n"
                 "`.m               → List matches`\n"
                 "`.h               → Show this help`\n"
             )
@@ -179,7 +174,6 @@ async def on_message(message):
         await message.channel.send("❌ Failed to process the following lines:\n```" + "\n".join(failed_lines) + "```")
     elif lines and not failed_lines:
         await message.add_reaction("✅")
-
 
 client.run(TOKEN)
 

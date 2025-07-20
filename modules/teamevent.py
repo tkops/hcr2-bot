@@ -32,6 +32,7 @@ def print_help():
     print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
 
+
 def add_teamevent(args):
     if len(args) < 2:
         print('Usage: teamevent add "<name>" <Jahr>/<KW> [vehicle_ids] [track-count] [max-score]')
@@ -52,7 +53,6 @@ def add_teamevent(args):
 
     tail = args[2:]
 
-    # Optionales Parsen von hinten nach vorn
     if tail and tail[-1].isdigit():
         max_score = int(tail.pop())
     if tail and tail[-1].isdigit():
@@ -62,8 +62,6 @@ def add_teamevent(args):
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-
-        # vehicle_inputs in echte IDs umwandeln
         resolved_ids = []
         for val in vehicle_inputs:
             if val.isdigit():
@@ -95,7 +93,10 @@ def add_teamevent(args):
                 except sqlite3.IntegrityError:
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
-            print(f"✅ Teamevent '{name}' erstellt für KW {iso_week}/{iso_year} mit {tracks} Tracks, max {max_score} Punkten, Fahrzeuge: {resolved_ids}")
+            # Statt einfachem print → gleich Teamevent anzeigen
+            conn.commit()
+            show_teamevent([str(teamevent_id)])
+
         except sqlite3.IntegrityError:
             print(f"❌ Teamevent für KW {iso_week}/{iso_year} existiert bereits.")
 
