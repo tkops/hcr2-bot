@@ -69,6 +69,7 @@ def list_matches(season_number=None, all_seasons=False):
                 JOIN teamevent t ON m.teamevent_id = t.id
                 ORDER BY m.start DESC
             """)
+            matches = cur.fetchall()
         else:
             if season_number is None:
                 season_number = get_current_season_number()
@@ -79,12 +80,32 @@ def list_matches(season_number=None, all_seasons=False):
                 WHERE m.season_number = ?
                 ORDER BY m.start DESC
             """, (season_number,))
-        matches = cur.fetchall()
+            matches = cur.fetchall()
 
     print(f"{'ID':<5} {'Start':<12} {'Season':<8} {'Opponent':<25} {'Event'}")
     print("-" * 85)
     for mid, start, season, opp, event_name in matches:
         print(f"{mid:>5}. {start:<12} {season:<8} {opp:<25} {event_name}")
+
+    if not all_seasons:
+        print(f"\n📊 {len(matches)} Matches in Season {season_number}")
+        warn_if_unusual_match_count(season_number, len(matches))
+
+
+def warn_if_unusual_match_count(season_number, actual_count):
+    start = datetime(2021, 5, 1) + relativedelta(months=season_number - 1)
+    month = start.month
+    year = start.year
+
+    if month == 2:
+        expected = 13
+    elif month in [4, 6, 9, 11]:
+        expected = 14
+    else:
+        expected = 15
+
+    if actual_count != expected:
+        print(f"⚠️  Achtung: Erwartet wären {expected} Matches im {start.strftime('%B %Y')}.")
 
 
 def delete_match(mid):
