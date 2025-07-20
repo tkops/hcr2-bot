@@ -139,7 +139,7 @@ async def on_message(message):
                 "`.v               → List vehicles`\n"
                 "`.t               → List teamevents`\n"
                 "`.t <id>          → Show teamevent with vehicles`\n"
-                "`.t add ...       → Add teamevent (name, year/week, vehicles, etc)`\n"
+                "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
                 "`    example:     .t add 'Best Teamevent ever' 2025/31 hc,ro,rb,rt,sm`\n"
                 "`.m               → List matches`\n"
                 "`.h               → Show this help`\n"
