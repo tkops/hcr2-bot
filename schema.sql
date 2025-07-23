@@ -4,18 +4,6 @@ CREATE TABLE IF NOT EXISTS vehicle (
             shortname TEXT NOT NULL UNIQUE
         );
 
-
-CREATE TABLE match (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    teamevent_id INTEGER NOT NULL,
-    season_number INTEGER NOT NULL,
-    start TEXT NOT NULL,
-    opponent TEXT NOT NULL,
-    FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
-    FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
-);
-
-
 CREATE TABLE IF NOT EXISTS matchscore (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             match_id INTEGER NOT NULL,
@@ -34,16 +22,6 @@ CREATE TABLE IF NOT EXISTS season (
             division TEXT NOT NULL
         );
 
-CREATE TABLE IF NOT EXISTS teamevent (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    iso_year INTEGER NOT NULL,
-    iso_week INTEGER NOT NULL,
-    tracks INTEGER DEFAULT 4,
-    max_score_per_track INTEGER DEFAULT 15000,
-    UNIQUE(iso_year, iso_week)
-);
-
 CREATE TABLE IF NOT EXISTS teamevent_vehicle (
             teamevent_id INTEGER NOT NULL,
             vehicle_id INTEGER NOT NULL,
@@ -60,4 +38,29 @@ CREATE TABLE IF NOT EXISTS players (
     active BOOLEAN DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 , birthday TEXT, team TEXT, discord_name TEXT, country_code TEXT);
+
+CREATE TABLE IF NOT EXISTS flags (
+            alpha2 TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        );
+
+CREATE TABLE IF NOT EXISTS teamevent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    iso_year INTEGER NOT NULL,
+    iso_week INTEGER NOT NULL,
+    tracks INTEGER DEFAULT 4,
+    max_score_per_track INTEGER DEFAULT 15000,
+    UNIQUE(iso_year, iso_week)
+);
+
+CREATE TABLE IF NOT EXISTS match (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teamevent_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    start TEXT NOT NULL,
+    opponent TEXT NOT NULL, score_ladys INTEGER DEFAULT 0, score_opponent INTEGER DEFAULT 0,
+    FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
+    FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
+);
 

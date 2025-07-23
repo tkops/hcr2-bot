@@ -16,21 +16,26 @@ def get_teamevent_id(conn, name: str, match_date: datetime):
     matches = cur.fetchall()
 
     if not matches:
+        print(f"❌ Kein Teamevent mit Namen '{name}' gefunden.")
         return None
 
     if len(matches) == 1:
         return matches[0][0]
 
+    print(f"ℹ️  Mehrere Teamevents für '{name}' gefunden. Vergleiche mit Match-Datum {match_date.date()}:")
     best_id = None
     best_diff = None
     for te_id, year, week in matches:
         iso_start = datetime.fromisocalendar(year, week, 1)
         diff = abs((match_date - iso_start).days)
+        print(f"  - ID {te_id}: {year}-KW{week}, Start {iso_start.date()}, Differenz {diff} Tage")
         if best_diff is None or diff < best_diff:
             best_diff = diff
             best_id = te_id
 
+    print(f"✅ Beste Übereinstimmung: ID {best_id} mit {best_diff} Tagen Differenz")
     return best_id
+
 
 def import_matches():
     with sqlite3.connect(DB_PATH) as conn:
