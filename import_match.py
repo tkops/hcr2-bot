@@ -36,7 +36,6 @@ def get_teamevent_id(conn, name: str, match_date: datetime):
     print(f"✅ Beste Übereinstimmung: ID {best_id} mit {best_diff} Tagen Differenz")
     return best_id
 
-
 def import_matches():
     with sqlite3.connect(DB_PATH) as conn:
         with open(TSV_FILE, newline='', encoding="utf-8") as f:
@@ -59,6 +58,16 @@ def import_matches():
                     skipped += 1
                     continue
 
+                try:
+                    score_ladys = int(row["score_ladys"].strip())
+                except (KeyError, ValueError):
+                    score_ladys = 0
+
+                try:
+                    score_opponent = int(row["score_opponent"].strip())
+                except (KeyError, ValueError):
+                    score_opponent = 0
+
                 season_number = get_season_number(match_date)
                 teamevent_id = get_teamevent_id(conn, event, match_date)
 
@@ -77,9 +86,9 @@ def import_matches():
                     continue
 
                 cur.execute("""
-                    INSERT INTO match (teamevent_id, season_number, start, opponent)
-                    VALUES (?, ?, ?, ?)
-                """, (teamevent_id, season_number, date_str, opponent))
+                    INSERT INTO match (teamevent_id, season_number, start, opponent, score_ladys, score_opponent)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (teamevent_id, season_number, date_str, opponent, score_ladys, score_opponent))
                 added += 1
 
             conn.commit()
