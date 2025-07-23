@@ -14,7 +14,7 @@ def handle_command(cmd, args):
         elif args:
             list_matches(season_number=int(args[0]))
         else:
-            list_matches()  # aktuelle Season
+            list_matches()  # current season
     elif cmd == "delete":
         if len(args) != 1:
             print("Usage: match delete <id>")
@@ -85,10 +85,10 @@ def list_matches(season_number=None, all_seasons=False):
     print(f"{'ID':<5} {'Start':<12} {'Season':<8} {'Opponent':<25} {'Event'}")
     print("-" * 85)
     for mid, start, season, opp, event_name in matches:
-        print(f"{mid:>5}. {start:<12} {season:<8} {opp:<25} {event_name}")
+        print(f"{mid:>5}. {start:<12} S{season:<7} {opp:<25} {event_name}")
 
     if not all_seasons:
-        print(f"\n📊 {len(matches)} Matches in Season {season_number}")
+        print(f"\n📊 {len(matches)} matches in Season {season_number}")
         warn_if_unusual_match_count(season_number, len(matches))
 
 
@@ -105,7 +105,7 @@ def warn_if_unusual_match_count(season_number, actual_count):
         expected = 15
 
     if actual_count != expected:
-        print(f"⚠️  Achtung: Erwartet wären {expected} Matches im {start.strftime('%B %Y')}.")
+        print(f"⚠️  Warning: Expected {expected} matches for {start.strftime('%B %Y')} (Season {season_number}), but found {actual_count}.")
 
 
 def delete_match(mid):
