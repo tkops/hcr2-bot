@@ -15,6 +15,11 @@ def handle_command(cmd, args):
             list_matches(season_number=int(args[0]))
         else:
             list_matches()  # current season
+    elif cmd == "edit":
+        if len(args) != 8:
+            print("Usage: match edit <id> <teamevent_id> <season_number> <start> <opponent> <score_ladys> <score_opponent>")
+            return
+        edit_match(args)
     elif cmd == "delete":
         if len(args) != 1:
             print("Usage: match delete <id>")
@@ -29,6 +34,7 @@ def print_help():
     print("Usage: python hcr2.py match <command> [args]")
     print("\nAvailable commands:")
     print("  add <teamevent_id> <season_number> <start> <opponent> [<score_ladys> <score_opponent>]")
+    print("  edit <id> <teamevent_id> <season_number> <start> <opponent> <score_ladys> <score_opponent>")
     print("  list [season_number|all]")
     print("  delete <id>")
 
@@ -56,6 +62,29 @@ def add_match(args):
 
     print(f"✅ Match added: Event {teamevent_id}, Season {season_number}, vs {opponent} on {start} "
           f"(Score Ladys: {score_ladys}, Score Opponent: {score_opponent})")
+
+
+def edit_match(args):
+    mid = int(args[0])
+    teamevent_id = int(args[1])
+    season_number = int(args[2])
+    start = args[3]
+    opponent = args[4]
+    score_ladys = int(args[5])
+    score_opponent = int(args[6])
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE match
+            SET teamevent_id = ?, season_number = ?, start = ?, opponent = ?, score_ladys = ?, score_opponent = ?
+            WHERE id = ?
+        """, (teamevent_id, season_number, start, opponent, score_ladys, score_opponent, mid))
+
+        if cur.rowcount == 0:
+            print(f"❌ Match ID {mid} not found.")
+        else:
+            print(f"✏️  Match {mid} updated.")
 
 
 def get_current_season_number():

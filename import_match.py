@@ -59,12 +59,12 @@ def import_matches():
                     continue
 
                 try:
-                    score_ladys = int(row["score_ladys"].strip())
+                    score_ladys = int(row["Score PL"].strip())
                 except (KeyError, ValueError):
                     score_ladys = 0
 
                 try:
-                    score_opponent = int(row["score_opponent"].strip())
+                    score_opponent = int(row["Score Gegner"].strip())
                 except (KeyError, ValueError):
                     score_opponent = 0
 
