@@ -61,7 +61,7 @@ def show_average(season_number=None):
         rows = cur.fetchall()
 
         if not rows:
-            print("⚠️ Keine Matchscores gefunden.")
+            print("⚠️ No match scores found.")
             return
 
         scores_by_match = {}
@@ -89,15 +89,17 @@ def show_average(season_number=None):
                 player_names[pid] = name
                 player_counts[pid] = player_counts.get(pid, 0) + 1
 
-        cur.execute("SELECT id FROM players WHERE active = 1")
-        active_ids = {row[0] for row in cur.fetchall()}
+        # Only include players with at least 80% match participation
+        cur.execute("SELECT COUNT(*) FROM match WHERE season_number = ?", (season_number,))
+        total_matches = cur.fetchone()[0]
+        min_matches = round(total_matches * 0.8)
 
         entries = []
         for pid, deltas in player_scores.items():
-            if pid not in active_ids:
+            count = player_counts.get(pid, 0)
+            if count < min_matches:
                 continue
             avg_delta = round(sum(deltas) / len(deltas))
-            count = player_counts.get(pid, 0)
             entries.append((player_names[pid], avg_delta, count))
 
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")

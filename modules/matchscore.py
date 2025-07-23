@@ -20,7 +20,7 @@ def handle_command(cmd, args):
             return
         match_id = int(args[0]) if args else get_latest_match_id()
         if match_id is None:
-            print("❌ Kein Match gefunden.")
+            print("❌ No match found.")
             return
         auto_add_scores(match_id)
     else:
@@ -54,7 +54,7 @@ def add_score(args):
     points = int(args[3])
 
     if not (0 <= score <= 75000 and 0 <= points <= 300):
-        print("❌ Score oder Points außerhalb des gültigen Bereichs.")
+        print("❌ Score or points out of valid range.")
         return
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -80,12 +80,17 @@ def add_score(args):
             else:
                 player_id = matches[0][0]
 
-        conn.execute("""
-            INSERT INTO matchscore (match_id, player_id, score, points)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(match_id, player_id)
-            DO UPDATE SET score = excluded.score, points = excluded.points
-        """, (match_id, player_id, score, points))
+        try:
+            conn.execute("""
+                INSERT INTO matchscore (match_id, player_id, score, points)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(match_id, player_id)
+                DO UPDATE SET score = excluded.score, points = excluded.points
+            """, (match_id, player_id, score, points))
+        except Exception as e:
+            print(f"❌ Failed to save score: match={match_id}, player={player_input}, score={score}, points={points}")
+            print(f"Error: {e}")
+            return
 
         cur.execute("""
             SELECT ms.id, m.id, m.start, m.opponent,
@@ -100,6 +105,31 @@ def add_score(args):
         row = cur.fetchone()
 
         print(f"\n✅ Score saved:")
+        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
+        print("-" * 100)
+        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+
+def delete_score(score_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT ms.id, m.id, m.start, m.opponent,
+                   s.name, s.division, p.name, ms.score, ms.points
+            FROM matchscore ms
+            JOIN match m ON ms.match_id = m.id
+            JOIN season s ON m.season_number = s.number
+            JOIN players p ON ms.player_id = p.id
+            WHERE ms.id = ?
+        """, (score_id,))
+        row = cur.fetchone()
+
+        if not row:
+            print(f"⚠️ No entry found with ID {score_id}.")
+            return
+
+        conn.execute("DELETE FROM matchscore WHERE id = ?", (score_id,))
+        print(f"\n🗑️ Score entry deleted:")
         print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
         print("-" * 100)
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
@@ -120,16 +150,16 @@ def auto_add_scores(match_id):
                 WHERE match_id = ? AND player_id = ?
             """, (match_id, pid))
             if cur.fetchone():
-                print(f"➡️  Spieler {name} (ID {pid}) hat bereits einen Eintrag. Überspringe.")
+                print(f"➡️  Player {name} (ID {pid}) already has a score. Skipping.")
                 continue
 
             while True:
-                score_input = input(f"🔢 Score für {name}: ")
+                score_input = input(f"🔢 Score for {name}: ")
                 if score_input.lower() == "cancel":
-                    print("⛔ Vorgang abgebrochen.")
+                    print("⛔ Aborted.")
                     return
                 if score_input.lower() == "skip":
-                    print(f"↪️  Überspringe {name}.")
+                    print(f"↪️  Skipping {name}.")
                     break
                 try:
                     score = int(score_input)
@@ -137,18 +167,18 @@ def auto_add_scores(match_id):
                         break
                 except ValueError:
                     pass
-                print("❌ Ungültiger Score. Bitte erneut eingeben.")
+                print("❌ Invalid score. Try again.")
 
             if score_input.lower() == "skip":
                 continue
 
             while True:
-                points_input = input(f"⭐ Points für {name}: ")
+                points_input = input(f"⭐ Points for {name}: ")
                 if points_input.lower() == "cancel":
-                    print("⛔ Vorgang abgebrochen.")
+                    print("⛔ Aborted.")
                     return
                 if points_input.lower() == "skip":
-                    print(f"↪️  Überspringe {name}.")
+                    print(f"↪️  Skipping {name}.")
                     break
                 try:
                     points = int(points_input)
@@ -156,7 +186,7 @@ def auto_add_scores(match_id):
                         break
                 except ValueError:
                     pass
-                print("❌ Ungültige Points. Bitte erneut eingeben.")
+                print("❌ Invalid points. Try again.")
 
             if points_input.lower() == "skip":
                 continue
@@ -168,7 +198,7 @@ def auto_add_scores(match_id):
                 DO UPDATE SET score = excluded.score, points = excluded.points
             """, (match_id, pid, score, points))
 
-            print(f"✅ Gespeichert für {name}: Score {score}, Points {points}")
+            print(f"✅ Saved for {name}: Score {score}, Points {points}")
 
 def list_scores(*args):
     match_filter = None
@@ -218,14 +248,13 @@ def list_scores(*args):
         rows = cur.fetchall()
 
     if not rows:
-        print("⚠️ Keine Scores gefunden.")
+        print("⚠️ No scores found.")
         return
 
     print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
     print("-" * 100)
     for row in rows:
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
-
 
 def edit_score(args):
     if not args or not args[0].isdigit():
@@ -248,7 +277,7 @@ def edit_score(args):
             i += 1
 
     if new_score is None and new_points is None:
-        print("⚠️ Nichts zu ändern angegeben.")
+        print("⚠️ Nothing to update.")
         return
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -272,7 +301,7 @@ def edit_score(args):
         """, (score_id,))
         row = cur.fetchone()
 
-        print(f"\n✅ Score aktualisiert:")
+        print(f"\n✅ Score updated:")
         print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
         print("-" * 100)
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
