@@ -1,5 +1,5 @@
 import sys
-from modules import vehicle, player, teamevent, season, match, matchscore, stats
+from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet
 
 
 def show_main_help():
@@ -12,6 +12,7 @@ def show_main_help():
     print("  match       Manage matches")
     print("  matchscore  Manage matchscores")
     print("  stats       Show statistics")
+    print("  sheet       Manage Excel files for matches")
 
 
 def show_entity_help(entity):
@@ -29,6 +30,8 @@ def show_entity_help(entity):
         matchscore.print_help()
     elif entity == "stats":
         stats.print_help()
+    elif entity == "sheet":
+        sheet.print_help()
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
@@ -61,6 +64,8 @@ def main():
         matchscore.handle_command(command, args)
     elif entity == "stats":
         stats.handle_command(command, args)
+    elif entity == "sheet":
+        sheet.handle_command(command, args)
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
@@ -68,3 +73,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1,6 +1,6 @@
 import discord
 import re
-from secrets_config import TOKEN
+from modules import secrets_config 
 import subprocess
 
 ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]
