@@ -108,7 +108,15 @@ def generate_excel(match, players, output_path):
     remote_path = str((NEXTCLOUD_BASE / f"S{season}" / filename)).replace("\\", "/")
     upload_url = upload_to_nextcloud(filepath, remote_path)
     web_url = f"http://cloud-pl.de?path=/Scores/S{season}/{filename}"
+        # Lokale Datei löschen
+    if filepath.exists():
+        try:
+            filepath.unlink()
+            print("[INFO] Deleted local Excel file:", filepath)
+        except Exception as e:
+            print("[WARN] Could not delete Excel file:", e)
     return web_url
+
 
 def import_excel_to_matchscore(match_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -165,6 +173,14 @@ def import_excel_to_matchscore(match_id):
                     print(result.stderr.strip())
 
         print("[OK] Imported", imported, "entries from", tsv_path)
+    for path in (local_path, tsv_path):
+        if path.exists():
+            try:
+                path.unlink()
+                print("[INFO] Deleted temporary file:", path)
+            except Exception as e:
+                print("[WARN] Could not delete file:", path, "-", e)
+
 
 def print_help():
     print("Usage: python hcr2.py sheet <command> <match_id>")
