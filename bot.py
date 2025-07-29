@@ -1,6 +1,7 @@
 import discord
 import re
-from modules import secrets_config 
+from secrets_config import TOKEN
+from secrets_config import NEXTCLOUD_AUTH
 import subprocess
 
 ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]

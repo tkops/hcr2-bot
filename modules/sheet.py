@@ -36,11 +36,25 @@ def upload_to_nextcloud(local_path, remote_path):
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
+    # Prüfe, ob Datei schon existiert
     res = requests.head(url, auth=(user, password))
     if res.status_code == 200:
         print("[INFO] File already exists in Nextcloud:", remote_path)
         return url
 
+    # Verzeichnisstruktur erstellen
+    parts = remote_path.split("/")[:-1]  # ohne Dateiname
+    current_path = ""
+    for part in parts:
+        current_path += f"/{part}"
+        dir_url = NEXTCLOUD_URL.format(user=user, path=current_path.lstrip("/"))
+        res = requests.request("MKCOL", dir_url, auth=(user, password))
+        if res.status_code in (201, 405):  # 201 = erstellt, 405 = existiert schon
+            continue
+        elif res.status_code != 301:  # manchmal folgt ein Redirect
+            print(f"[WARN] MKCOL {current_path} failed:", res.status_code, res.text)
+
+    # Datei hochladen
     with open(local_path, "rb") as f:
         res = requests.put(url, auth=(user, password), data=f)
     if res.status_code in (200, 201, 204):
