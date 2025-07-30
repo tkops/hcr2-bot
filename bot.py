@@ -193,7 +193,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    if cmd in [".v", ".version"]:
+    if cmd in [".version"]:
         await message.channel.send(f"📦 Current version: `{get_version()}`")
         return
 
@@ -241,11 +241,11 @@ async def on_message(message):
             "`    example: .x 10 - 220`\n"
             "`.c <id>          → Create Excel file for match and upload`\n"
             "`.i <id>          → Import scores from Excel file on Nextcloud`\n"
-            "`.version or .v   → Show version`\n"
             "`.h               → Show this help`\n"
+            "`.version         → Show version`\n"
         )
-    await message.channel.send(help_text)
-    return
+        await message.channel.send(help_text)
+        return
 
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]
