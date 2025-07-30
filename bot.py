@@ -3,6 +3,7 @@ import re
 import sys
 import subprocess
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
+from version import get_version
 
 MAX_DISCORD_MSG_LEN = 1990
 
@@ -166,6 +167,11 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    if cmd in [".v", ".version"]:
+        await message.channel.send(f"📦 Current version: `{get_version()}`")
+        return
+
+
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
@@ -207,6 +213,7 @@ async def on_message(message):
             "`    example: .x 10 30000 220`\n"
             "`    example: .x 10 30000`\n"
             "`    example: .x 10 - 220`\n"
+            "`.v               → Show version`\n"
             "`.h               → Show this help`\n"
         )
         await message.channel.send(help_text)
