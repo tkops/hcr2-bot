@@ -1,10 +1,9 @@
 import discord
 import re
-from secrets_config import TOKEN
-from secrets_config import NEXTCLOUD_AUTH
+import sys
 import subprocess
+from secrets_config import CONFIG, NEXTCLOUD_AUTH
 
-ALLOWED_CHANNEL_ID = [1394750333129068564, 1394909975238934659]
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
@@ -14,6 +13,15 @@ COMMANDS = {
     ".m": ["match", "list"],
     ".h": None,
 }
+
+# Check mode argument
+if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
+    print("Usage: python3 bot.py [dev|prod]")
+    sys.exit(1)
+
+mode = sys.argv[1]
+TOKEN = CONFIG[mode]["TOKEN"]
+ALLOWED_CHANNEL_ID = CONFIG[mode]["CHANNEL_IDS"]
 
 class MyClient(discord.Client):
     def __init__(self):
@@ -40,15 +48,12 @@ def run_hcr2(args):
         return None
 
 def parse_teamevent_add_args(args):
-    """
-    Automatically splits name and rest based on year/week (e.g. 2025/38 or 2025-38)
-    """
     for i, val in enumerate(args):
         if re.match(r"^\d{4}[/\-]\d{1,2}$", val):
             name = " ".join(args[:i])
             rest = args[i:]
             return [name] + rest
-    return args  # Fallback
+    return args
 
 @client.event
 async def on_message(message):
@@ -65,47 +70,40 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
-    # .p <id> → show player details
     if cmd == ".p" and len(args) == 1 and args[0].isdigit():
         output = run_hcr2(["player", "show", args[0]])
         await respond(message, output)
         return
 
-    # .p → list-active --team PLTE
     if cmd == ".p" and not args:
         output = run_hcr2(["player", "list-active", "--team", "PLTE"])
         await respond(message, output)
         return
 
-    # .s [<season>] → stats avg
     if cmd == ".s":
         full_args = ["stats", "avg"] + args
         output = run_hcr2(full_args)
         await respond(message, output)
         return
 
-    # .S → list seasons oder .S <number> [division] → add/update
     if cmd == ".S":
         output = run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
         await respond(message, output)
         return
 
-    # .t → add or show/list teamevents
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
-
         elif args[0].lower() == "add":
             parsed_args = parse_teamevent_add_args(args[1:])
             output = run_hcr2(["teamevent", "add"] + parsed_args)
             if not output:
                 await message.channel.send("⚠️ No data found or error occurred.")
-            elif output.strip().startswith("Teamevent "):  # Erfolg sicher erkannt
+            elif output.strip().startswith("Teamevent "):
                 await message.channel.send("✅ Teamevent added:\n```\n" + output + "```")
             else:
                 await message.channel.send("```\n" + output + "```")
             return
-
         elif len(args) == 1 and args[0].isdigit():
             output = run_hcr2(["teamevent", "show", args[0]])
         else:
@@ -114,7 +112,6 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    # .h → help
     if cmd == ".h":
         help_text = (
             "**`Available Commands:`**\n"
@@ -134,7 +131,6 @@ async def on_message(message):
         await message.channel.send(help_text)
         return
 
-    # generische COMMANDS
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]
         if base_cmd is None:
@@ -143,7 +139,6 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    # Semikolon-getrennte Scorezeilen
     lines = content.splitlines()
     failed_lines = []
 
