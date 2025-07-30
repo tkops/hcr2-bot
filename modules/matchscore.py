@@ -43,6 +43,7 @@ def get_latest_match_id():
         row = cur.fetchone()
         return row[0] if row and row[0] is not None else None
 
+
 def add_score(args):
     if len(args) != 4:
         print("Usage: matchscore add <match_id> <player_id|name> <score> <points>")
@@ -80,6 +81,19 @@ def add_score(args):
             else:
                 player_id = matches[0][0]
 
+        cur.execute("""
+            SELECT score, points FROM matchscore
+            WHERE match_id = ? AND player_id = ?
+        """, (match_id, player_id))
+        existing = cur.fetchone()
+
+        changed = False
+        if existing:
+            old_score, old_points = existing
+            changed = (score != old_score or points != old_points)
+        else:
+            changed = True
+
         try:
             conn.execute("""
                 INSERT INTO matchscore (match_id, player_id, score, points)
@@ -92,22 +106,7 @@ def add_score(args):
             print(f"Error: {e}")
             return
 
-        cur.execute("""
-            SELECT ms.id, m.id, m.start, m.opponent,
-                   s.name, s.division, p.name, ms.score, ms.points
-            FROM matchscore ms
-            JOIN match m ON ms.match_id = m.id
-            JOIN season s ON m.season_number = s.number
-            JOIN players p ON ms.player_id = p.id
-            WHERE ms.match_id = ? AND ms.player_id = ?
-        """, (match_id, player_id))
-
-        row = cur.fetchone()
-
-        print(f"\n✅ Score saved:")
-        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
-        print("-" * 100)
-        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+        print("CHANGED" if changed else "UNCHANGED")
 
 def delete_score(score_id):
     with sqlite3.connect(DB_PATH) as conn:
