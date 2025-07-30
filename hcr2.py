@@ -1,6 +1,6 @@
 import sys
 from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet
-
+import version
 
 def show_main_help():
     print("Usage: python hcr2.py <entity> <command> [args]")
@@ -13,7 +13,7 @@ def show_main_help():
     print("  matchscore  Manage matchscores")
     print("  stats       Show statistics")
     print("  sheet       Manage Excel files for matches")
-
+    print("  version     Print version")
 
 def show_entity_help(entity):
     if entity == "vehicle":
@@ -32,10 +32,11 @@ def show_entity_help(entity):
         stats.print_help()
     elif entity == "sheet":
         sheet.print_help()
+    elif entity == "version":
+        print(version.get_version())
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
-
 
 def main():
     if len(sys.argv) < 2:
@@ -43,6 +44,10 @@ def main():
         return
 
     entity = sys.argv[1]
+    if entity == "version":
+        print(version.get_version())
+        return
+
     if len(sys.argv) == 2:
         show_entity_help(entity)
         return
@@ -69,7 +74,6 @@ def main():
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
-
 
 if __name__ == "__main__":
     main()

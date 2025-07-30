@@ -3,6 +3,7 @@ import re
 import sys
 import subprocess
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
+from version import get_version
 
 MAX_DISCORD_MSG_LEN = 1990
 
@@ -70,14 +71,71 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
-    if cmd == ".p" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["player", "show", args[0]])
-        await respond(message, output)
+
+    if cmd == ".p":
+        if not args:
+            output = run_hcr2(["player", "list-active", "--team", "PLTE"])
+            await respond(message, output)
+            return
+
+        if args[0].isdigit():
+            player_id = args[0]
+
+            # Nur ID → show
+            if len(args) == 1:
+                output = run_hcr2(["player", "show", player_id])
+                await respond(message, output)
+                return
+
+            # ID + weitere Argumente → edit
+            edit_args = ["player", "edit", player_id]
+            for arg in args[1:]:
+                if ":" not in arg:
+                    continue  # ignoriert ungültige Argumente
+                key, value = arg.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                flag_map = {
+                    "name": "--name",
+                    "alias": "--alias",
+                    "gp": "--gp",
+                    "active": "--active",
+                    "birthday": "--birthday",
+                    "team": "--team",
+                    "discord": "--discord",
+                }
+                if key in flag_map:
+                    edit_args += [flag_map[key], value]
+
+            output = run_hcr2(edit_args)
+            await respond(message, output)
+            return
+
+        await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
         return
 
-    if cmd == ".p" and not args:
-        output = run_hcr2(["player", "list-active", "--team", "PLTE"])
-        await respond(message, output)
+    if cmd == ".c" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "create", args[0]])
+        if output:
+            lines = output.strip().splitlines()
+            link = lines[-1] if lines[-1].startswith("http") else None
+            desc = f"[Open file]({link})" if link else output
+            embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during sheet creation.")
+        return
+    
+    if cmd == ".i" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "import", args[0]])
+        if output:
+            lines = output.strip().splitlines()
+            link = next((l for l in lines if l.startswith("http")), None)
+            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            embed = discord.Embed(title="📥 Sheet import", description=desc, color=0x3498db)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during sheet import.")
         return
 
     if cmd == ".s":
@@ -90,6 +148,55 @@ async def on_message(message):
         output = run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
         await respond(message, output)
         return
+
+    if cmd == ".P" and args:
+        term = " ".join(args)
+        output = run_hcr2(["player", "grep", term])
+        await respond(message, output)
+        return
+
+    if cmd == ".m":
+        if not args:
+            output = run_hcr2(["match", "list"])
+        elif len(args) == 1 and args[0].isdigit():
+            output = run_hcr2(["match", "show", args[0]])
+        else:
+            await message.channel.send("⚠️ Invalid .m format. Use `.m` or `.m <id>`")
+            return
+        await respond(message, output)
+        return
+
+    if cmd == ".x":
+        if not args:
+            await message.channel.send("Usage: .x <id> <score|-> [points]")
+            return
+
+        match_id = args[0]
+
+        # Nur .x <id> → aktueller Score anzeigen
+        if len(args) == 1:
+            output = run_hcr2(["matchscore", "list", "--match", match_id])
+            await respond(message, output)
+            return
+
+        score_arg = args[1]
+        points_arg = args[2] if len(args) > 2 else None
+
+        cmd_args = ["matchscore", "edit", match_id]
+
+        if score_arg != "-":
+            cmd_args += ["--score", score_arg]
+        if points_arg:
+            cmd_args += ["--points", points_arg]
+
+        output = run_hcr2(cmd_args)
+        await respond(message, output)
+        return
+
+    if cmd in [".v", ".version"]:
+        await message.channel.send(f"📦 Current version: `{get_version()}`")
+        return
+
 
     if cmd == ".t":
         if not args:
@@ -117,6 +224,8 @@ async def on_message(message):
             "**`Available Commands:`**\n"
             "`.s [season]      → Show average stats (default: current season)`\n"
             "`.p [id]          → List PLTE players or show details by ID`\n"
+            "`.p <id> key:value→ Edit player name alias gp active birthday team discord`\n"
+            "`.P <name>        → Search for player with name expression`\n"
             "`.S               → List last 10 seasons`\n"
             "`.S <num> [div]   → Add/update season`\n"
             "`.a               → List aliases for PLTE team`\n"
@@ -124,12 +233,19 @@ async def on_message(message):
             "`.t               → List teamevents`\n"
             "`.t <id>          → Show teamevent with vehicles`\n"
             "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
-            "`    example:     .t add Best Event 2025/38 hc,ro`\n"
-            "`.m               → List matches`\n"
+            "`    example: .t add Best Event 2025/38 hc,ro`\n"
+            "`.m [id]          → List matches or show details for match`\n"
+            "`.x <id> [<score> [points]] → Edit score for match`\n"
+            "`    example: .x 10 30000 220`\n"
+            "`    example: .x 10 30000`\n"
+            "`    example: .x 10 - 220`\n"
+            "`.c <id>          → Create Excel file for match and upload`\n"
+            "`.i <id>          → Import scores from Excel file on Nextcloud`\n"
+            "`.version or .v   → Show version`\n"
             "`.h               → Show this help`\n"
         )
-        await message.channel.send(help_text)
-        return
+    await message.channel.send(help_text)
+    return
 
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]

@@ -250,10 +250,18 @@ def list_scores(*args):
         print("⚠️ No scores found.")
         return
 
-    print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} {'Season':<12} {'Div':<6} {'Player':<20} {'Score':<6} {'Points'}")
-    print("-" * 100)
+    if match_filter:
+        match_id = rows[0][1]
+        match_date = rows[0][2]
+        opponent = rows[0][3]
+        season = rows[0][4].lstrip("S")  # z. B. "S51" → "51"
+        print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season}\n")
+
+    print(f"{'ID':<4} {'Player':<20} {'Score':<6} {'Points'}")
+    print("-" * 40)
     for row in rows:
-        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
+        print(f"{row[0]:<4} {row[6]:<20} {row[7]:<6} {row[8]}")
+
 
 def edit_score(args):
     if not args or not args[0].isdigit():
