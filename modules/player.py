@@ -309,6 +309,7 @@ def edit_player(args):
         conn.execute(query, values)
 
     print(f"✅ Player {pid} updated.")
+    show_player(pid)
 
 def deactivate_player(pid):
     with sqlite3.connect(DB_PATH) as conn:

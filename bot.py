@@ -69,15 +69,46 @@ async def on_message(message):
     parts = content.split()
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
+    if cmd == ".p":
+        if not args:
+            output = run_hcr2(["player", "list-active", "--team", "PLTE"])
+            await respond(message, output)
+            return
 
-    if cmd == ".p" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["player", "show", args[0]])
-        await respond(message, output)
-        return
+        if args[0].isdigit():
+            player_id = args[0]
 
-    if cmd == ".p" and not args:
-        output = run_hcr2(["player", "list-active", "--team", "PLTE"])
-        await respond(message, output)
+            # Nur ID → show
+            if len(args) == 1:
+                output = run_hcr2(["player", "show", player_id])
+                await respond(message, output)
+                return
+
+            # ID + weitere Argumente → edit
+            edit_args = ["player", "edit", player_id]
+            for arg in args[1:]:
+                if ":" not in arg:
+                    continue  # ignoriert ungültige Argumente
+                key, value = arg.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                flag_map = {
+                    "name": "--name",
+                    "alias": "--alias",
+                    "gp": "--gp",
+                    "active": "--active",
+                    "birthday": "--birthday",
+                    "team": "--team",
+                    "discord": "--discord",
+                }
+                if key in flag_map:
+                    edit_args += [flag_map[key], value]
+
+            output = run_hcr2(edit_args)
+            await respond(message, output)
+            return
+
+        await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
         return
 
     if cmd == ".s":
@@ -108,6 +139,33 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    if cmd == ".x":
+        if not args:
+            await message.channel.send("Usage: .x <id> <score|-> [points]")
+            return
+
+        match_id = args[0]
+
+        # Nur .x <id> → aktueller Score anzeigen
+        if len(args) == 1:
+            output = run_hcr2(["matchscore", "list", "--match", match_id])
+            await respond(message, output)
+            return
+
+        score_arg = args[1]
+        points_arg = args[2] if len(args) > 2 else None
+
+        cmd_args = ["matchscore", "edit", match_id]
+
+        if score_arg != "-":
+            cmd_args += ["--score", score_arg]
+        if points_arg:
+            cmd_args += ["--points", points_arg]
+
+        output = run_hcr2(cmd_args)
+        await respond(message, output)
+        return
+
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
@@ -134,6 +192,7 @@ async def on_message(message):
             "**`Available Commands:`**\n"
             "`.s [season]      → Show average stats (default: current season)`\n"
             "`.p [id]          → List PLTE players or show details by ID`\n"
+            "`.p <id> key:value→ Edit player name alias gp active birthday team discord`\n"
             "`.P <name>        → Search for player with name expression`\n"
             "`.S               → List last 10 seasons`\n"
             "`.S <num> [div]   → Add/update season`\n"
@@ -142,8 +201,12 @@ async def on_message(message):
             "`.t               → List teamevents`\n"
             "`.t <id>          → Show teamevent with vehicles`\n"
             "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
-            "`    example:     .t add Best Event 2025/38 hc,ro`\n"
+            "`    example: .t add Best Event 2025/38 hc,ro`\n"
             "`.m [id]          → List matches or show details for match`\n"
+            "`.x <id> [<score> [points]] → List matches or show details for match`\n"
+            "`    example: .x 10 30000 220`\n"
+            "`    example: .x 10 30000`\n"
+            "`    example: .x 10 - 220`\n"
             "`.h               → Show this help`\n"
         )
         await message.channel.send(help_text)
