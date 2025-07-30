@@ -326,7 +326,7 @@ def grep_players(term):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, alias, garage_power, active, created_at, birthday, team, discord_name
+            SELECT id, name, alias, garage_power, active
             FROM players
             WHERE LOWER(name) LIKE ? OR LOWER(alias) LIKE ?
             ORDER BY name COLLATE NOCASE
@@ -337,14 +337,11 @@ def grep_players(term):
         print(f"❌ No players found matching '{term}'")
         return
 
-    print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
-    print("-" * 120)
-    for row in rows:
-        pid, name, alias, gp, active, created, birthday, team, discord_name = row
-        bday_fmt = format_birthday(birthday)
-        print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
-    print("-" * 120)
-
+    print(f"{'ID':<4} {'NAME':<20} {'Alias':<15} {'GP':>5} {'Act':>5}")
+    print("-" * 55)
+    for pid, name, alias, gp, active in rows:
+        print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>5} {str(bool(active))[:1]}")
+    print("-" * 55)
 
 def activate_player(pid):
     with sqlite3.connect(DB_PATH) as conn:

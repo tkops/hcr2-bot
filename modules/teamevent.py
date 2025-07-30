@@ -35,7 +35,9 @@ def print_help():
 
 def add_teamevent(args):
     if len(args) < 2:
-        print('Usage: teamevent add "<name>" <year>/W<week> [vehicle_ids] [track-count] [max-score]')
+        print('Usage:    .t add <name> <year>/W<week> [vehicle_ids] [track-count] [max-score-per-track]')
+        print('Exmample: .t add The Best Teamevent ever 2025/30 be,ro,sm,sc,hc 5 15000')
+        print('Exmample: .t add The Worst Teamevent ever 2025/31')
         return
 
     name = args[0]

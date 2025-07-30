@@ -99,7 +99,7 @@ def list_matches(season_number=None, all_seasons=False):
         cur = conn.cursor()
         if all_seasons:
             cur.execute("""
-                SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent
+                SELECT m.id, m.start, t.name, m.opponent
                 FROM match m
                 JOIN teamevent t ON m.teamevent_id = t.id
                 ORDER BY m.start DESC
@@ -109,7 +109,7 @@ def list_matches(season_number=None, all_seasons=False):
             if season_number is None:
                 season_number = get_current_season_number()
             cur.execute("""
-                SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent
+                SELECT m.id, m.start, t.name, m.opponent
                 FROM match m
                 JOIN teamevent t ON m.teamevent_id = t.id
                 WHERE m.season_number = ?
@@ -117,15 +117,13 @@ def list_matches(season_number=None, all_seasons=False):
             """, (season_number,))
             matches = cur.fetchall()
 
-    print(f"{'ID':<5} {'Start':<12} {'Season':<8} {'Opponent':<25} {'Event':<30} {'Ladys':>6} {'Opp.':>6}")
-    print("-" * 100)
-    for mid, start, season, opp, event_name, s_ladys, s_opp in matches:
-        print(f"{mid:>5}. {start:<12} S{season:<7} {opp:<25} {event_name:<30} {s_ladys:>6} {s_opp:>6}")
+    print(f"{'ID':<5} {'Start':<12} {'Event':<30} {'Opponent':<20}")
+    print("-" * 75)
+    for mid, start, event_name, opp in matches:
+        print(f"{mid:<5} {start:<12} {event_name:<30} {opp:<20}")
 
     if not all_seasons:
         print(f"\n📊 {len(matches)} matches in Season {season_number}")
-        warn_if_unusual_match_count(season_number, len(matches))
-
 
 def warn_if_unusual_match_count(season_number, actual_count):
     start = datetime(2021, 5, 1) + relativedelta(months=season_number - 1)

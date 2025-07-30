@@ -91,6 +91,12 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    if cmd == ".P" and args:
+        term = " ".join(args)
+        output = run_hcr2(["player", "grep", term])
+        await respond(message, output)
+        return
+
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
@@ -117,6 +123,7 @@ async def on_message(message):
             "**`Available Commands:`**\n"
             "`.s [season]      → Show average stats (default: current season)`\n"
             "`.p [id]          → List PLTE players or show details by ID`\n"
+            "`.P <name>        → Search for player with name expression`\n"
             "`.S               → List last 10 seasons`\n"
             "`.S <num> [div]   → Add/update season`\n"
             "`.a               → List aliases for PLTE team`\n"
