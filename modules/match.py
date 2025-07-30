@@ -20,6 +20,13 @@ def handle_command(cmd, args):
             print("Usage: match edit <id> <teamevent_id> <season_number> <start> <opponent> <score_ladys> <score_opponent>")
             return
         edit_match(args)
+
+    elif cmd == "show":
+        if len(args) != 1 or not args[0].isdigit():
+            print("Usage: match show <id>")
+            return
+        show_match(int(args[0]))
+
     elif cmd == "delete":
         if len(args) != 1:
             print("Usage: match delete <id>")
@@ -35,6 +42,7 @@ def print_help():
     print("\nAvailable commands:")
     print("  add <teamevent_id> <season_number> <start> <opponent> [<score_ladys> <score_opponent>]")
     print("  edit <id> <teamevent_id> <season_number> <start> <opponent> <score_ladys> <score_opponent>")
+    print("  show <id>")
     print("  list [season_number|all]")
     print("  delete <id>")
 
@@ -124,6 +132,32 @@ def list_matches(season_number=None, all_seasons=False):
 
     if not all_seasons:
         print(f"\n📊 {len(matches)} matches in Season {season_number}")
+
+
+def show_match(mid):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent
+            FROM match m
+            JOIN teamevent t ON m.teamevent_id = t.id
+            WHERE m.id = ?
+        """, (mid,))
+        row = cur.fetchone()
+
+    if not row:
+        print(f"❌ Match ID {mid} not found.")
+        return
+
+    match_id, start, season, opponent, event_name, score_ladys, score_opp = row
+    print(f"📅 Match {match_id}")
+    print(f"  Start:       {start}")
+    print(f"  Season:      {season}")
+    print(f"  Event:       {event_name}")
+    print(f"  Opponent:    {opponent}")
+    print(f"  Score Ladys: {score_ladys}")
+    print(f"  Score Opp.:  {score_opp}")
+
 
 def warn_if_unusual_match_count(season_number, actual_count):
     start = datetime(2021, 5, 1) + relativedelta(months=season_number - 1)

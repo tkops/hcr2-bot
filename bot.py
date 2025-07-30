@@ -97,6 +97,17 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    if cmd == ".m":
+        if not args:
+            output = run_hcr2(["match", "list"])
+        elif len(args) == 1 and args[0].isdigit():
+            output = run_hcr2(["match", "show", args[0]])
+        else:
+            await message.channel.send("⚠️ Invalid .m format. Use `.m` or `.m <id>`")
+            return
+        await respond(message, output)
+        return
+
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
@@ -132,7 +143,7 @@ async def on_message(message):
             "`.t <id>          → Show teamevent with vehicles`\n"
             "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
             "`    example:     .t add Best Event 2025/38 hc,ro`\n"
-            "`.m               → List matches`\n"
+            "`.m [id]          → List matches or show details for match`\n"
             "`.h               → Show this help`\n"
         )
         await message.channel.send(help_text)
