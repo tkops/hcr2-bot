@@ -193,7 +193,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    if cmd in [".v", ".version"]:
+    if cmd in [".version"]:
         await message.channel.send(f"📦 Current version: `{get_version()}`")
         return
 
@@ -221,31 +221,39 @@ async def on_message(message):
 
     if cmd == ".h":
         help_text = (
-            "**`Available Commands:`**\n"
-            "`.s [season]      → Show average stats (default: current season)`\n"
-            "`.p [id]          → List PLTE players or show details by ID`\n"
-            "`.p <id> key:value→ Edit player name alias gp active birthday team discord`\n"
-            "`.P <name>        → Search for player with name expression`\n"
-            "`.S               → List last 10 seasons`\n"
-            "`.S <num> [div]   → Add/update season`\n"
-            "`.a               → List aliases for PLTE team`\n"
-            "`.v               → List vehicles`\n"
-            "`.t               → List teamevents`\n"
-            "`.t <id>          → Show teamevent with vehicles`\n"
-            "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
-            "`    example: .t add Best Event 2025/38 hc,ro`\n"
-            "`.m [id]          → List matches or show details for match`\n"
-            "`.x <id> [<score> [points]] → Edit score for match`\n"
-            "`    example: .x 10 30000 220`\n"
-            "`    example: .x 10 30000`\n"
-            "`    example: .x 10 - 220`\n"
-            "`.c <id>          → Create Excel file for match and upload`\n"
-            "`.i <id>          → Import scores from Excel file on Nextcloud`\n"
-            "`.version or .v   → Show version`\n"
-            "`.h               → Show this help`\n"
+            "```text\n"
+            "Players & Stats:\n"
+            "  .p                  List active PLTE players\n"
+            "  .p <id>             Show player details by ID\n"
+            "  .p <id> k:v [...]   Edit player fields (name, alias, gp, ...)\n"
+            "  .P <term>           Search player by name or alias\n"
+            "  .s [season]         Show average stats (default: current season)\n\n"
+            "Matches & Scores:\n"
+            "  .m                  List recent matches\n"
+            "  .m <id>             Show match details\n"
+            "  .x <id>             Show scores for match\n"
+            "  .x <id> <score> [p] Set score and optional points\n"
+            "  .x <id> - <points>  Set only points (keep score)\n\n"
+            "Sheets (Excel):\n"
+            "  .c <id>             Create sheet and upload to Nextcloud\n"
+            "  .i <id>             Import scores from Excel sheet\n\n"
+            "Events & Seasons:\n"
+            "  .t                  List all teamevents\n"
+            "  .t <id>             Show teamevent and vehicles\n"
+            "  .t add <name> <kw>  Add teamevent (e.g. 2025/38)\n"
+            "  .S                  List last 10 seasons\n"
+            "  .S <num> [div]      Add or update season\n\n"
+            "Misc:\n"
+            "  .a                  Show alias map for PLTE players\n"
+            "  .v                  List all vehicles\n"
+            "  .h                  Show this help message\n"
+            "  .version            Show bot version\n"
+            "```"
         )
-    await message.channel.send(help_text)
-    return
+
+
+        await message.channel.send(help_text)
+        return
 
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]
