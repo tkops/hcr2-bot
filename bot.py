@@ -71,15 +71,6 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
-    elif cmd == ".c" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["sheet", "create", args[0]])
-        await respond(message, output or "❌ Error during sheet creation.")
-        return
-    
-    elif cmd == ".i" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["sheet", "import", args[0]])
-        await respond(message, output or "❌ Error during sheet import.")
-        return
 
     if cmd == ".p":
         if not args:
@@ -121,6 +112,30 @@ async def on_message(message):
             return
 
         await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
+        return
+
+    if cmd == ".c" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "create", args[0]])
+        if output:
+            lines = output.strip().splitlines()
+            link = lines[-1] if lines[-1].startswith("http") else None
+            desc = f"[Open file]({link})" if link else output
+            embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during sheet creation.")
+        return
+    
+    if cmd == ".i" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "import", args[0]])
+        if output:
+            lines = output.strip().splitlines()
+            link = next((l for l in lines if l.startswith("http")), None)
+            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            embed = discord.Embed(title="📥 Sheet import", description=desc, color=0x3498db)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during sheet import.")
         return
 
     if cmd == ".s":
@@ -220,15 +235,17 @@ async def on_message(message):
             "`.t add ...       → Add teamevent (name year/week vehicles)`\n"
             "`    example: .t add Best Event 2025/38 hc,ro`\n"
             "`.m [id]          → List matches or show details for match`\n"
-            "`.x <id> [<score> [points]] → List matches or show details for match`\n"
+            "`.x <id> [<score> [points]] → Edit score for match`\n"
             "`    example: .x 10 30000 220`\n"
             "`    example: .x 10 30000`\n"
             "`    example: .x 10 - 220`\n"
-            "`.v               → Show version`\n"
+            "`.c <id>          → Create Excel file for match and upload`\n"
+            "`.i <id>          → Import scores from Excel file on Nextcloud`\n"
+            "`.version or .v   → Show version`\n"
             "`.h               → Show this help`\n"
         )
-        await message.channel.send(help_text)
-        return
+    await message.channel.send(help_text)
+    return
 
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]

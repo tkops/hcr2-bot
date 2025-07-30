@@ -11,8 +11,10 @@ DB_PATH = "db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys/Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
+
 def sanitize_filename(s):
     return re.sub(r'[^A-Za-z0-9_]', '', s.replace(' ', '_'))
+
 
 def get_match_info(conn, match_id):
     c = conn.cursor()
@@ -24,6 +26,7 @@ def get_match_info(conn, match_id):
     """, (match_id,))
     return c.fetchone()
 
+
 def get_active_players(conn):
     c = conn.cursor()
     c.execute("""
@@ -32,6 +35,7 @@ def get_active_players(conn):
         ORDER BY name
     """)
     return c.fetchall()
+
 
 def upload_to_nextcloud(local_path, remote_path):
     import requests
@@ -56,6 +60,7 @@ def upload_to_nextcloud(local_path, remote_path):
         return url, True
     return None, False
 
+
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
     remote_path = f"Power-Ladys/Scores/S{season}/{filename}"
@@ -65,6 +70,7 @@ def download_from_nextcloud(season, filename, local_path):
         "curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url
     ]
     subprocess.run(curl_cmd, capture_output=True)
+
 
 def generate_excel(match, players, output_path):
     match_id, match_date, season, opponent, event = match
@@ -88,7 +94,7 @@ def generate_excel(match, players, output_path):
     wb.save(filepath)
 
     remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
-    url, uploaded = upload_to_nextcloud(filepath, remote_path)
+    upload_to_nextcloud(filepath, remote_path)
 
     if filepath.exists():
         try:
@@ -96,8 +102,9 @@ def generate_excel(match, players, output_path):
         except:
             pass
 
-    web_url = f"http://cloud-pl.de?path=/Scores/S{season}/{filename}"
-    return web_url, uploaded
+    web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
+    return f"[{filename}]({web_url})", True
+
 
 def import_excel_to_matchscore(match_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -153,15 +160,17 @@ def import_excel_to_matchscore(match_id):
                 except:
                     pass
 
-        web_url = f"http://cloud-pl.de?path=/Scores/S{season}/{filename}"
+        web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
-        print(f"[OK] {web_url} ({status}, {imported} imported, {changed} changed)")
+        print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed)")
+
 
 def print_help():
     print("Usage: python hcr2.py sheet <command> <match_id>")
     print("\nCommands:")
     print("  create <match_id>   Create Excel file and upload to Nextcloud")
     print("  import <match_id>   Import scores from Excel file on Nextcloud")
+
 
 def handle_command(command, args):
     if command == "create":
