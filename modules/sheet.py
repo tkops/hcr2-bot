@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import re
 from openpyxl import Workbook, load_workbook
 from pathlib import Path
 import sys
@@ -9,6 +10,9 @@ import subprocess
 DB_PATH = "db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys/Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
+
+def sanitize_filename(s):
+    return re.sub(r'[^A-Za-z0-9_]', '', s.replace(' ', '_'))
 
 def get_match_info(conn, match_id):
     c = conn.cursor()
@@ -64,7 +68,9 @@ def download_from_nextcloud(season, filename, local_path):
 
 def generate_excel(match, players, output_path):
     match_id, match_date, season, opponent, event = match
-    filename = f"{match_id}_{event.replace(' ', '_')}_{opponent.replace(' ', '_')}.xlsx"
+    safe_event = sanitize_filename(event)
+    safe_opponent = sanitize_filename(opponent)
+    filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
     folder = output_path / f"S{season}"
     filepath = folder / filename
 
@@ -92,6 +98,7 @@ def generate_excel(match, players, output_path):
 
     web_url = f"http://cloud-pl.de?path=/Scores/S{season}/{filename}"
     return web_url, uploaded
+
 def import_excel_to_matchscore(match_id):
     with sqlite3.connect(DB_PATH) as conn:
         match = get_match_info(conn, match_id)
@@ -100,7 +107,9 @@ def import_excel_to_matchscore(match_id):
             return
 
         match_id, _, season, opponent, event = match
-        filename = f"{match_id}_{event.replace(' ', '_')}_{opponent.replace(' ', '_')}.xlsx"
+        safe_event = sanitize_filename(event)
+        safe_opponent = sanitize_filename(opponent)
+        filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
         local_path = Path("tmp") / filename
         tsv_path = Path("tmp") / f"sheet_{match_id}.tsv"
 

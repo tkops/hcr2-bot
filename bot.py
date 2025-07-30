@@ -70,6 +70,17 @@ async def on_message(message):
     parts = content.split()
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
+
+    elif cmd == ".c" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "create", args[0]])
+        await respond(message, output or "❌ Error during sheet creation.")
+        return
+    
+    elif cmd == ".i" and len(args) == 1 and args[0].isdigit():
+        output = run_hcr2(["sheet", "import", args[0]])
+        await respond(message, output or "❌ Error during sheet import.")
+        return
+
     if cmd == ".p":
         if not args:
             output = run_hcr2(["player", "list-active", "--team", "PLTE"])
