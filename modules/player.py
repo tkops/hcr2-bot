@@ -364,12 +364,13 @@ def print_help():
     print("  activate <id>                 Set player active")
 
 
+
 def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
             SELECT id, name, alias, garage_power, active, birthday, team, discord_name,
-                   created_at, last_modified
+                   created_at, last_modified, active_modified, away_from, away_until
             FROM players
             WHERE id = ?
         """, (pid,))
@@ -380,7 +381,7 @@ def show_player(pid):
             return
 
         (id, name, alias, gp, active, birthday, team, discord,
-         created, last_modified) = row
+         created, last_modified, active_modified, away_from, away_until) = row
 
         print(f"{'ID':<15}: {id}")
         print(f"{'Name':<15}: {name}")
@@ -392,3 +393,7 @@ def show_player(pid):
         print(f"{'Discord':<15}: {discord or '-'}")
         print(f"{'Created':<15}: {created}")
         print(f"{'Last modified':<15}: {last_modified or '-'}")
+        print(f"{'Active modified':<15}: {active_modified or '-'}")
+        print(f"{'Away from':<15}: {away_from or '-'}")
+        print(f"{'Away until':<15}: {away_until or '-'}")
+
