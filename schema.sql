@@ -1,34 +1,23 @@
 CREATE TABLE IF NOT EXISTS vehicle (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            shortname TEXT NOT NULL UNIQUE
-        );
-
-CREATE TABLE IF NOT EXISTS matchscore (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            match_id INTEGER NOT NULL,
-            player_id INTEGER NOT NULL,
-            score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 75000),
-            points INTEGER NOT NULL DEFAULT 0 CHECK(points BETWEEN 0 AND 300),
-            UNIQUE (match_id, player_id),
-            FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
-            FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-        );
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    shortname TEXT NOT NULL UNIQUE
+);
 
 CREATE TABLE IF NOT EXISTS season (
-            number INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            start TEXT NOT NULL,
-            division TEXT NOT NULL
-        );
+    number INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    start TEXT NOT NULL,
+    division TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS teamevent_vehicle (
-            teamevent_id INTEGER NOT NULL,
-            vehicle_id INTEGER NOT NULL,
-            PRIMARY KEY (teamevent_id, vehicle_id),
-            FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
-            FOREIGN KEY (vehicle_id) REFERENCES vehicle(id) ON DELETE CASCADE
-        );
+    teamevent_id INTEGER NOT NULL,
+    vehicle_id INTEGER NOT NULL,
+    PRIMARY KEY (teamevent_id, vehicle_id),
+    FOREIGN KEY (teamevent_id) REFERENCES teamevent(id) ON DELETE CASCADE,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicle(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,13 +25,18 @@ CREATE TABLE IF NOT EXISTS players (
     alias TEXT,
     garage_power INTEGER DEFAULT 0,
     active BOOLEAN DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-, birthday TEXT, team TEXT, discord_name TEXT, country_code TEXT);
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    birthday TEXT,
+    team TEXT,
+    discord_name TEXT,
+    country_code TEXT,
+    last_modified TEXT
+);
 
 CREATE TABLE IF NOT EXISTS flags (
             alpha2 TEXT PRIMARY KEY,
             name TEXT NOT NULL
-        );
+);
 
 CREATE TABLE IF NOT EXISTS teamevent (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,3 +58,22 @@ CREATE TABLE IF NOT EXISTS match (
     FOREIGN KEY (season_number) REFERENCES season(number) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS matchscore (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 75000),
+    points INTEGER NOT NULL DEFAULT 0 CHECK(points BETWEEN 0 AND 300),
+    UNIQUE (match_id, player_id),
+    FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
+    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
+CREATE TRIGGER update_players_last_modified
+AFTER UPDATE ON players
+FOR EACH ROW
+BEGIN
+    UPDATE players
+    SET last_modified = CURRENT_TIMESTAMP
+    WHERE id = OLD.id;
+END;

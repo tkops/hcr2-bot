@@ -368,8 +368,10 @@ def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, alias, garage_power, active, birthday, team, discord_name, created_at
-            FROM players WHERE id = ?
+            SELECT id, name, alias, garage_power, active, birthday, team, discord_name,
+                   created_at, last_modified
+            FROM players
+            WHERE id = ?
         """, (pid,))
         row = cur.fetchone()
 
@@ -377,7 +379,9 @@ def show_player(pid):
             print(f"❌ Player ID {pid} not found.")
             return
 
-        id, name, alias, gp, active, birthday, team, discord, created = row
+        (id, name, alias, gp, active, birthday, team, discord,
+         created, last_modified) = row
+
         print(f"{'ID':<15}: {id}")
         print(f"{'Name':<15}: {name}")
         print(f"{'Alias':<15}: {alias or '-'}")
@@ -387,4 +391,4 @@ def show_player(pid):
         print(f"{'Team':<15}: {team or '-'}")
         print(f"{'Discord':<15}: {discord or '-'}")
         print(f"{'Created':<15}: {created}")
-
+        print(f"{'Last modified':<15}: {last_modified or '-'}")
