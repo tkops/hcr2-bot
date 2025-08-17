@@ -80,21 +80,20 @@ async def on_message(message):
         if args and re.fullmatch(r"[1-4]\s*w?", args[0], flags=re.IGNORECASE):
             dur = args[0]
 
-        # WICHTIG: was ist in players.discord_name gespeichert?
-        # Falls du nur den Username speicherst, nimm message.author.name
+        # Nutze genau das, was in players.discord_name steht (z. B. "user#1234")
         discord_key = str(message.author)
 
         call = ["player", "away", "--discord", discord_key]
         if dur:
             call += ["--dur", dur]
         output = run_hcr2(call)
-        await message.channel.send(output or "⚠️ No data found or error occurred.")
+        await respond(message, output)  # <-- als Codeblock
         return
 
     if cmd == ".back":
         discord_key = str(message.author)
         output = run_hcr2(["player", "back", "--discord", discord_key])
-        await message.channel.send(output or "⚠️ No data found or error occurred.")
+        await respond(message, output)  # <-- als Codeblock
         return
 
     # --- Player Commands ---

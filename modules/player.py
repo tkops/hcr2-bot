@@ -90,25 +90,54 @@ def handle_command(cmd, args):
             return
         grep_players(args[0])
 
-    # --- NEW: away/back driven by Discord name ---
+    # --- away/back: flexibel per id | name | alias | discord oder Flags ---
     elif cmd == "away":
-        dn = get_arg_value(args, "--discord")
-        dur = get_arg_value(args, "--dur")  # accepts 1w..4w (optional 'w')
-        if not dn:
-            print("Usage: player away --discord <discord_name> [--dur 1w|2w|3w|4w]")
-            return
-        away_set_by_discord(dn, dur)
+        # Flags weiterhin unterstützen
+        dur_flag = get_arg_value(args, "--dur")
+        pid_flag = get_arg_value(args, "--id")
+        pname_flag = get_arg_value(args, "--name")
+        dname_flag = get_arg_value(args, "--discord")
+
+        # Kurzform: player away <term> [1w|2w|3w|4w]
+        term = None
+        dur_pos = None
+        if args and not args[0].startswith("--"):
+            term = args[0]
+            if len(args) > 1 and not args[1].startswith("--"):
+                dur_pos = args[1]
+
+        # bevorzugt Flags, sonst Kurzform
+        dur = dur_flag or dur_pos
+        if pid_flag or pname_flag or dname_flag:
+            away_set_generic(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag, dur_token=dur)
+        elif term:
+            away_set_fuzzy(term, dur)
+        else:
+            print("Usage: player away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
 
     elif cmd == "back":
-        dn = get_arg_value(args, "--discord")
-        if not dn:
-            print("Usage: player back --discord <discord_name>")
-            return
-        away_clear_by_discord(dn)
+        # Flags
+        pid_flag = get_arg_value(args, "--id")
+        pname_flag = get_arg_value(args, "--name")
+        dname_flag = get_arg_value(args, "--discord")
+
+        # Kurzform: player back <term>
+        term = None
+        if args and not args[0].startswith("--"):
+            term = args[0]
+
+        if pid_flag or pname_flag or dname_flag:
+            away_clear_generic(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
+        elif term:
+            away_clear_fuzzy(term)
+        else:
+            print("Usage: player back <term> | (--id ID | --name NAME | --discord NAME)")
 
     else:
         print(f"❌ Unknown player command: {cmd}")
         print_help()
+
+# ----------------- helpers -----------------
 
 def get_arg_value(args, key):
     if key in args:
@@ -137,6 +166,8 @@ def format_birthday(stored):
 
 def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
+
+# ----------------- list/show -----------------
 
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
@@ -339,22 +370,23 @@ def grep_players(term):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, alias, garage_power, active
+            SELECT id, name, alias, garage_power, active, COALESCE(discord_name, '')
             FROM players
             WHERE LOWER(name) LIKE ? OR LOWER(alias) LIKE ?
+               OR LOWER(COALESCE(discord_name, '')) LIKE ?
             ORDER BY name COLLATE NOCASE
-        """, (pattern, pattern))
+        """, (pattern, pattern, pattern))
         rows = cur.fetchall()
 
     if not rows:
         print(f"❌ No players found matching '{term}'")
         return
 
-    print(f"{'ID':<4} {'NAME':<20} {'Alias':<15} {'GP':>5} {'Act':>5}")
-    print("-" * 55)
-    for pid, name, alias, gp, active in rows:
-        print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>5} {str(bool(active))[:1]}")
-    print("-" * 55)
+    print(f"{'ID':<4} {'NAME':<20} {'Alias':<15} {'Discord':<22} {'GP':>5} {'Act':>5}")
+    print("-" * 74)
+    for pid, name, alias, gp, active, discord in rows:
+        print(f"{pid:<4} {name:<20} {alias or '':<15} {discord or '':<22} {gp:>5} {str(bool(active))[:1]}")
+    print("-" * 74)
 
 def activate_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
@@ -371,10 +403,10 @@ def print_help():
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
     print("  show <id>                     Show player details")
-    print("  grep <term>                   Search players by name or alias (case-insensitive)")
+    print("  grep <term>                   Search players by name/alias/discord (case-insensitive)")
     print("  activate <id>                 Set player active")
-    print("  away --discord <name> [--dur 1w|2w|3w|4w]  Set away_from=now, away_until=now+dur")
-    print("  back --discord <name>                      Clear away_from/away_until")
+    print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
+    print("  back <term> | (--id ID | --name NAME | --discord NAME)")
 
 def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
@@ -408,22 +440,9 @@ def show_player(pid):
         print(f"{'Away from':<15}: {away_from or '-'}")
         print(f"{'Away until':<15}: {away_until or '-'}")
 
-# ------- NEW: away helpers -------
+# -------------- away/back core --------------
 
-def _find_player_id_by_discord(discord_name: str):
-    if not discord_name:
-        return None
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id FROM players
-            WHERE LOWER(discord_name) = LOWER(?)
-            LIMIT 1
-        """, (discord_name.strip(),))
-        row = cur.fetchone()
-        return row[0] if row else None
-
-def _parse_weeks_token(token: str) -> int:
+def _parse_weeks_token(token):
     """Accepts 1w..4w (optional 'w'); returns days 7..28. Default 1w."""
     if not token:
         return 7
@@ -432,15 +451,137 @@ def _parse_weeks_token(token: str) -> int:
         raise ValueError("Use 1w, 2w, 3w or 4w.")
     return int(m.group(1)) * 7
 
-def away_set_by_discord(discord_name: str, dur_token: str = None):
-    pid = _find_player_id_by_discord(discord_name)
-    if not pid:
-        print(f"❌ No player found for discord_name='{discord_name}'")
+def _resolve_player_id_exact(term):
+    """Versucht exakte Auflösung: ID, exakter Name/Alias/Discord (case-insensitive)."""
+    # ID?
+    if term.isdigit():
+        pid = int(term)
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM players WHERE id = ?", (pid,))
+            if cur.fetchone():
+                return pid
+            print(f"❌ No player with id {pid}")
+            return None
+
+    # exakte Felder (case-insensitive)
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM players
+            WHERE LOWER(name) = LOWER(?)
+               OR LOWER(alias) = LOWER(?)
+               OR LOWER(COALESCE(discord_name,'')) = LOWER(?)
+        """, (term, term, term))
+        rows = cur.fetchall()
+
+    if len(rows) == 1:
+        return rows[0][0]
+    elif len(rows) > 1:
+        _print_duplicates_for_term(term)
+        return None
+    else:
+        return None  # kein Treffer
+
+def _resolve_player_id_like(term):
+    """Fallback mit LIKE (wie grep, aber inkl. discord_name). Eindeutig? → ID, sonst Liste."""
+    pattern = f"%{term.lower()}%"
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, alias, garage_power, active, COALESCE(discord_name,'')
+            FROM players
+            WHERE LOWER(name) LIKE ?
+               OR LOWER(alias) LIKE ?
+               OR LOWER(COALESCE(discord_name,'')) LIKE ?
+            ORDER BY name COLLATE NOCASE
+        """, (pattern, pattern, pattern))
+        rows = cur.fetchall()
+
+    if len(rows) == 0:
+        print(f"❌ No players found matching '{term}'")
+        return None
+    if len(rows) == 1:
+        return rows[0][0]
+
+    print(f"⚠️  Term '{term}' is not unique. Matching players:")
+    print(f"{'ID':<4} {'NAME':<20} {'Alias':<15} {'Discord':<22} {'GP':>5} {'Act':>5}")
+    print("-" * 74)
+    for pid, name, alias, gp, active, discord in rows:
+        print(f"{pid:<4} {name:<20} {alias or '':<15} {discord or '':<22} {gp:>5} {str(bool(active))[:1]}")
+    print("-" * 74)
+    return None
+
+def _print_duplicates_for_term(term):
+    pattern = f"%{term.lower()}%"
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, alias, garage_power, active, COALESCE(discord_name,'')
+            FROM players
+            WHERE LOWER(name) LIKE ?
+               OR LOWER(alias) LIKE ?
+               OR LOWER(COALESCE(discord_name,'')) LIKE ?
+            ORDER BY name COLLATE NOCASE
+        """, (pattern, pattern, pattern))
+        rows = cur.fetchall()
+
+    if not rows:
+        print(f"❌ No players found matching '{term}'")
         return
+
+    print(f"⚠️  Multiple players match '{term}':")
+    print(f"{'ID':<4} {'NAME':<20} {'Alias':<15} {'Discord':<22} {'GP':>5} {'Act':>5}")
+    print("-" * 74)
+    for pid, name, alias, gp, active, discord in rows:
+        print(f"{pid:<4} {name:<20} {alias or '':<15} {discord or '':<22} {gp:>5} {str(bool(active))[:1]}")
+    print("-" * 74)
+
+def away_set_fuzzy(term, dur_token):
+    pid = _resolve_player_id_exact(term)
+    if pid is None:
+        pid = _resolve_player_id_like(term)
+        if pid is None:
+            return
+    away_set_generic(player_id=str(pid), player_name=None, discord_name=None, dur_token=dur_token)
+
+def away_clear_fuzzy(term):
+    pid = _resolve_player_id_exact(term)
+    if pid is None:
+        pid = _resolve_player_id_like(term)
+        if pid is None:
+            return
+    away_clear_generic(player_id=str(pid), player_name=None, discord_name=None)
+
+def _parse_weeks_token_or_default(token):
     try:
-        days = _parse_weeks_token(dur_token)
+        return _parse_weeks_token(token)
     except ValueError as e:
         print(f"❌ {e}")
+        return None
+
+def _fetch_player_brief(pid: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, alias, discord_name
+            FROM players
+            WHERE id = ?
+        """, (pid,))
+        return cur.fetchone()  # (id, name, alias, discord) oder None
+
+def away_set_generic(player_id=None, player_name=None, discord_name=None, dur_token=None):
+    # Falls per Flags übergeben wurde → auflösen
+    if player_id or player_name or discord_name:
+        pid = _resolve_player_id(player_id, player_name, discord_name)
+        if pid is None:
+            return
+    else:
+        print("❌ Provide one of --id, --name, --discord or use the short form with a term.")
+        return
+
+    days = _parse_weeks_token_or_default(dur_token)
+    if days is None:
         return
 
     now = datetime.now()
@@ -453,12 +594,21 @@ def away_set_by_discord(discord_name: str, dur_token: str = None):
                SET away_from = ?, away_until = ?
              WHERE id = ?
         """, (away_from, away_until, pid))
-    print(f"✅ Away set for player {pid}\nfrom: {away_from}\nuntil: {away_until}")
 
-def away_clear_by_discord(discord_name: str):
-    pid = _find_player_id_by_discord(discord_name)
-    if not pid:
-        print(f"❌ No player found for discord_name='{discord_name}'")
+    brief = _fetch_player_brief(pid)
+    if brief:
+        _id, name, alias, discord = brief
+        print(
+            "✅ Away set\n"
+            f"Player       : ID {_id} | Name: {name} | Alias: {alias or '-'} | Discord: {discord or '-'}\n"
+            f"From → Until : {away_from}  →  {away_until}"
+        )
+    else:
+        print(f"✅ Away set for player {pid}\nfrom: {away_from}\nuntil: {away_until}")
+
+def away_clear_generic(player_id=None, player_name=None, discord_name=None):
+    pid = _resolve_player_id(player_id, player_name, discord_name)
+    if pid is None:
         return
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
@@ -466,5 +616,57 @@ def away_clear_by_discord(discord_name: str):
                SET away_from = NULL, away_until = NULL
              WHERE id = ?
         """, (pid,))
-    print(f"✅ Back: absence cleared for player {pid}")
+
+    brief = _fetch_player_brief(pid)
+    if brief:
+        _id, name, alias, discord = brief
+        print(
+            "✅ Back: absence cleared\n"
+            f"Player: ID {_id} | {name} | alias: {alias or '-'} | discord: {discord or '-'}"
+        )
+    else:
+        print(f"✅ Back: absence cleared for player {pid}")
+
+def _resolve_player_id(player_id=None, player_name=None, discord_name=None):
+    """Resolve a single player id from explicit flags."""
+    if player_id:
+        try:
+            return int(player_id)
+        except ValueError:
+            print("❌ Invalid --id value")
+            return None
+
+    if discord_name:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id FROM players
+                WHERE LOWER(discord_name) = LOWER(?)
+            """, (discord_name.strip(),))
+            rows = cur.fetchall()
+        if not rows:
+            print(f"❌ No player found for discord_name='{discord_name}'")
+            return None
+        if len(rows) > 1:
+            _print_duplicates_for_term(discord_name)
+            return None
+        return rows[0][0]
+
+    if player_name:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id FROM players
+                WHERE LOWER(name) = LOWER(?)
+            """, (player_name.strip(),))
+            rows = cur.fetchall()
+        if not rows:
+            return _resolve_player_id_like(player_name)
+        if len(rows) > 1:
+            _print_duplicates_for_term(player_name)
+            return None
+        return rows[0][0]
+
+    print("❌ Provide one of --id, --name, or --discord")
+    return None
 
