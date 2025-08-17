@@ -3,13 +3,9 @@ import discord
 import re
 import sys
 import subprocess
-import sqlite3
-from pathlib import Path
-from datetime import datetime, timedelta
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version
 
-DB_PATH = "db/hcr2.db"
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
@@ -37,77 +33,6 @@ class MyClient(discord.Client):
         super().__init__(intents=intents)
 
 client = MyClient()
-
-# --- Helpers for DB/players ---
-def _find_player_id_by_discord(author):
-    """
-    Try to find a player.id for a given discord author
-    by matching discord_name column (case-insensitive).
-    """
-    candidates = []
-    try:
-        candidates.append(str(author))  # may include discriminator
-    except Exception:
-        pass
-    for v in (getattr(author, "name", None),
-              getattr(author, "display_name", None),
-              getattr(author, "global_name", None)):
-        if v and v not in candidates:
-            candidates.append(v)
-
-    norm = list({c.strip().lower() for c in candidates if c})
-    if not norm:
-        return None, "no-candidates"
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        placeholders = ",".join("?" * len(norm))
-        cur.execute(f"""
-            SELECT id, discord_name
-            FROM players
-            WHERE LOWER(discord_name) IN ({placeholders})
-        """, norm)
-        rows = cur.fetchall()
-
-    if not rows:
-        return None, "not-found"
-    if len(rows) > 1:
-        return None, "ambiguous"
-    return rows[0][0], None
-
-def set_player_away_by_author(author):
-    pid, err = _find_player_id_by_discord(author)
-    if pid is None:
-        if err == "ambiguous":
-            return "❌ Multiple players match your Discord. Ask a leader to disambiguate."
-        return "❌ Your Discord is not linked to a player (discord_name). Ask a leader to set it."
-
-    away_from = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    away_until = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            UPDATE players
-               SET away_from = ?, away_until = ?
-             WHERE id = ?
-        """, (away_from, away_until, pid))
-
-    return f"✅ Away set\nfrom: {away_from}\nuntil: {away_until}"
-
-def clear_player_away_by_author(author):
-    pid, err = _find_player_id_by_discord(author)
-    if pid is None:
-        if err == "ambiguous":
-            return "❌ Multiple players match your Discord. Ask a leader to disambiguate."
-        return "❌ Your Discord is not linked to a player (discord_name). Ask a leader to set it."
-
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            UPDATE players
-               SET away_from = NULL, away_until = NULL
-             WHERE id = ?
-        """, (pid,))
-    return "✅ Back: absence cleared."
 
 # --- Helpers for hcr2.py ---
 def run_hcr2(args):
@@ -149,15 +74,27 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
-    # --- Away / Back ---
+    # --- Away / Back (no DB access; delegate to hcr2.py) ---
     if cmd == ".away":
-        output = set_player_away_by_author(message.author)
-        await message.channel.send(output)
+        dur = None
+        if args and re.fullmatch(r"[1-4]\s*w?", args[0], flags=re.IGNORECASE):
+            dur = args[0]
+
+        # WICHTIG: was ist in players.discord_name gespeichert?
+        # Falls du nur den Username speicherst, nimm message.author.name
+        discord_key = str(message.author)
+
+        call = ["player", "away", "--discord", discord_key]
+        if dur:
+            call += ["--dur", dur]
+        output = run_hcr2(call)
+        await message.channel.send(output or "⚠️ No data found or error occurred.")
         return
 
     if cmd == ".back":
-        output = clear_player_away_by_author(message.author)
-        await message.channel.send(output)
+        discord_key = str(message.author)
+        output = run_hcr2(["player", "back", "--discord", discord_key])
+        await message.channel.send(output or "⚠️ No data found or error occurred.")
         return
 
     # --- Player Commands ---
@@ -320,7 +257,7 @@ async def on_message(message):
             " .p <id> k:v [...]   Edit player fields (name, alias, gp, ...)\n"
             " .P <term>           Search player by name or alias\n"
             " .s [season]         Show average stats (default: current season)\n"
-            " .away               Mark yourself absent for 1 week\n"
+            " .away [1w..4w]      Mark yourself absent for given weeks (default 1w)\n"
             " .back               Clear your absence\n"
             "```"
             "**Matches & Scores:**"
