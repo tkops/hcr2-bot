@@ -1,10 +1,15 @@
+#!/usr/bin/env python3
 import discord
 import re
 import sys
 import subprocess
+import sqlite3
+from pathlib import Path
+from datetime import datetime, timedelta
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version
 
+DB_PATH = "db/hcr2.db"
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
@@ -33,6 +38,78 @@ class MyClient(discord.Client):
 
 client = MyClient()
 
+# --- Helpers for DB/players ---
+def _find_player_id_by_discord(author):
+    """
+    Try to find a player.id for a given discord author
+    by matching discord_name column (case-insensitive).
+    """
+    candidates = []
+    try:
+        candidates.append(str(author))  # may include discriminator
+    except Exception:
+        pass
+    for v in (getattr(author, "name", None),
+              getattr(author, "display_name", None),
+              getattr(author, "global_name", None)):
+        if v and v not in candidates:
+            candidates.append(v)
+
+    norm = list({c.strip().lower() for c in candidates if c})
+    if not norm:
+        return None, "no-candidates"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        placeholders = ",".join("?" * len(norm))
+        cur.execute(f"""
+            SELECT id, discord_name
+            FROM players
+            WHERE LOWER(discord_name) IN ({placeholders})
+        """, norm)
+        rows = cur.fetchall()
+
+    if not rows:
+        return None, "not-found"
+    if len(rows) > 1:
+        return None, "ambiguous"
+    return rows[0][0], None
+
+def set_player_away_by_author(author):
+    pid, err = _find_player_id_by_discord(author)
+    if pid is None:
+        if err == "ambiguous":
+            return "❌ Multiple players match your Discord. Ask a leader to disambiguate."
+        return "❌ Your Discord is not linked to a player (discord_name). Ask a leader to set it."
+
+    away_from = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    away_until = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            UPDATE players
+               SET away_from = ?, away_until = ?
+             WHERE id = ?
+        """, (away_from, away_until, pid))
+
+    return f"✅ Away set\nfrom: {away_from}\nuntil: {away_until}"
+
+def clear_player_away_by_author(author):
+    pid, err = _find_player_id_by_discord(author)
+    if pid is None:
+        if err == "ambiguous":
+            return "❌ Multiple players match your Discord. Ask a leader to disambiguate."
+        return "❌ Your Discord is not linked to a player (discord_name). Ask a leader to set it."
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            UPDATE players
+               SET away_from = NULL, away_until = NULL
+             WHERE id = ?
+        """, (pid,))
+    return "✅ Back: absence cleared."
+
+# --- Helpers for hcr2.py ---
 def run_hcr2(args):
     try:
         result = subprocess.run(
@@ -56,6 +133,7 @@ def parse_teamevent_add_args(args):
             return [name] + rest
     return args
 
+# --- Message Handling ---
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -71,7 +149,18 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
+    # --- Away / Back ---
+    if cmd == ".away":
+        output = set_player_away_by_author(message.author)
+        await message.channel.send(output)
+        return
 
+    if cmd == ".back":
+        output = clear_player_away_by_author(message.author)
+        await message.channel.send(output)
+        return
+
+    # --- Player Commands ---
     if cmd == ".p":
         if not args:
             output = run_hcr2(["player", "list-active", "--team", "PLTE"])
@@ -80,18 +169,15 @@ async def on_message(message):
 
         if args[0].isdigit():
             player_id = args[0]
-
-            # Nur ID → show
             if len(args) == 1:
                 output = run_hcr2(["player", "show", player_id])
                 await respond(message, output)
                 return
 
-            # ID + weitere Argumente → edit
             edit_args = ["player", "edit", player_id]
             for arg in args[1:]:
                 if ":" not in arg:
-                    continue  # ignoriert ungültige Argumente
+                    continue
                 key, value = arg.split(":", 1)
                 key = key.strip().lower()
                 value = value.strip()
@@ -114,6 +200,7 @@ async def on_message(message):
         await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
         return
 
+    # --- Sheet create ---
     if cmd == ".c" and len(args) == 1 and args[0].isdigit():
         output = run_hcr2(["sheet", "create", args[0]])
         if output:
@@ -125,7 +212,8 @@ async def on_message(message):
         else:
             await message.channel.send("❌ Error during sheet creation.")
         return
-    
+
+    # --- Sheet import ---
     if cmd == ".i" and len(args) == 1 and args[0].isdigit():
         output = run_hcr2(["sheet", "import", args[0]])
         if output:
@@ -138,23 +226,27 @@ async def on_message(message):
             await message.channel.send("❌ Error during sheet import.")
         return
 
+    # --- Stats ---
     if cmd == ".s":
         full_args = ["stats", "avg"] + args
         output = run_hcr2(full_args)
         await respond(message, output)
         return
 
+    # --- Seasons ---
     if cmd == ".S":
         output = run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
         await respond(message, output)
         return
 
+    # --- Player search ---
     if cmd == ".P" and args:
         term = " ".join(args)
         output = run_hcr2(["player", "grep", term])
         await respond(message, output)
         return
 
+    # --- Matches ---
     if cmd == ".m":
         if not args:
             output = run_hcr2(["match", "list"])
@@ -166,14 +258,13 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    # --- Matchscores ---
     if cmd == ".x":
         if not args:
             await message.channel.send("Usage: .x <id> <score|-> [points]")
             return
 
         match_id = args[0]
-
-        # Nur .x <id> → aktueller Score anzeigen
         if len(args) == 1:
             output = run_hcr2(["matchscore", "list", "--match", match_id])
             await respond(message, output)
@@ -183,7 +274,6 @@ async def on_message(message):
         points_arg = args[2] if len(args) > 2 else None
 
         cmd_args = ["matchscore", "edit", match_id]
-
         if score_arg != "-":
             cmd_args += ["--score", score_arg]
         if points_arg:
@@ -193,11 +283,12 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    if cmd in [".version"]:
+    # --- Version ---
+    if cmd == ".version":
         await message.channel.send(f"📦 Current version: `{get_version()}`")
         return
 
-
+    # --- Teamevents ---
     if cmd == ".t":
         if not args:
             output = run_hcr2(["teamevent", "list"])
@@ -219,6 +310,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    # --- Help ---
     if cmd == ".h":
         help_text = (
             "**Players & Stats:**"
@@ -228,6 +320,8 @@ async def on_message(message):
             " .p <id> k:v [...]   Edit player fields (name, alias, gp, ...)\n"
             " .P <term>           Search player by name or alias\n"
             " .s [season]         Show average stats (default: current season)\n"
+            " .away               Mark yourself absent for 1 week\n"
+            " .back               Clear your absence\n"
             "```"
             "**Matches & Scores:**"
             "```"
@@ -258,11 +352,10 @@ async def on_message(message):
             " .version            Show bot version\n"
             "```"
         )
-
-
         await message.channel.send(help_text)
         return
 
+    # --- Aliases from COMMANDS map ---
     if cmd in COMMANDS:
         base_cmd = COMMANDS[cmd]
         if base_cmd is None:
@@ -271,6 +364,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    # --- Fallback: matchscore import lines ---
     lines = content.splitlines()
     failed_lines = []
 
@@ -290,6 +384,7 @@ async def on_message(message):
     elif lines and not failed_lines:
         await message.add_reaction("✅")
 
+# --- Respond helper ---
 async def respond(message, output):
     if not output:
         await message.channel.send("⚠️ No data found or error occurred.")
