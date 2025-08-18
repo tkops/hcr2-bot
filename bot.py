@@ -17,7 +17,11 @@ COMMANDS = {
 }
 
 # Befehle, die auch normale User ausführen dürfen
-PUBLIC_COMMANDS = [".away", ".back", ".help", ".vehicles", ".about", ".language", ".playstyle", ".birthday"]
+PUBLIC_COMMANDS = [
+    ".away", ".back", ".help",
+    ".vehicles", ".about", ".language", ".playstyle", ".birthday",
+    ".leader", ".acc"
+]
 
 # Check mode argument
 if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
@@ -106,6 +110,19 @@ async def on_message(message):
 
     # Standard: nur Leader dürfen Befehle ausführen, außer wenn in PUBLIC_COMMANDS
     if not leader and cmd not in PUBLIC_COMMANDS:
+        return
+
+    # --- Public: Leader-Liste ---
+    if cmd == ".leader":
+        output = run_hcr2(["player", "list-leader"])
+        await respond(message, output)
+        return
+
+    # --- Public: Eigene Account-Infos anzeigen ---
+    if cmd == ".acc":
+        discord_key = str(message.author)
+        output = run_hcr2(["player", "show", "--discord", discord_key])
+        await respond(message, output)
         return
 
     # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday ---
@@ -342,6 +359,8 @@ async def on_message(message):
             " .language <text>    Set your language (e.g., en,de)\n"
             " .playstyle <text>   Set your playstyle\n"
             " .birthday <DD.MM.>  Set your birthday without year. Just for congrats\n"
+            " .leader             Show all leaders\n"
+            " .acc                Show your own account info\n"
             "```"
             "**Matches & Scores:**"
             "```"
@@ -387,6 +406,8 @@ async def on_message(message):
             " .language <text>    Set your language (e.g., german, english)\n"
             " .playstyle <text>   Set your playstyle\n"
             " .birthday <DD.MM>   Set your birthday (no year)\n"
+            " .leader             Show all leaders\n"
+            " .acc                Show your account info\n"
             " .help               Show this help message\n"
             "```"
         )
