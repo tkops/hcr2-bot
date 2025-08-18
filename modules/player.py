@@ -31,14 +31,35 @@ def handle_command(cmd, args):
         show_players(active_only=True, sort_by=sort, team_filter=team)
 
     elif cmd == "show":
-        if len(args) != 1:
-            print("Usage: player show <id>")
+        # Flags unterstützen: --id / --name / --discord
+        pid_flag = get_arg_value(args, "--id")
+        pname_flag = get_arg_value(args, "--name")
+        dname_flag = get_arg_value(args, "--discord")
+
+        # Kurzform wie bisher: player show <id>
+        if len(args) == 1 and not args[0].startswith("--"):
+            try:
+                pid = int(args[0])
+                show_player(pid)
+            except ValueError:
+                print("❌ Invalid ID.")
             return
-        try:
-            pid = int(args[0])
-            show_player(pid)
-        except ValueError:
-            print("❌ Invalid ID.")
+
+        # Flags-Variante
+        selectors = [x for x in (pid_flag, pname_flag, dname_flag) if x is not None]
+        if len(selectors) == 0:
+            print("Usage: player show <id> | (--id ID | --name NAME | --discord NAME)")
+            return
+        if len(selectors) > 1:
+            print("❌ Provide exactly one of --id, --name or --discord.")
+            return
+
+        pid = _resolve_player_id(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
+        if pid is None:
+            print("❌ No matching player found.")
+            return
+
+        show_player(pid)
 
     elif cmd == "add":
         if len(args) < 1:
@@ -418,11 +439,12 @@ def print_help():
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
-    print("  show <id>                     Show player details")
+    print("  show <id> | (--id ID | --name NAME | --discord NAME)")  # <── diese Zeile ersetzt die alte
     print("  grep <term>                   Search players by name/alias/discord (case-insensitive)")
     print("  activate <id>                 Set player active")
     print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
     print("  back <term> | (--id ID | --name NAME | --discord NAME)")
+
 
 def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
