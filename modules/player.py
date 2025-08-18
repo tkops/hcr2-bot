@@ -190,7 +190,6 @@ def is_valid_team(team):
 
 # ----------------- list/show -----------------
 
-
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -235,7 +234,6 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
             print("-" * 130)
             print(f"🟢 Active players: {active_count}")
 
-
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
 
@@ -275,12 +273,16 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, di
 
 def edit_player(args):
     if len(args) < 1:
-        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false]")
+        print("Usage: player edit <id>"
+              " [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false]"
+              " [--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false]"
+              " [--about TEXT] [--vehicles TEXT] [--playstyle TEXT] [--language TEXT]")
         return
 
     pid = int(args[0])
     name = alias = birthday = team = discord = None
     gp = active = leader = None
+    about = vehicles = playstyle = language = None
 
     i = 1
     while i < len(args):
@@ -323,6 +325,18 @@ def edit_player(args):
         elif args[i] == "--discord":
             i += 1
             discord = args[i]
+        elif args[i] == "--about":
+            i += 1
+            about = args[i]
+        elif args[i] == "--vehicles":
+            i += 1
+            vehicles = args[i]
+        elif args[i] == "--playstyle":
+            i += 1
+            playstyle = args[i]
+        elif args[i] == "--language":
+            i += 1
+            language = args[i]
         i += 1
 
     if alias is not None:
@@ -380,6 +394,18 @@ def edit_player(args):
         if leader is not None:
             fields.append("is_leader = ?")
             values.append(1 if leader else 0)
+        if about is not None:
+            fields.append("about = ?")
+            values.append(about)
+        if vehicles is not None:
+            fields.append("preferred_vehicles = ?")
+            values.append(vehicles)
+        if playstyle is not None:
+            fields.append("playstyle = ?")
+            values.append(playstyle)
+        if language is not None:
+            fields.append("language = ?")
+            values.append(language)
 
         if not fields:
             print("⚠️  Nothing to update.")
@@ -436,15 +462,15 @@ def print_help():
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
-    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false ...")
+    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false "
+          "--about '...' --vehicles '...' --playstyle '...' --language 'en'")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
-    print("  show <id> | (--id ID | --name NAME | --discord NAME)")  # <── diese Zeile ersetzt die alte
+    print("  show <id> | (--id ID | --name NAME | --discord NAME)")
     print("  grep <term>                   Search players by name/alias/discord (case-insensitive)")
     print("  activate <id>                 Set player active")
     print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
     print("  back <term> | (--id ID | --name NAME | --discord NAME)")
-
 
 def show_player(pid):
     with sqlite3.connect(DB_PATH) as conn:
@@ -452,7 +478,8 @@ def show_player(pid):
         cur.execute("""
             SELECT id, name, alias, garage_power, active, birthday, team, discord_name,
                    created_at, last_modified, active_modified, away_from, away_until,
-                   COALESCE(is_leader, 0)
+                   COALESCE(is_leader, 0),
+                   about, preferred_vehicles, playstyle, language
             FROM players
             WHERE id = ?
         """, (pid,))
@@ -463,7 +490,8 @@ def show_player(pid):
             return
 
         (id, name, alias, gp, active, birthday, team, discord,
-         created, last_modified, active_modified, away_from, away_until, is_leader) = row
+         created, last_modified, active_modified, away_from, away_until, is_leader,
+         about, preferred_vehicles, playstyle, language) = row
 
         print(f"{'ID':<15}: {id}")
         print(f"{'Name':<15}: {name}")
@@ -479,6 +507,10 @@ def show_player(pid):
         print(f"{'Active modified':<15}: {active_modified or '-'}")
         print(f"{'Away from':<15}: {away_from or '-'}")
         print(f"{'Away until':<15}: {away_until or '-'}")
+        print(f"{'About':<15}: {about or '-'}")
+        print(f"{'Vehicles':<15}: {preferred_vehicles or '-'}")
+        print(f"{'Playstyle':<15}: {playstyle or '-'}")
+        print(f"{'Language':<15}: {language or '-'}")
 
 # -------------- away/back core --------------
 
