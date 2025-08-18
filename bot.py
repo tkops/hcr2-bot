@@ -20,7 +20,8 @@ COMMANDS = {
 PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday",
-    ".leader", ".acc"
+    ".leader", ".acc",
+    ".search", ".show"
 ]
 
 # Check mode argument
@@ -125,6 +126,25 @@ async def on_message(message):
         await respond(message, output)
         return
 
+    # --- Public: Suche wie `.P <term>` ---
+    if cmd == ".search":
+        if not args:
+            await message.channel.send("Usage: .search <term>")
+            return
+        term = " ".join(args)
+        output = run_hcr2(["player", "grep", term])
+        await respond(message, output)
+        return
+
+    # --- Public: Show wie `.p <id>` ---
+    if cmd == ".show":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .show <id>")
+            return
+        output = run_hcr2(["player", "show", args[0]])
+        await respond(message, output)
+        return
+
     # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday ---
     if cmd in (".vehicles", ".about", ".language", ".playstyle", ".birthday"):
         # Usage-Hinweise
@@ -142,9 +162,7 @@ async def on_message(message):
         discord_key = str(message.author)
 
         if cmd == ".birthday":
-            # Nimm nur das erste Argument (Datum), Rest verwerfen
             value = args[0].strip()
-            # Erlaube DD.MM oder DD.MM. mit 1-2-stellige Zahlen
             if not re.fullmatch(r"\d{1,2}\.\d{1,2}\.?", value):
                 await message.channel.send("⚠️ Invalid format. Use `DD.MM` or `DD.MM.` (no year).")
                 return
@@ -268,7 +286,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    # --- Player search ---
+    # --- Player search (Admin-Variante weiter nutzbar) ---
     if cmd == ".P" and args:
         term = " ".join(args)
         output = run_hcr2(["player", "grep", term])
@@ -361,6 +379,8 @@ async def on_message(message):
             " .birthday <DD.MM.>  Set your birthday without year. Just for congrats\n"
             " .leader             Show all leaders\n"
             " .acc                Show your own account info\n"
+            " .search <term>      Search players (same as .P)\n"
+            " .show <id>          Show player by ID (same as .p <id>)\n"
             "```"
             "**Matches & Scores:**"
             "```"
@@ -408,6 +428,8 @@ async def on_message(message):
             " .birthday <DD.MM>   Set your birthday (no year)\n"
             " .leader             Show all leaders\n"
             " .acc                Show your account info\n"
+            " .search <term>      Search players\n"
+            " .show <id>          Show player by ID\n"
             " .help               Show this help message\n"
             "```"
         )
