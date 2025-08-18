@@ -685,13 +685,45 @@ async def on_message(message):
     # --- Teamevents ---
     if cmd == ".t":
         if not args:
+            # Liste aller Events
             output = await run_hcr2(["teamevent", "list"])
-        elif len(args) == 1 and args[0].isdigit():
-            output = await run_hcr2(["teamevent", "show", args[0]])
-        else:
-            await message.channel.send("⚠️ Invalid .t format. Use `.t`, `.t <id>`")
+            await send_codeblock(message.channel, output)
             return
-        await send_codeblock(message.channel, output)
+    
+        if len(args) == 1 and args[0].isdigit():
+            # Details eines Events anzeigen
+            output = await run_hcr2(["teamevent", "show", args[0]])
+            await send_codeblock(message.channel, output)
+            return
+    
+        if args[0].isdigit() and len(args) > 1:
+            # Editieren: .t <id> key:value ...
+            event_id = args[0]
+            edit_args = ["teamevent", "edit", event_id]
+            flag_map = {
+                "name": "--name",
+                "tracks": "--tracks",
+                "vehicles": "--vehicles",
+                "score": "--score",
+            }
+            for arg in args[1:]:
+                if ":" not in arg:
+                    continue
+                key, value = arg.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                if key in flag_map:
+                    edit_args += [flag_map[key], value]
+    
+            output = await run_hcr2(edit_args)
+            await send_codeblock(message.channel, output)
+
+            show_out = await run_hcr2(["teamevent", "show", event_id])
+            await send_codeblock(message.channel, show_out)
+
+            return
+    
+        await message.channel.send("⚠️ Invalid .t format. Use `.t`, `.t <id>`, or `.t <id> key:value [...]`")
         return
 
     # --- Admin Sub-Helps (2 Spalten) ---
