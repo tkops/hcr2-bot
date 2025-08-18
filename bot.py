@@ -180,7 +180,7 @@ async def post_birthdays_now():
             await channel.send("⚠️ Profile output too long to display.")
 
 # Läuft jeden Tag um 12:00 Europe/Berlin
-@tasks.loop(time=time(hour=12, minute=20, tzinfo=ZoneInfo("Europe/Berlin")))
+@tasks.loop(time=time(hour=6, minute=30, tzinfo=ZoneInfo("Europe/Berlin")))
 async def birthday_job():
     await post_birthdays_now()
 
