@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import discord
 import re
 import sys
@@ -6,11 +7,18 @@ import subprocess
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version
 
-from discord.ext import tasks  # <-- für Scheduler
-from zoneinfo import ZoneInfo  # <-- Zeitzone Europe/Berlin
-from datetime import time      # <-- Uhrzeit für tasks.loop
+from discord.ext import tasks  # Scheduler
+from zoneinfo import ZoneInfo   # Zeitzone Europe/Berlin
+from datetime import time       # Uhrzeit für tasks.loop
+
+# ===================== Konstante Limits & Regexe =============================
 
 MAX_DISCORD_MSG_LEN = 1990
+
+# Vorcompilierte Regexe für Parsing aus hcr2-Ausgaben
+ID_LINE_RE = re.compile(r"^ID\s*:?\s*(\d+)", re.MULTILINE)
+NAME_LINE_RE = re.compile(r"^Name\s*:?\s*(.+)$", re.MULTILINE)
+BIRTHDAY_IDS_RE = re.compile(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", re.MULTILINE)
 
 COMMANDS = {
     ".a": ["stats", "alias"],
@@ -28,7 +36,8 @@ PUBLIC_COMMANDS = [
     ".search", ".show"
 ]
 
-# Check mode argument
+# ===================== Mode/Config laden ====================================
+
 if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
     print("Usage: python3 bot.py [dev|prod]")
     sys.exit(1)
@@ -37,7 +46,21 @@ mode = sys.argv[1]
 TOKEN = CONFIG[mode]["TOKEN"]
 ALLOWED_CHANNEL_ID = CONFIG[mode]["CHANNEL_IDS"]
 LEADER_ROLE_IDS = CONFIG[mode].get("LEADER_ROLE_IDS", [])
-BIRTHDAY_CHANNEL_ID = CONFIG[mode].get("BIRTHDAY_CHANNEL_ID")  # <-- neuer Kanal
+BIRTHDAY_CHANNEL_ID = CONFIG[mode].get("BIRTHDAY_CHANNEL_ID")
+
+def validate_config():
+    missing = []
+    if not TOKEN:
+        missing.append("TOKEN")
+    if not isinstance(ALLOWED_CHANNEL_ID, (list, tuple)) or not ALLOWED_CHANNEL_ID:
+        missing.append("CHANNEL_IDS")
+    if missing:
+        print(f"❌ Config error: missing/invalid {', '.join(missing)} for mode '{mode}'")
+        sys.exit(1)
+
+validate_config()
+
+# ===================== Discord Client =======================================
 
 class MyClient(discord.Client):
     def __init__(self):
@@ -49,8 +72,9 @@ class MyClient(discord.Client):
 
 client = MyClient()
 
-# --- Helpers for hcr2.py ---
-def run_hcr2(args):
+# ===================== hcr2 Helper (nicht-blockierend) ======================
+
+def run_hcr2_sync(args):
     try:
         result = subprocess.run(
             ["python3", "hcr2.py"] + args,
@@ -65,6 +89,12 @@ def run_hcr2(args):
         print(e.stderr)
         return None
 
+async def run_hcr2(args):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, run_hcr2_sync, args)
+
+# ===================== Utilities ============================================
+
 def parse_teamevent_add_args(args):
     for i, val in enumerate(args):
         if re.match(r"^\d{4}[/\-]\d{1,2}$", val):
@@ -76,45 +106,48 @@ def parse_teamevent_add_args(args):
 async def is_leader(member: discord.Member) -> bool:
     return any(r.id in LEADER_ROLE_IDS for r in member.roles)
 
-def get_self_player_id(discord_key: str):
+async def get_self_player_id(discord_key: str):
     """
     Holt die Player-ID anhand des Discord-Namens über 'player show --discord'.
     Erwartet eine Ausgabezeile wie: 'ID             : 89'
     """
-    out = run_hcr2(["player", "show", "--discord", discord_key])
+    out = await run_hcr2(["player", "show", "--discord", discord_key])
     if not out:
         return None
-    m = re.search(r"^ID\s*:?\s*(\d+)", out, flags=re.MULTILINE)
+    m = ID_LINE_RE.search(out)
     if not m:
         return None
     return m.group(1)
 
-def update_self_field(discord_key: str, flag: str, value: str):
-    pid = get_self_player_id(discord_key)
+async def update_self_field(discord_key: str, flag: str, value: str):
+    pid = await get_self_player_id(discord_key)
     if not pid:
         return "❌ Could not resolve your player. Make sure your Discord is set in the players table."
     args = ["player", "edit", str(pid), flag, value]
-    return run_hcr2(args)
+    return await run_hcr2(args)
 
-# ====== BIRTHDAY SCHEDULER ===================================================
+async def send_codeblock(channel, text: str):
+    if not text:
+        await channel.send("⚠️ No data found or error occurred.")
+    elif len(text) <= MAX_DISCORD_MSG_LEN:
+        await channel.send(f"```\n{text}```")
+    else:
+        await channel.send("⚠️ Output too long to display.")
+
+# ===================== Birthday Scheduler ===================================
 
 def _parse_birthday_ids(output: str):
     """
-    Erwartet eine Zeile 'BIRTHDAY_IDS: 12,45,78' im Output von 'player birthday --ids'.
+    Erwartet eine Zeile 'BIRTHDAY_IDS: 12,45,78' im Output von 'player birthday'.
     Gibt Liste von IDs (Strings) zurück.
     """
     if not output:
         return []
-
-    # 1) Bevorzugt die klare Maschinen-Zeile
-    m = re.search(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", output, flags=re.MULTILINE)
+    m = BIRTHDAY_IDS_RE.search(output)
     if m:
-        ids = [x.strip() for x in m.group(1).split(",") if x.strip().isdigit()]
-        return ids
-
-    # 2) Fallback: versuche jede Zahl am Zeilenanfang zu lesen (unwahrscheinlicher Notfall)
-    ids = re.findall(r"^\s*(\d+)\s*$", output, flags=re.MULTILINE)
-    return ids
+        return [x.strip() for x in m.group(1).split(",") if x.strip().isdigit()]
+    # Fallback: einzelne ID-Zeilen
+    return re.findall(r"^\s*(\d+)\s*$", output, flags=re.MULTILINE)
 
 def _parse_player_name_from_show(output: str):
     """
@@ -122,28 +155,34 @@ def _parse_player_name_from_show(output: str):
     """
     if not output:
         return None
-    m = re.search(r"^Name\s*:?\s*(.+)$", output, flags=re.MULTILINE)
+    m = NAME_LINE_RE.search(output)
     return m.group(1).strip() if m else None
+
+_bday_channel_cache = None
+def get_birthday_channel():
+    global _bday_channel_cache
+    if _bday_channel_cache is None and BIRTHDAY_CHANNEL_ID:
+        _bday_channel_cache = client.get_channel(BIRTHDAY_CHANNEL_ID)
+    return _bday_channel_cache
 
 async def post_birthdays_now():
     """
-    Holt IDs der Geburtstagskinder via 'player birthday --ids',
+    Holt IDs der Geburtstagskinder via 'player birthday',
     postet Glückwunsch + für jede ID ein 'player show <id>'.
     """
     if not BIRTHDAY_CHANNEL_ID:
         print("⚠️ BIRTHDAY_CHANNEL_ID not configured; skipping birthday post.")
         return
 
-    channel = client.get_channel(BIRTHDAY_CHANNEL_ID)
+    channel = get_birthday_channel()
     if channel is None:
         print(f"⚠️ Could not resolve channel id {BIRTHDAY_CHANNEL_ID}")
         return
 
-    out = run_hcr2(["player", "birthday"])
+    out = await run_hcr2(["player", "birthday"])
     ids = _parse_birthday_ids(out)
 
     if not ids:
-        # Optional: still & silent, oder Info loggen:
         print("ℹ️ No birthdays today.")
         return
 
@@ -151,7 +190,7 @@ async def post_birthdays_now():
     names = []
     profiles = []
     for pid in ids:
-        show_out = run_hcr2(["player", "show", pid])
+        show_out = await run_hcr2(["player", "show", pid])
         profiles.append(show_out or "")
         name = _parse_player_name_from_show(show_out) or f"ID {pid}"
         names.append(name)
@@ -174,24 +213,28 @@ async def post_birthdays_now():
     for p in profiles:
         if not p:
             continue
-        if len(p) <= MAX_DISCORD_MSG_LEN:
-            await channel.send(f"```\n{p}```")
-        else:
-            await channel.send("⚠️ Profile output too long to display.")
+        await send_codeblock(channel, p)
 
-# Läuft jeden Tag um 12:00 Europe/Berlin
-@tasks.loop(time=time(hour=6, minute=30, tzinfo=ZoneInfo("Europe/Berlin")))
+# Zeitplan-Konstanten
+SCHEDULE_TZ = ZoneInfo("Europe/Berlin")
+SCHEDULE_TIME = time(hour=6, minute=30, tzinfo=SCHEDULE_TZ)
+
+@tasks.loop(time=SCHEDULE_TIME)  # Läuft jeden Tag zur definierten Zeit
 async def birthday_job():
     await post_birthdays_now()
 
 @client.event
 async def on_ready():
-    # Startet den täglichen Job (nur einmal starten)
     if not birthday_job.is_running():
         birthday_job.start()
-    print(f"✅ Logged in as {client.user} — birthday job scheduled for 12:00 Europe/Berlin.")
+    hh = str(SCHEDULE_TIME.hour).zfill(2)
+    mm = str(SCHEDULE_TIME.minute).zfill(2)
+    print(f"✅ Logged in as {client.user} — birthday job scheduled for {hh}:{mm} Europe/Berlin.")
 
-# ====== MESSAGE HANDLING =====================================================
+# ===================== MESSAGE HANDLING =====================================
+
+def is_public(cmd: str) -> bool:
+    return cmd in PUBLIC_COMMANDS
 
 @client.event
 async def on_message(message):
@@ -210,21 +253,28 @@ async def on_message(message):
 
     leader = await is_leader(message.author)
 
-    # Standard: nur Leader dürfen Befehle ausführen, außer wenn in PUBLIC_COMMANDS
-    if not leader and cmd not in PUBLIC_COMMANDS:
+    # nur Leader, außer Public-Commands
+    if not leader and not is_public(cmd):
+        return
+
+    # ---- (Optional) Manuelles Triggern des Birthday-Posts (nur Leader) ----
+    if cmd == ".birthday-now":
+        if not leader:
+            return
+        await post_birthdays_now()
         return
 
     # --- Public: Leader-Liste ---
     if cmd == ".leader":
-        output = run_hcr2(["player", "list-leader"])
-        await respond(message, output)
+        output = await run_hcr2(["player", "list-leader"])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Public: Eigene Account-Infos anzeigen ---
     if cmd == ".acc":
         discord_key = str(message.author)
-        output = run_hcr2(["player", "show", "--discord", discord_key])
-        await respond(message, output)
+        output = await run_hcr2(["player", "show", "--discord", discord_key])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Public: Suche wie `.P <term>` ---
@@ -233,8 +283,8 @@ async def on_message(message):
             await message.channel.send("Usage: .search <term>")
             return
         term = " ".join(args)
-        output = run_hcr2(["player", "grep", term])
-        await respond(message, output)
+        output = await run_hcr2(["player", "grep", term])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Public: Show wie `.p <id>` ---
@@ -242,13 +292,12 @@ async def on_message(message):
         if len(args) != 1 or not args[0].isdigit():
             await message.channel.send("Usage: .show <id>")
             return
-        output = run_hcr2(["player", "show", args[0]])
-        await respond(message, output)
+        output = await run_hcr2(["player", "show", args[0]])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday ---
     if cmd in (".vehicles", ".about", ".language", ".playstyle", ".birthday"):
-        # Usage-Hinweise
         if not args:
             usage = {
                 ".vehicles": "Usage: .vehicles <text>",
@@ -278,8 +327,8 @@ async def on_message(message):
             }
             flag = flag_map[cmd]
 
-        output = update_self_field(discord_key, flag, value)
-        await respond(message, output)
+        output = await update_self_field(discord_key, flag, value)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Away / Back ---
@@ -292,28 +341,28 @@ async def on_message(message):
         call = ["player", "away", "--discord", discord_key]
         if dur:
             call += ["--dur", dur]
-        output = run_hcr2(call)
-        await respond(message, output)
+        output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
         return
 
     if cmd == ".back":
         discord_key = str(message.author)
-        output = run_hcr2(["player", "back", "--discord", discord_key])
-        await respond(message, output)
+        output = await run_hcr2(["player", "back", "--discord", discord_key])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Player Commands ---
     if cmd == ".p":
         if not args:
-            output = run_hcr2(["player", "list-active", "--team", "PLTE"])
-            await respond(message, output)
+            output = await run_hcr2(["player", "list-active", "--team", "PLTE"])
+            await send_codeblock(message.channel, output)
             return
 
         if args[0].isdigit():
             player_id = args[0]
             if len(args) == 1:
-                output = run_hcr2(["player", "show", player_id])
-                await respond(message, output)
+                output = await run_hcr2(["player", "show", player_id])
+                await send_codeblock(message.channel, output)
                 return
 
             edit_args = ["player", "edit", player_id]
@@ -341,8 +390,8 @@ async def on_message(message):
                 if key in flag_map:
                     edit_args += [flag_map[key], value]
 
-            output = run_hcr2(edit_args)
-            await respond(message, output)
+            output = await run_hcr2(edit_args)
+            await send_codeblock(message.channel, output)
             return
 
         await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
@@ -350,10 +399,10 @@ async def on_message(message):
 
     # --- Sheet create ---
     if cmd == ".c" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["sheet", "create", args[0]])
+        output = await run_hcr2(["sheet", "create", args[0]])
         if output:
             lines = output.strip().splitlines()
-            link = lines[-1] if lines and lines[-1].startsWith("http") else None
+            link = lines[-1] if lines and lines[-1].startswith("http") else None
             desc = f"[Open file]({link})" if link else output
             embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
             await message.channel.send(embed=embed)
@@ -363,7 +412,7 @@ async def on_message(message):
 
     # --- Sheet import ---
     if cmd == ".i" and len(args) == 1 and args[0].isdigit():
-        output = run_hcr2(["sheet", "import", args[0]])
+        output = await run_hcr2(["sheet", "import", args[0]])
         if output:
             lines = output.strip().splitlines()
             link = next((l for l in lines if l.startswith("http")), None)
@@ -377,33 +426,33 @@ async def on_message(message):
     # --- Stats ---
     if cmd == ".s":
         full_args = ["stats", "avg"] + args
-        output = run_hcr2(full_args)
-        await respond(message, output)
+        output = await run_hcr2(full_args)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Seasons ---
     if cmd == ".S":
-        output = run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
-        await respond(message, output)
+        output = await run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Player search (Admin-Variante weiter nutzbar) ---
     if cmd == ".P" and args:
         term = " ".join(args)
-        output = run_hcr2(["player", "grep", term])
-        await respond(message, output)
+        output = await run_hcr2(["player", "grep", term])
+        await send_codeblock(message.channel, output)
         return
 
     # --- Matches ---
     if cmd == ".m":
         if not args:
-            output = run_hcr2(["match", "list"])
+            output = await run_hcr2(["match", "list"])
         elif len(args) == 1 and args[0].isdigit():
-            output = run_hcr2(["match", "show", args[0]])
+            output = await run_hcr2(["match", "show", args[0]])
         else:
             await message.channel.send("⚠️ Invalid .m format. Use `.m` or `.m <id>`")
             return
-        await respond(message, output)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Matchscores ---
@@ -414,8 +463,8 @@ async def on_message(message):
 
         match_id = args[0]
         if len(args) == 1:
-            output = run_hcr2(["matchscore", "list", "--match", match_id])
-            await respond(message, output)
+            output = await run_hcr2(["matchscore", "list", "--match", match_id])
+            await send_codeblock(message.channel, output)
             return
 
         score_arg = args[1]
@@ -427,8 +476,8 @@ async def on_message(message):
         if points_arg:
             cmd_args += ["--points", points_arg]
 
-        output = run_hcr2(cmd_args)
-        await respond(message, output)
+        output = await run_hcr2(cmd_args)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Version ---
@@ -439,10 +488,10 @@ async def on_message(message):
     # --- Teamevents ---
     if cmd == ".t":
         if not args:
-            output = run_hcr2(["teamevent", "list"])
+            output = await run_hcr2(["teamevent", "list"])
         elif args[0].lower() == "add":
             parsed_args = parse_teamevent_add_args(args[1:])
-            output = run_hcr2(["teamevent", "add"] + parsed_args)
+            output = await run_hcr2(["teamevent", "add"] + parsed_args)
             if not output:
                 await message.channel.send("⚠️ No data found or error occurred.")
             elif output.strip().startswith("Teamevent "):
@@ -451,11 +500,11 @@ async def on_message(message):
                 await message.channel.send("```\n" + output + "```")
             return
         elif len(args) == 1 and args[0].isdigit():
-            output = run_hcr2(["teamevent", "show", args[0]])
+            output = await run_hcr2(["teamevent", "show", args[0]])
         else:
             await message.channel.send("⚠️ Invalid .t format. Use `.t`, `.t <id>`, or `.t add ...`")
             return
-        await respond(message, output)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Admin Help ---
@@ -542,8 +591,8 @@ async def on_message(message):
         base_cmd = COMMANDS[cmd]
         if base_cmd is None:
             return
-        output = run_hcr2(base_cmd + args)
-        await respond(message, output)
+        output = await run_hcr2(base_cmd + args)
+        await send_codeblock(message.channel, output)
         return
 
     # --- Fallback: matchscore import lines ---
@@ -556,7 +605,7 @@ async def on_message(message):
             failed_lines.append(line)
             continue
         match_id, player_name, score, points = map(str.strip, parts)
-        output = run_hcr2(["matchscore", "add", match_id, player_name, score, points])
+        output = await run_hcr2(["matchscore", "add", match_id, player_name, score, points])
         if not output or "✅" not in output:
             failed_lines.append(line)
 
@@ -566,14 +615,13 @@ async def on_message(message):
     elif lines and not failed_lines:
         await message.add_reaction("✅")
 
-# --- Respond helper ---
+# ===================== Respond helper (deprecated) ===========================
+
+# Belasse es für Kompatibilität – intern auf send_codeblock abgestellt, falls noch genutzt.
 async def respond(message, output):
-    if not output:
-        await message.channel.send("⚠️ No data found or error occurred.")
-    elif len(output) <= MAX_DISCORD_MSG_LEN:
-        await message.channel.send(f"```\n{output}```")
-    else:
-        await message.channel.send("⚠️ Output too long to display.")
+    await send_codeblock(message.channel, output)
+
+# ===================== Start =================================================
 
 client.run(TOKEN)
 
