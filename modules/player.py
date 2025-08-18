@@ -169,11 +169,13 @@ def is_valid_team(team):
 
 # ----------------- list/show -----------------
 
+
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         q = """
-            SELECT id, name, alias, garage_power, active, created_at, birthday, team, discord_name
+            SELECT id, name, alias, garage_power, active, created_at,
+                   birthday, team, discord_name, COALESCE(is_leader,0)
             FROM players
         """
         conditions = []
@@ -194,23 +196,24 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
         rows = cur.fetchall()
 
         if team_filter:
-            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15}")
-            print("-" * 60)
-            for i, (pid, name, alias, *_) in enumerate(rows, start=1):
-                print(f"{i:<3} {pid:<4} {name:<20} {alias or '-':<15}")
-            print("-" * 60)
+            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15} {'Leader':<6}")
+            print("-" * 70)
+            for i, (pid, name, alias, *_rest, is_leader) in enumerate(rows, start=1):
+                print(f"{i:<3} {pid:<4} {name:<20} {alias or '-':<15} {bool(is_leader):<6}")
+            print("-" * 70)
         else:
             cur.execute("SELECT COUNT(*) FROM players WHERE active = 1")
             active_count = cur.fetchone()[0]
 
-            print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
-            print("-" * 120)
+            print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Lead':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
+            print("-" * 130)
             for row in rows:
-                pid, name, alias, gp, active, created, birthday, team, discord_name = row
+                pid, name, alias, gp, active, created, birthday, team, discord_name, is_leader = row
                 bday_fmt = format_birthday(birthday)
-                print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
-            print("-" * 120)
+                print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {str(bool(is_leader)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
+            print("-" * 130)
             print(f"🟢 Active players: {active_count}")
+
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
@@ -251,12 +254,12 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, di
 
 def edit_player(args):
     if len(args) < 1:
-        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord DISCORD]")
+        print("Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false]")
         return
 
     pid = int(args[0])
     name = alias = birthday = team = discord = None
-    gp = active = None
+    gp = active = leader = None
 
     i = 1
     while i < len(args):
@@ -271,7 +274,18 @@ def edit_player(args):
             gp = int(args[i])
         elif args[i] == "--active":
             i += 1
-            active = args[i].lower() == "true"
+            val = args[i].lower()
+            if val not in ("true", "false", "1", "0"):
+                print("❌ --active expects true|false")
+                return
+            active = (val in ("true", "1"))
+        elif args[i] == "--leader":
+            i += 1
+            val = args[i].lower()
+            if val not in ("true", "false", "1", "0"):
+                print("❌ --leader expects true|false")
+                return
+            leader = (val in ("true", "1"))
         elif args[i] == "--birthday":
             i += 1
             raw = args[i]
@@ -309,7 +323,6 @@ def edit_player(args):
             if not target_alias:
                 print("❌ Alias is required for team PLTE.")
                 return
-
             cur.execute("""
                 SELECT id, alias FROM players
                 WHERE team = 'PLTE' AND id != ?
@@ -343,6 +356,9 @@ def edit_player(args):
         if discord is not None:
             fields.append("discord_name = ?")
             values.append(discord)
+        if leader is not None:
+            fields.append("is_leader = ?")
+            values.append(1 if leader else 0)
 
         if not fields:
             print("⚠️  Nothing to update.")
@@ -399,7 +415,7 @@ def print_help():
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
-    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 ...")
+    print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false ...")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
     print("  show <id>                     Show player details")
@@ -413,7 +429,8 @@ def show_player(pid):
         cur = conn.cursor()
         cur.execute("""
             SELECT id, name, alias, garage_power, active, birthday, team, discord_name,
-                   created_at, last_modified, active_modified, away_from, away_until
+                   created_at, last_modified, active_modified, away_from, away_until,
+                   COALESCE(is_leader, 0)
             FROM players
             WHERE id = ?
         """, (pid,))
@@ -424,13 +441,14 @@ def show_player(pid):
             return
 
         (id, name, alias, gp, active, birthday, team, discord,
-         created, last_modified, active_modified, away_from, away_until) = row
+         created, last_modified, active_modified, away_from, away_until, is_leader) = row
 
         print(f"{'ID':<15}: {id}")
         print(f"{'Name':<15}: {name}")
         print(f"{'Alias':<15}: {alias or '-'}")
         print(f"{'Garage Power':<15}: {gp}")
         print(f"{'Active':<15}: {bool(active)}")
+        print(f"{'Leader':<15}: {bool(is_leader)}")
         print(f"{'Birthday':<15}: {format_birthday(birthday)}")
         print(f"{'Team':<15}: {team or '-'}")
         print(f"{'Discord':<15}: {discord or '-'}")

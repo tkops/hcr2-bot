@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS players(
     last_modified TEXT,
     away_from TEXT,
     away_until TEXT,
-    active_modified TEXT
+    active_modified TEXT,
+    is_leader BOOLEAN DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS season(
