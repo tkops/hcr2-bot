@@ -187,6 +187,7 @@ async def on_message(message):
                     "playstyle": "--playstyle",
                     "language": "--language",
                     "leader": "--leader",
+                    "emoji": "--emoji",
                 }
                 if key in flag_map:
                     edit_args += [flag_map[key], value]

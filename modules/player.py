@@ -285,13 +285,13 @@ def edit_player(args):
         print("Usage: player edit <id>"
               " [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false]"
               " [--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false]"
-              " [--about TEXT] [--vehicles TEXT] [--playstyle TEXT] [--language TEXT]")
+              " [--about TEXT] [--vehicles TEXT] [--playstyle TEXT] [--language TEXT] [--emoji EMOJI]")
         return
 
     pid = int(args[0])
     name = alias = birthday = team = discord = None
     gp = active = leader = None
-    about = vehicles = playstyle = language = None
+    about = vehicles = playstyle = language = emoji = None
 
     i = 1
     while i < len(args):
@@ -346,6 +346,9 @@ def edit_player(args):
         elif args[i] == "--language":
             i += 1
             language = args[i]
+        elif args[i] == "--emoji":
+            i += 1
+            emoji = args[i]
         i += 1
 
     if alias is not None:
@@ -415,6 +418,9 @@ def edit_player(args):
         if language is not None:
             fields.append("language = ?")
             values.append(language)
+        if emoji is not None:
+            fields.append("emoji = ?")
+            values.append(emoji)
 
         if not fields:
             print("⚠️  Nothing to update.")
@@ -472,7 +478,7 @@ def print_help():
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false "
-          "--about '...' --vehicles '...' --playstyle '...' --language 'en'")
+          "--about '...' --vehicles '...' --playstyle '...' --language 'en' --emoji '🚗'")
     print("  deactivate <id>               Set player inactive")
     print("  delete <id>                   Remove player")
     print("  show <id> | (--id ID | --name NAME | --discord NAME)")
@@ -488,7 +494,7 @@ def show_player(pid):
             SELECT id, name, alias, garage_power, active, birthday, team, discord_name,
                    created_at, last_modified, active_modified, away_from, away_until,
                    COALESCE(is_leader, 0),
-                   about, preferred_vehicles, playstyle, language
+                   about, preferred_vehicles, playstyle, language, emoji
             FROM players
             WHERE id = ?
         """, (pid,))
@@ -500,7 +506,7 @@ def show_player(pid):
 
         (id, name, alias, gp, active, birthday, team, discord,
          created, last_modified, active_modified, away_from, away_until, is_leader,
-         about, preferred_vehicles, playstyle, language) = row
+         about, preferred_vehicles, playstyle, language, emoji) = row
 
         print(f"{'ID':<15}: {id}")
         print(f"{'Name':<15}: {name}")
@@ -521,6 +527,7 @@ def show_player(pid):
         _print_wrapped("Vehicles", preferred_vehicles)
         _print_wrapped("Playstyle", playstyle)
         _print_wrapped("Language", language)
+        _print_wrapped("Emoji", emoji)
 
 # -------------- away/back core --------------
 
