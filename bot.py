@@ -17,7 +17,7 @@ COMMANDS = {
 }
 
 # Befehle, die auch normale User ausführen dürfen
-PUBLIC_COMMANDS = [".away", ".back", ".help"]
+PUBLIC_COMMANDS = [".away", ".back", ".help", ".vehicles", ".about", ".language", ".playstyle"]
 
 # Check mode argument
 if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
@@ -66,6 +66,26 @@ def parse_teamevent_add_args(args):
 async def is_leader(member: discord.Member) -> bool:
     return any(r.id in LEADER_ROLE_IDS for r in member.roles)
 
+def get_self_player_id(discord_key: str):
+    """
+    Holt die Player-ID anhand des Discord-Namens über 'player show --discord'.
+    Erwartet eine Ausgabezeile wie: 'ID             : 89'
+    """
+    out = run_hcr2(["player", "show", "--discord", discord_key])
+    if not out:
+        return None
+    m = re.search(r"^ID\s*:?\s*(\d+)", out, flags=re.MULTILINE)
+    if not m:
+        return None
+    return m.group(1)
+
+def update_self_field(discord_key: str, flag: str, value: str):
+    pid = get_self_player_id(discord_key)
+    if not pid:
+        return "❌ Could not resolve your player. Make sure your Discord is set in the players table."
+    args = ["player", "edit", str(pid), flag, value]
+    return run_hcr2(args)
+
 # --- Message Handling ---
 @client.event
 async def on_message(message):
@@ -86,6 +106,31 @@ async def on_message(message):
 
     # Standard: nur Leader dürfen Befehle ausführen, außer wenn in PUBLIC_COMMANDS
     if not leader and cmd not in PUBLIC_COMMANDS:
+        return
+
+    # --- Self profile updates (public): .vehicles / .about / .language / .playstyle ---
+    if cmd in (".vehicles", ".about", ".language", ".playstyle"):
+        if not args:
+            usage = {
+                ".vehicles": "Usage: .vehicles <text>",
+                ".about": "Usage: .about <text>",
+                ".language": "Usage: .language <code or text>",
+                ".playstyle": "Usage: .playstyle <text>",
+            }[cmd]
+            await message.channel.send(usage)
+            return
+
+        value = " ".join(args).strip()
+        discord_key = str(message.author)
+
+        flag_map = {
+            ".vehicles": "--vehicles",
+            ".about": "--about",
+            ".language": "--language",
+            ".playstyle": "--playstyle",
+        }
+        output = update_self_field(discord_key, flag_map[cmd], value)
+        await respond(message, output)
         return
 
     # --- Away / Back ---
@@ -137,6 +182,11 @@ async def on_message(message):
                     "birthday": "--birthday",
                     "team": "--team",
                     "discord": "--discord",
+                    "about": "--about",
+                    "vehicles": "--vehicles",
+                    "playstyle": "--playstyle",
+                    "language": "--language",
+                    "leader": "--leader",
                 }
                 if key in flag_map:
                     edit_args += [flag_map[key], value]
@@ -153,7 +203,7 @@ async def on_message(message):
         output = run_hcr2(["sheet", "create", args[0]])
         if output:
             lines = output.strip().splitlines()
-            link = lines[-1] if lines[-1].startswith("http") else None
+            link = lines[-1] if lines and lines[-1].startswith("http") else None
             desc = f"[Open file]({link})" if link else output
             embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
             await message.channel.send(embed=embed)
@@ -270,6 +320,10 @@ async def on_message(message):
             " .s [season]         Show average stats (default: current season)\n"
             " .away [1w..4w]      Mark yourself absent for given weeks (default 1w)\n"
             " .back               Clear your absence\n"
+            " .vehicles <text>    Set your preferred vehicles\n"
+            " .about <text>       Set your about/bio text\n"
+            " .language <text>    Set your language (e.g., en,de)\n"
+            " .playstyle <text>   Set your playstyle\n"
             "```"
             "**Matches & Scores:**"
             "```"
@@ -308,9 +362,13 @@ async def on_message(message):
         help_text = (
             "**Public Commands:**"
             "```"
-            " .away [1w..4w]   Mark yourself absent for given weeks (default 1w)\n"
-            " .back            Clear your absence\n"
-            " .help            Show this help message\n"
+            " .away [1w..4w]      Mark yourself absent for given weeks (default 1w)\n"
+            " .back               Clear your absence\n"
+            " .vehicles <text>    Set your preferred vehicles\n"
+            " .about <text>       Set your about/bio text\n"
+            " .language <text>    Set your language (e.g., en,de)\n"
+            " .playstyle <text>   Set your playstyle\n"
+            " .help               Show this help message\n"
             "```"
         )
         await message.channel.send(help_text)

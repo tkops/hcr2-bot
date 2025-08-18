@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS players(
     about TEXT,
     preferred_vehicles TEXT,
     playstyle TEXT,
-    language TEXT
+    language TEXT,
+    emoji TEXT
 );
 
 CREATE TABLE IF NOT EXISTS season(
