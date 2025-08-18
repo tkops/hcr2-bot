@@ -16,6 +16,9 @@ COMMANDS = {
     ".h": None,
 }
 
+# Befehle, die auch normale User ausführen dürfen
+PUBLIC_COMMANDS = [".away", ".back", ".help"]
+
 # Check mode argument
 if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
     print("Usage: python3 bot.py [dev|prod]")
@@ -24,12 +27,14 @@ if len(sys.argv) != 2 or sys.argv[1] not in CONFIG:
 mode = sys.argv[1]
 TOKEN = CONFIG[mode]["TOKEN"]
 ALLOWED_CHANNEL_ID = CONFIG[mode]["CHANNEL_IDS"]
+LEADER_ROLE_IDS = CONFIG[mode].get("LEADER_ROLE_IDS", [])
 
 class MyClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.messages = True
         intents.message_content = True
+        intents.guilds = True
         super().__init__(intents=intents)
 
 client = MyClient()
@@ -58,6 +63,9 @@ def parse_teamevent_add_args(args):
             return [name] + rest
     return args
 
+async def is_leader(member: discord.Member) -> bool:
+    return any(r.id in LEADER_ROLE_IDS for r in member.roles)
+
 # --- Message Handling ---
 @client.event
 async def on_message(message):
@@ -74,26 +82,30 @@ async def on_message(message):
     cmd = parts[0]
     args = parts[1:] if len(parts) > 0 else []
 
-    # --- Away / Back (no DB access; delegate to hcr2.py) ---
+    leader = await is_leader(message.author)
+
+    # Standard: nur Leader dürfen Befehle ausführen, außer wenn in PUBLIC_COMMANDS
+    if not leader and cmd not in PUBLIC_COMMANDS:
+        return
+
+    # --- Away / Back ---
     if cmd == ".away":
         dur = None
         if args and re.fullmatch(r"[1-4]\s*w?", args[0], flags=re.IGNORECASE):
             dur = args[0]
 
-        # Nutze genau das, was in players.discord_name steht (z. B. "user#1234")
         discord_key = str(message.author)
-
         call = ["player", "away", "--discord", discord_key]
         if dur:
             call += ["--dur", dur]
         output = run_hcr2(call)
-        await respond(message, output)  # <-- als Codeblock
+        await respond(message, output)
         return
 
     if cmd == ".back":
         discord_key = str(message.author)
         output = run_hcr2(["player", "back", "--discord", discord_key])
-        await respond(message, output)  # <-- als Codeblock
+        await respond(message, output)
         return
 
     # --- Player Commands ---
@@ -246,7 +258,7 @@ async def on_message(message):
         await respond(message, output)
         return
 
-    # --- Help ---
+    # --- Admin Help ---
     if cmd == ".h":
         help_text = (
             "**Players & Stats:**"
@@ -286,6 +298,19 @@ async def on_message(message):
             " .v                  List all vehicles\n"
             " .h                  Show this help message\n"
             " .version            Show bot version\n"
+            "```"
+        )
+        await message.channel.send(help_text)
+        return
+
+    # --- User Help ---
+    if cmd == ".help":
+        help_text = (
+            "**Public Commands:**"
+            "```"
+            " .away [1w..4w]   Mark yourself absent for given weeks (default 1w)\n"
+            " .back            Clear your absence\n"
+            " .help            Show this help message\n"
             "```"
         )
         await message.channel.send(help_text)
