@@ -322,6 +322,10 @@ HELP_MH = help_block(
     rows=[
         (".m",                   "List last 10 matches."),
         (".m <id>",              "Show match details."),
+        (".m <id> key:value",    "Edit match.\nkeys: teamevent, season, start, opponent, score, scoreopp"),
+        (".m+ <season> <event> <YYYY-MM-DD> <opponent>", "Add match."),
+        (".m- <match>" ,         "Delete match."),
+        (".M <match>",           "Show match details."),
     ],
     total_width=65,
     left_col=22,
@@ -624,13 +628,107 @@ async def on_message(message):
         return
 
     # --- Matches ---
+    if cmd == ".m+":
+        tokens = content.split()[1:]  # alles nach dem .m+
+
+        if len(tokens) < 4:
+            await message.channel.send("Usage: .m+ <seasonid> <teameventid> <YYYY-MM-DD> <opponent>")
+            return
+
+        season_str, teamevent_str, date_str = tokens[0], tokens[1], tokens[2]
+        opponent = " ".join(tokens[3:]).strip()
+
+        if not season_str.isdigit() or not teamevent_str.isdigit():
+            await message.channel.send("⚠️ seasonid und teameventid müssen Zahlen sein.")
+            return
+
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+            await message.channel.send("⚠️ Datum bitte als YYYY-MM-DD angeben.")
+            return
+
+        if not opponent:
+            await message.channel.send("⚠️ Opponent fehlt.")
+            return
+
+        args = [
+            "match", "add",
+            "--teamevent", teamevent_str,
+            "--season", season_str,
+            "--start", date_str,
+            "--opponent", opponent,
+        ]
+        output = await run_hcr2(args)
+        await send_codeblock(message.channel, output)
+        return
+
+    if cmd == ".m-":
+        tokens = content.split()[1:]  # alles nach dem .m-
+
+        if len(tokens) != 1 or not tokens[0].isdigit():
+            await message.channel.send("Usage: .m- <matchid>")
+            return
+
+        match_id = tokens[0]
+
+        args = ["match", "delete", match_id]
+        output = await run_hcr2(args)
+        await send_codeblock(message.channel, output)
+        return
+
+
     if cmd == ".m":
         if not args:
+            # Liste (Standard)
             output = await run_hcr2(["match", "list"])
-        elif len(args) == 1 and args[0].isdigit():
+            await send_codeblock(message.channel, output)
+            return
+
+        # .m <id> [...]  -> list ODER edit
+        if args[0].isdigit():
+            mid = args[0]
+
+            # Nur ID -> list
+            if len(args) == 1:
+                output = await run_hcr2(["match", "list", mid])
+                await send_codeblock(message.channel, output)
+                return
+
+            # Edit: .m <id> key:value [...]
+            flag_map = {
+                "start":     "--start",
+                "season":    "--season",
+                "teamevent": "--teamevent",
+                "opponent":  "--opponent",
+                "score":     "--score",
+                "scoreopp":  "--scoreopp",
+            }
+            edit_args = ["match", "edit", "--id", mid]
+            for arg in args[1:]:
+                if ":" not in arg:
+                    continue
+                key, value = arg.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                if key in flag_map and value:
+                    edit_args += [flag_map[key], value]
+
+            output = await run_hcr2(edit_args)
+            await send_codeblock(message.channel, output)
+
+            # Danach aktuellen Datensatz zeigen
+            show_out = await run_hcr2(["match", "show", mid])
+            await send_codeblock(message.channel, show_out)
+            return
+
+        await message.channel.send("⚠️ Invalid .m format. Use `.m`, `.m <id>`, or `.m <id> key:value [...]`")
+        return
+
+
+    if cmd == ".M":
+        if len(args) == 1 and args[0].isdigit():
             output = await run_hcr2(["match", "show", args[0]])
         else:
-            await message.channel.send("⚠️ Invalid .m format. Use `.m` or `.m <id>`")
+            await message.channel.send("⚠️ Invalid .M format. Use `.M <id>`")
             return
         await send_codeblock(message.channel, output)
         return
