@@ -4,6 +4,7 @@ import discord
 import re
 import sys
 import subprocess
+import shlex  # <-- für .p++ mit Anführungszeichen
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version
 
@@ -19,6 +20,7 @@ MAX_DISCORD_MSG_LEN = 1990
 ID_LINE_RE = re.compile(r"^ID\s*:?\s*(\d+)", re.MULTILINE)
 NAME_LINE_RE = re.compile(r"^Name\s*:?\s*(.+)$", re.MULTILINE)
 BIRTHDAY_IDS_RE = re.compile(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", re.MULTILINE)
+TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$", re.IGNORECASE)
 
 COMMANDS = {
     ".a": ["stats", "alias"],
@@ -236,6 +238,66 @@ async def on_ready():
 def is_public(cmd: str) -> bool:
     return cmd in PUBLIC_COMMANDS
 
+# ===================== Admin Sub-Help Texte ==================================
+
+HELP_PH = (
+    "**Players (.p / .P) – Admin-Details**\n"
+    "```"
+    ".p                   → Listet aktive PLTE-Spieler\n"
+    ".p <id>              → Zeigt Player-Details\n"
+    ".p <id> k:v [...]    → Editiert Felder (name, alias, gp, active, birthday, team, discord, about,\n"
+    "                        vehicles, playstyle, language, leader, emoji)\n"
+    ".P <term>            → Sucht in name/alias/discord (case-insensitive)\n"
+    "\n"
+    "Admin-Shortcuts:\n"
+    ".pa <id> [1w..4w]    → Set away:   player away --id <id> [--dur ...]\n"
+    ".pb <id>             → Clear away: player back --id <id>\n"
+    ".p+ <id>             → Aktivieren: player activate <id>\n"
+    ".p- <id>             → Deaktiv.:   player deactivate <id>\n"
+    ".p++ \"Name\" TEAM [alias] [gp] [active] [birthday: DD.MM.] [discord]\n"
+    "                     → Neu anlegen: player add <team> <name> [...]\n"
+    "Hinweise: TEAM = PLTE | PL1..PL9. Für PLTE ist alias Pflicht & eindeutig.\n"
+    "Beispiel: .p++ PLTE \"Max Mustermann\" Max 90000 true 15.07. max#1234\n"
+    "```"
+)
+
+HELP_TH = (
+    "**Teamevents (.t) – Admin-Details**\n"
+    "```"
+    ".t                   → Listet alle Teamevents\n"
+    ".t <id>              → Zeigt Teamevent inkl. Vehicles\n"
+    ".t add <name> <kw>   → Fügt Event hinzu (KW-Format: 2025/38 oder 2025-38)\n"
+    "Beispiel: .t add Teamcup 2025/38\n"
+    "```"
+)
+
+HELP_SH = (
+    "**Seasons (.S) – Admin-Details**\n"
+    "```"
+    ".S                   → Listet die letzten 10 Seasons\n"
+    ".S <num> [div]       → Add/Update Season (div optional)\n"
+    "Beispiel: .S 10 Elite\n"
+    "```"
+)
+
+HELP_MH = (
+    "**Matches (.m) – Admin-Details**\n"
+    "```"
+    ".m                   → Listet jüngste Matches\n"
+    ".m <id>              → Zeigt Match-Details\n"
+    "```"
+)
+
+HELP_XH = (
+    "**Matchscores (.x) – Admin-Details**\n"
+    "```"
+    ".x <id>              → Listet Scores zu Match <id>\n"
+    ".x <id> <score> [p]  → Setzt score und optional points\n"
+    ".x <id> - <points>   → Setzt nur points (score bleibt unverändert)\n"
+    "```"
+)
+
+
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -263,6 +325,82 @@ async def on_message(message):
             return
         await post_birthdays_now()
         return
+
+    # ================== NEUE ADMIN-KOMMANDOS ==================
+
+    # .pa <id> [1w..4w]  → player away --id <id> [--dur ...]
+    if cmd == ".pa":
+        if len(args) < 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .pa <id> [1w..4w]")
+            return
+        pid = args[0]
+        dur = args[1] if len(args) > 1 and re.fullmatch(r"[1-4]\s*w?", args[1], flags=re.IGNORECASE) else None
+        call = ["player", "away", "--id", pid]
+        if dur:
+            call += ["--dur", dur]
+        output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
+        return
+
+    # .pb <id>  → player back --id <id>
+    if cmd == ".pb":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .pb <id>")
+            return
+        output = await run_hcr2(["player", "back", "--id", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
+    # .p+ <id>  → player activate <id>
+    if cmd == ".p+":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .p+ <id>")
+            return
+        output = await run_hcr2(["player", "activate", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
+    # .p- <id>  → player deactivate <id>
+    if cmd == ".p-":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .p- <id>")
+            return
+        output = await run_hcr2(["player", "deactivate", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
+    # .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]
+    # Name kann in Anführungszeichen stehen; TEAM kann vor ODER nach dem Namen kommen.
+    if cmd == ".p++":
+        raw = content[len(cmd):].strip()
+        try:
+            tokens = shlex.split(raw)
+        except ValueError:
+            await message.channel.send('Usage: .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]')
+            return
+        if len(tokens) < 2:
+            await message.channel.send('Usage: .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]')
+            return
+
+        # Erkennen, ob erstes Token Team ist
+        if TEAM_RE.match(tokens[0]):
+            team = tokens[0].upper()
+            name = tokens[1]
+            rest = tokens[2:]
+        else:
+            name = tokens[0]
+            if not TEAM_RE.match(tokens[1]):
+                await message.channel.send('Usage: .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]')
+                return
+            team = tokens[1].upper()
+            rest = tokens[2:]
+
+        call = ["player", "add", team, name] + rest
+        output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
+        return
+
+    # ================== ENDE NEUE ADMIN-KOMMANDOS ==================
 
     # --- Public: Leader-Liste ---
     if cmd == ".leader":
@@ -507,63 +645,116 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
+    # --- Admin Sub-Helps ---
+    if cmd == ".ph":
+        if not leader:
+            return
+        await message.channel.send(HELP_PH)
+        return
+
+    if cmd == ".th":
+        if not leader:
+            return
+        await message.channel.send(HELP_TH)
+        return
+
+    if cmd == ".sh":
+        if not leader:
+            return
+        await message.channel.send(HELP_SH)
+        return
+
+    if cmd == ".mh":
+        if not leader:
+            return
+        await message.channel.send(HELP_MH)
+        return
+
+    if cmd == ".xh":
+        if not leader:
+            return
+        await message.channel.send(HELP_XH)
+        return
+
+
     # --- Admin Help ---
+#    if cmd == ".h":
+#        help_text = (
+#            "**Administration:**"
+#            "```"
+#            " .p                  List active PLTE players\n"
+#            " .p <id>             Show player details by ID\n"
+#            " .p <id> k:v [...]   Edit player fields (name, alias, gp, ...)\n"
+#            " .P <term>           Search player by name or alias\n"
+#            "```"
+#            "**Admin Shortcuts:**"
+#            "```"
+#            " .pa <id> [1w..4w]   Set player away (admin)       → player away --id <id> [--dur ...]\n"
+#            " .pb <id>            Clear away for player (admin)  → player back --id <id>\n"
+#            " .p+ <id>            Activate existing player       → player activate <id>\n"
+#            " .p- <id>            Deactivate player              → player deactivate <id>\n"
+#            " .p++ \"Name\" TEAM  [alias] [gp] [active] [birthday] [discord]\n"
+#            "                     Create new player               → player add <team> <name> ...\n"
+#            "```"
+#            "**Matches & Scores:**"
+#            "```"
+#            " .m                  List recent matches\n"
+#            " .m <id>             Show match details\n"
+#            " .x <id>             Show scores for match\n"
+#            " .x <id> <score> [p] Set score and optional points\n"
+#            " .x <id> - <points>  Set only points (keep score)\n"
+#            "```"
+#            "**Sheets (Excel):**"
+#            "```"
+#            " .c <id>             Create sheet and upload to Nextcloud\n"
+#            " .i <id>             Import scores from Excel sheet\n"
+#            "```"
+#            "**Events & Seasons:**"
+#            "```"
+#            " .t                  List all teamevents\n"
+#            " .t <id>             Show teamevent and vehicles\n"
+#            " .t add <name> <kw>  Add teamevent (e.g. 2025/38)\n"
+#            " .S                  List last 10 seasons\n"
+#            " .S <num> [div]      Add or update season\n"
+#            "```"
+#            "**Misc:**"
+#            "```"
+#            " .a                  Show alias map for PLTE players\n"
+#            " .v                  List all vehicles\n"
+#            " .h                  Show this help message\n"
+#            " .s [season]         Show average stats (default: current season)\n"
+#            " .version            Show bot version\n"
+#            "```"
+#        )
+
     if cmd == ".h":
         help_text = (
-            "**Players & Stats:**"
+            "**Administration:**"
             "```"
-            " .p                  List active PLTE players\n"
-            " .p <id>             Show player details by ID\n"
-            " .p <id> k:v [...]   Edit player fields (name, alias, gp, ...)\n"
+            " .p[h]               Manage Players or show help\n"
             " .P <term>           Search player by name or alias\n"
-            " .s [season]         Show average stats (default: current season)\n"
-            "```"
-            "**Accountmanagement:**"
-            "```"
-            " .away [1w..4w]      Mark yourself absent for given weeks (default 1w)\n"
-            " .back               Clear your absence\n"
-            " .vehicles <text>    Set your preferred vehicles\n"
-            " .about <text>       Set your about/bio text\n"
-            " .language <text>    Set your language (e.g., en,de)\n"
-            " .playstyle <text>   Set your playstyle\n"
-            " .birthday <DD.MM.>  Set your birthday without year. Just for congrats\n"
-            " .leader             Show all leaders\n"
-            " .acc                Show your own account info\n"
-            " .search <term>      Search players (same as .P)\n"
-            " .show <id>          Show player by ID (same as .p <id>)\n"
-            "```"
-            "**Matches & Scores:**"
-            "```"
-            " .m                  List recent matches\n"
-            " .m <id>             Show match details\n"
-            " .x <id>             Show scores for match\n"
-            " .x <id> <score> [p] Set score and optional points\n"
-            " .x <id> - <points>  Set only points (keep score)\n"
+            " .t[h]               Manage teamevents or show help\n"
+            " .s[h]               Manage Seasons or show help\n"
+            " .m[h]               Manage Matches or show help\n"
+            " .x[h]               Manage Matchscores or show help\n"
             "```"
             "**Sheets (Excel):**"
             "```"
             " .c <id>             Create sheet and upload to Nextcloud\n"
             " .i <id>             Import scores from Excel sheet\n"
             "```"
-            "**Events & Seasons:**"
-            "```"
-            " .t                  List all teamevents\n"
-            " .t <id>             Show teamevent and vehicles\n"
-            " .t add <name> <kw>  Add teamevent (e.g. 2025/38)\n"
-            " .S                  List last 10 seasons\n"
-            " .S <num> [div]      Add or update season\n"
-            "```"
             "**Misc:**"
             "```"
             " .a                  Show alias map for PLTE players\n"
             " .v                  List all vehicles\n"
             " .h                  Show this help message\n"
+            " .stats [season]     Show average stats (default: current season)\n"
             " .version            Show bot version\n"
             "```"
         )
+
         await message.channel.send(help_text)
         return
-
     # --- User Help ---
     if cmd == ".help":
         help_text = (
@@ -617,7 +808,6 @@ async def on_message(message):
 
 # ===================== Respond helper (deprecated) ===========================
 
-# Belasse es für Kompatibilität – intern auf send_codeblock abgestellt, falls noch genutzt.
 async def respond(message, output):
     await send_codeblock(message.channel, output)
 
