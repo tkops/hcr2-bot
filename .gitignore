@@ -1,3 +1,4 @@
 modules/__pycache__
 __pycache__
 secrets_config.py
+db/
