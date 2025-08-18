@@ -275,50 +275,22 @@ def list_leaders():
     print("-" * 64)
     print(f"👑 Leaders: {len(rows)}")
 
+
 def birthday_command():
-    """
-    Sucht nach Spielern mit heutigem Geburtstag (MM-DD) und gibt:
-    - einen Glückwunsch-Header (Singular/Plural)
-    - danach für jede/n das Profil (via show_player) in ```-Blöcken aus.
-    """
+    """Druckt NUR 'BIRTHDAY_IDS: 12,45,78' (eine Zeile) – keine weiteren Texte."""
     today = _today_mm_dd()
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, name, COALESCE(emoji,''), COALESCE(alias,''), COALESCE(team,'')
+            SELECT id
             FROM players
             WHERE birthday = ?
             ORDER BY name COLLATE NOCASE
         """, (today,))
-        rows = cur.fetchall()
+        ids = [str(row[0]) for row in cur.fetchall()]
 
-    if not rows:
-        print("ℹ️  No birthdays today.")
-        return
-
-    names = [r[1] for r in rows]
-    # Header
-    if len(names) == 1:
-        pid, name, emoji, alias, team = rows[0]
-        alias_txt = f" ({alias})" if alias else ""
-        team_txt  = f" · Team: {team}" if team else ""
-        emj = f"{emoji} " if emoji else ""
-        print(f"🎂 Heute hat {emj}{name}{alias_txt}{team_txt} Geburtstag!")
-        print("🎉 Wir wünschen dir alles Gute, volle Tanks und viele PBs im neuen Lebensjahr! 🏁")
-    else:
-        joined = ", ".join(names)
-        print(f"🎂 Unsere heutigen Geburtstagskinder sind: {joined}")
-        print("🎉 Wir wünschen euch alles Gute, fette Beute und smoothes Air-Time-Glück im neuen Lebensjahr! 🏁")
-
-    print()  # Leerzeile
-
-    # Profile ausgeben
-    for pid, name, emoji, alias, team in rows:
-        print(f"— Profil von {name} —")
-        print("```")
-        show_player(pid)  # schreibt direkt nach stdout
-        print("```")
-        print()
+    if ids:
+        print("BIRTHDAY_IDS: " + ",".join(ids))
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None

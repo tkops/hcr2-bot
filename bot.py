@@ -6,6 +6,10 @@ import subprocess
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version
 
+from discord.ext import tasks  # <-- für Scheduler
+from zoneinfo import ZoneInfo  # <-- Zeitzone Europe/Berlin
+from datetime import time      # <-- Uhrzeit für tasks.loop
+
 MAX_DISCORD_MSG_LEN = 1990
 
 COMMANDS = {
@@ -33,6 +37,7 @@ mode = sys.argv[1]
 TOKEN = CONFIG[mode]["TOKEN"]
 ALLOWED_CHANNEL_ID = CONFIG[mode]["CHANNEL_IDS"]
 LEADER_ROLE_IDS = CONFIG[mode].get("LEADER_ROLE_IDS", [])
+BIRTHDAY_CHANNEL_ID = CONFIG[mode].get("BIRTHDAY_CHANNEL_ID")  # <-- neuer Kanal
 
 class MyClient(discord.Client):
     def __init__(self):
@@ -91,7 +96,103 @@ def update_self_field(discord_key: str, flag: str, value: str):
     args = ["player", "edit", str(pid), flag, value]
     return run_hcr2(args)
 
-# --- Message Handling ---
+# ====== BIRTHDAY SCHEDULER ===================================================
+
+def _parse_birthday_ids(output: str):
+    """
+    Erwartet eine Zeile 'BIRTHDAY_IDS: 12,45,78' im Output von 'player birthday --ids'.
+    Gibt Liste von IDs (Strings) zurück.
+    """
+    if not output:
+        return []
+
+    # 1) Bevorzugt die klare Maschinen-Zeile
+    m = re.search(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", output, flags=re.MULTILINE)
+    if m:
+        ids = [x.strip() for x in m.group(1).split(",") if x.strip().isdigit()]
+        return ids
+
+    # 2) Fallback: versuche jede Zahl am Zeilenanfang zu lesen (unwahrscheinlicher Notfall)
+    ids = re.findall(r"^\s*(\d+)\s*$", output, flags=re.MULTILINE)
+    return ids
+
+def _parse_player_name_from_show(output: str):
+    """
+    Liest aus 'player show <id>' den Namen (Zeile 'Name : ...').
+    """
+    if not output:
+        return None
+    m = re.search(r"^Name\s*:?\s*(.+)$", output, flags=re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+async def post_birthdays_now():
+    """
+    Holt IDs der Geburtstagskinder via 'player birthday --ids',
+    postet Glückwunsch + für jede ID ein 'player show <id>'.
+    """
+    if not BIRTHDAY_CHANNEL_ID:
+        print("⚠️ BIRTHDAY_CHANNEL_ID not configured; skipping birthday post.")
+        return
+
+    channel = client.get_channel(BIRTHDAY_CHANNEL_ID)
+    if channel is None:
+        print(f"⚠️ Could not resolve channel id {BIRTHDAY_CHANNEL_ID}")
+        return
+
+    out = run_hcr2(["player", "birthday"])
+    ids = _parse_birthday_ids(out)
+
+    if not ids:
+        # Optional: still & silent, oder Info loggen:
+        print("ℹ️ No birthdays today.")
+        return
+
+    # Namen einsammeln (für den Glückwunsch-Header)
+    names = []
+    profiles = []
+    for pid in ids:
+        show_out = run_hcr2(["player", "show", pid])
+        profiles.append(show_out or "")
+        name = _parse_player_name_from_show(show_out) or f"ID {pid}"
+        names.append(name)
+
+    # Glückwunsch-Text bauen
+    if len(names) == 1:
+        header = (
+            f"🎂 **Unser Geburtstagskind heute:** {names[0]}\n"
+            f"Alles Gute zum neuen Lebensjahr! Viel Glück, Gesundheit und viele PBs! 🏁"
+        )
+    else:
+        joined = ", ".join(names)
+        header = (
+            f"🎉 **Unsere heutigen Geburtstagskinder:** {joined}\n"
+            f"Wir gratulieren euch herzlich zum neuen Lebensjahr – auf viele PBs und starken Runs! 🏁"
+        )
+
+    # Posten
+    await channel.send(header)
+    for p in profiles:
+        if not p:
+            continue
+        if len(p) <= MAX_DISCORD_MSG_LEN:
+            await channel.send(f"```\n{p}```")
+        else:
+            await channel.send("⚠️ Profile output too long to display.")
+
+# Läuft jeden Tag um 12:00 Europe/Berlin
+@tasks.loop(time=time(hour=12, minute=20, tzinfo=ZoneInfo("Europe/Berlin")))
+async def birthday_job():
+    await post_birthdays_now()
+
+@client.event
+async def on_ready():
+    # Startet den täglichen Job (nur einmal starten)
+    if not birthday_job.is_running():
+        birthday_job.start()
+    print(f"✅ Logged in as {client.user} — birthday job scheduled for 12:00 Europe/Berlin.")
+
+# ====== MESSAGE HANDLING =====================================================
+
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -252,7 +353,7 @@ async def on_message(message):
         output = run_hcr2(["sheet", "create", args[0]])
         if output:
             lines = output.strip().splitlines()
-            link = lines[-1] if lines and lines[-1].startswith("http") else None
+            link = lines[-1] if lines and lines[-1].startsWith("http") else None
             desc = f"[Open file]({link})" if link else output
             embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
             await message.channel.send(embed=embed)
