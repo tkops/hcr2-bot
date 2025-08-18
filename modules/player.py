@@ -1,6 +1,7 @@
 import sqlite3
 import sys
 import re
+import textwrap
 from datetime import datetime, timedelta
 
 DB_PATH = "db/hcr2.db"
@@ -175,6 +176,14 @@ def parse_birthday(raw):
         return dt.strftime("%m-%d")
     except ValueError:
         return None
+
+def _print_wrapped(label, text, width=60, indent=15):
+    if not text:
+        text = "-"
+    wrapper = textwrap.TextWrapper(width=width,
+                                   subsequent_indent=" " * (indent + 2))
+    wrapped = wrapper.fill(text)
+    print(f"{label:<{indent}}: {wrapped}")
 
 def format_birthday(stored):
     if not stored:
@@ -507,10 +516,11 @@ def show_player(pid):
         print(f"{'Active modified':<15}: {active_modified or '-'}")
         print(f"{'Away from':<15}: {away_from or '-'}")
         print(f"{'Away until':<15}: {away_until or '-'}")
-        print(f"{'About':<15}: {about or '-'}")
-        print(f"{'Vehicles':<15}: {preferred_vehicles or '-'}")
-        print(f"{'Playstyle':<15}: {playstyle or '-'}")
-        print(f"{'Language':<15}: {language or '-'}")
+
+        _print_wrapped("About", about)
+        _print_wrapped("Vehicles", preferred_vehicles)
+        _print_wrapped("Playstyle", playstyle)
+        _print_wrapped("Language", language)
 
 # -------------- away/back core --------------
 
