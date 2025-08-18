@@ -34,6 +34,9 @@ def handle_command(cmd, args):
     elif cmd == "list-leader":
         list_leaders()
 
+    elif cmd == "birthday":
+        birthday_command()
+
     elif cmd == "show":
         # Flags unterstützen: --id / --name / --discord
         pid_flag = get_arg_value(args, "--id")
@@ -200,6 +203,9 @@ def format_birthday(stored):
 def is_valid_team(team):
     return team == "PLTE" or re.fullmatch(r"PL[1-9]", team) is not None
 
+def _today_mm_dd():
+    return datetime.now().strftime("%m-%d")
+
 # ----------------- list/show -----------------
 
 def show_players(active_only=False, sort_by="gp", team_filter=None):
@@ -268,6 +274,51 @@ def list_leaders():
         print(f"{pid:<4} {name:<25} {discord_name:<30}")
     print("-" * 64)
     print(f"👑 Leaders: {len(rows)}")
+
+def birthday_command():
+    """
+    Sucht nach Spielern mit heutigem Geburtstag (MM-DD) und gibt:
+    - einen Glückwunsch-Header (Singular/Plural)
+    - danach für jede/n das Profil (via show_player) in ```-Blöcken aus.
+    """
+    today = _today_mm_dd()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, COALESCE(emoji,''), COALESCE(alias,''), COALESCE(team,'')
+            FROM players
+            WHERE birthday = ?
+            ORDER BY name COLLATE NOCASE
+        """, (today,))
+        rows = cur.fetchall()
+
+    if not rows:
+        print("ℹ️  No birthdays today.")
+        return
+
+    names = [r[1] for r in rows]
+    # Header
+    if len(names) == 1:
+        pid, name, emoji, alias, team = rows[0]
+        alias_txt = f" ({alias})" if alias else ""
+        team_txt  = f" · Team: {team}" if team else ""
+        emj = f"{emoji} " if emoji else ""
+        print(f"🎂 Heute hat {emj}{name}{alias_txt}{team_txt} Geburtstag!")
+        print("🎉 Wir wünschen dir alles Gute, volle Tanks und viele PBs im neuen Lebensjahr! 🏁")
+    else:
+        joined = ", ".join(names)
+        print(f"🎂 Unsere heutigen Geburtstagskinder sind: {joined}")
+        print("🎉 Wir wünschen euch alles Gute, fette Beute und smoothes Air-Time-Glück im neuen Lebensjahr! 🏁")
+
+    print()  # Leerzeile
+
+    # Profile ausgeben
+    for pid, name, emoji, alias, team in rows:
+        print(f"— Profil von {name} —")
+        print("```")
+        show_player(pid)  # schreibt direkt nach stdout
+        print("```")
+        print()
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
@@ -503,6 +554,7 @@ def print_help():
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  list-leader                                 Show only leaders (id, name, discord)")
+    print("  birthday                                    Congratulate today's birthdays and show profiles")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false "
           "--about '...' --vehicles '...' --playstyle '...' --language 'en' --emoji '🚗'")
