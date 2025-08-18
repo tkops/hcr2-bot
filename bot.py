@@ -308,10 +308,10 @@ HELP_TH = help_block(
 )
 
 HELP_SH = help_block(
-    "Seasons (.S) – Admin-Details",
+    "Seasons (.s) – Admin-Details",
     rows=[
-        (".S",                   "List last 10 seasons."),
-        (".S <num> [div]",       "Add or edit season (division optional). "),
+        (".s",                   "List last 10 seasons."),
+        (".s <num> [div]",       "Add or edit season (division optional). "),
     ],
     total_width=65,
     left_col=22,
@@ -604,14 +604,14 @@ async def on_message(message):
         return
 
     # --- Stats ---
-    if cmd == ".s":
+    if cmd == ".stats":
         full_args = ["stats", "avg"] + args
         output = await run_hcr2(full_args)
         await send_codeblock(message.channel, output)
         return
 
     # --- Seasons ---
-    if cmd == ".S":
+    if cmd == ".s":
         output = await run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
         await send_codeblock(message.channel, output)
         return
