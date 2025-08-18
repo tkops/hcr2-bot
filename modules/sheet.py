@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Optional
 import os
 import re
 from openpyxl import Workbook, load_workbook
@@ -6,6 +7,7 @@ from pathlib import Path
 import sys
 from secrets_config import NEXTCLOUD_AUTH
 import subprocess
+from datetime import datetime, date
 
 DB_PATH = "db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys/Scores")
@@ -28,13 +30,52 @@ def get_match_info(conn, match_id):
 
 
 def get_active_players(conn):
+    """
+    Holt aktive PLTE-Spieler inkl. Abwesenheitsfenster.
+    """
     c = conn.cursor()
     c.execute("""
-        SELECT id, name FROM players
+        SELECT id, name, away_from, away_until
+        FROM players
         WHERE active = 1 AND team = 'PLTE'
         ORDER BY name
     """)
     return c.fetchall()
+
+
+def _parse_date_or_none(s: str):
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    # Versuche ISO first (YYYY-MM-DD)
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        pass
+    # Fallback: DD.MM.YYYY
+    try:
+        return datetime.strptime(s, "%d.%m.%Y").date()
+    except Exception:
+        return None
+
+
+def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> bool:
+    """
+    True, wenn match_day innerhalb [away_from, away_until] (inkl. Grenzen) liegt.
+    Beide Felder sind TEXT / NULL. Teilintervalle werden sinnvoll interpretiert.
+    """
+    d_from = _parse_date_or_none(frm)
+    d_until = _parse_date_or_none(until)
+
+    if d_from and d_until:
+        return d_from <= match_day <= d_until
+    if d_from and not d_until:
+        return d_from <= match_day
+    if not d_from and d_until:
+        return match_day <= d_until
+    return False
 
 
 def upload_to_nextcloud(local_path, remote_path):
@@ -43,10 +84,12 @@ def upload_to_nextcloud(local_path, remote_path):
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
+    # existiert Datei schon?
     res = requests.head(url, auth=(user, password))
     if res.status_code == 200:
         return url, False
 
+    # Ordnerkette anlegen (MKCOL)
     parts = remote_path.split("/")[:-1]
     current_path = ""
     for part in parts:
@@ -73,7 +116,24 @@ def download_from_nextcloud(season, filename, local_path):
 
 
 def generate_excel(match, players, output_path):
-    match_id, match_date, season, opponent, event = match
+    """
+    players: Liste von Tupeln (id, name, away_from, away_until)
+    Excel-Spalten:
+      A: MatchID
+      B: PlayerID
+      C: Player
+      D: Score
+      E: Points
+      F: Absent   <-- neu
+    """
+    match_id, match_date_str, season, opponent, event = match
+
+    # Match-Datum bestimmen (für Abwesenheitsprüfung)
+    md = _parse_date_or_none(match_date_str)
+    # Fallback, falls None: setze auf ein Datum, das nie im Intervall liegt.
+    if md is None:
+        md = date(1970, 1, 1)
+
     safe_event = sanitize_filename(event)
     safe_opponent = sanitize_filename(opponent)
     filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
@@ -85,11 +145,12 @@ def generate_excel(match, players, output_path):
     ws = wb.active
     ws.title = "Match Info"
 
-    ws.append([f"Match ID: {match_id}", f"Date: {match_date}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
-    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points"])
+    ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
+    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent"])
 
-    for pid, name in players:
-        ws.append([match_id, pid, name, "", ""])
+    for pid, name, a_from, a_until in players:
+        absent_flag = _is_absent_on(md, a_from, a_until)
+        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false"])
 
     wb.save(filepath)
 
@@ -99,7 +160,7 @@ def generate_excel(match, players, output_path):
     if filepath.exists():
         try:
             filepath.unlink()
-        except:
+        except Exception:
             pass
 
     web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
@@ -128,25 +189,55 @@ def import_excel_to_matchscore(match_id):
 
         with open(tsv_path, "w", encoding="utf-8") as f:
             for row in ws.iter_rows(min_row=3, values_only=True):
+                # Row hat jetzt bis zu 6 Spalten: MatchID, PlayerID, Player, Score, Points, Absent
+                # Wir ignorieren "Player" (Index 2) und lesen Absent (Index 5), falls vorhanden.
                 if not row or len(row) < 5 or not row[1]:
                     continue
-                mid, pid, _, score, points = row
+                mid = row[0]
+                pid = row[1]
+                score = row[3] if len(row) >= 4 else 0
+                points = row[4] if len(row) >= 5 else 0
+                absent_raw = row[5] if len(row) >= 6 else "false"
+
+                # Robust in int (0/1) normalisieren:
+                def _to_bool01(x):
+                    if x is None:
+                        return 0
+                    s = str(x).strip().lower()
+                    if s in ("1", "true", "yes", "y", "ja"):
+                        return 1
+                    if s in ("0", "false", "no", "n", "nein", ""):
+                        return 0
+                    # falls was Komisches steht: 0
+                    return 0
+
                 try:
                     score = int(score) if score not in (None, "") else 0
-                except:
+                except Exception:
                     score = 0
                 try:
                     points = int(points) if points not in (None, "") else 0
-                except:
+                except Exception:
                     points = 0
-                f.write(f"{mid}\t{pid}\t{score}\t{points}\n")
+
+                absent01 = _to_bool01(absent_raw)
+
+                # TSV Zeile: mid  pid  score  points  absent01
+                f.write(f"{mid}\t{pid}\t{score}\t{points}\t{absent01}\n")
 
         imported = 0
         changed = 0
         with open(tsv_path, encoding="utf-8") as f:
             for line in f:
-                mid, player_id, score, points = line.strip().split("\t")
-                cmd = ["python", "hcr2.py", "matchscore", "add", mid, player_id, score, points]
+                parts = line.strip().split("\t")
+                if len(parts) < 5:
+                    # Backward-compat, falls alte Dateien ohne absent auftauchen
+                    parts = parts + ["0"]
+                mid, player_id, score, points, absent01 = parts[:5]
+                cmd = [
+                    "python", "hcr2.py", "matchscore", "add",
+                    mid, player_id, score, points, absent01
+                ]
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     imported += 1
@@ -157,7 +248,7 @@ def import_excel_to_matchscore(match_id):
             if path.exists():
                 try:
                     path.unlink()
-                except:
+                except Exception:
                     pass
 
         web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
