@@ -334,12 +334,12 @@ HELP_MH = help_block(
 HELP_XH = help_block(
     "Matchscores (.x) – Admin-Details",
     rows=[
-        (".x <id>",              "List scores for match <id>."),
-        (".x <id> <score> [p]",  "Set score for match (points optional)."),
-        (".x <id> - <points>",   "Set points (score unchanged)."),
+        (".x <matchid>",              "List scores for match <id>."),
+        (".x <matchid> <score> [p]",  "Set score  (points optional)."),
+        (".x <matchid> - <points>",   "Set points (score unchanged)."),
     ],
     total_width=65,
-    left_col=22,
+    left_col=25,
 )
 
 # ===================== Events ===============================================
