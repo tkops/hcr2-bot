@@ -31,6 +31,9 @@ def handle_command(cmd, args):
             sort = get_arg_value(args, "--sort") or sort
         show_players(active_only=True, sort_by=sort, team_filter=team)
 
+    elif cmd == "list-leader":
+        list_leaders()
+
     elif cmd == "show":
         # Flags unterstützen: --id / --name / --discord
         pid_flag = get_arg_value(args, "--id")
@@ -242,6 +245,29 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
                 print(f"{pid:<4} {name:<20} {alias or '':<15} {gp:>6} {str(bool(active)):>5} {str(bool(is_leader)):>5} {bday_fmt:<10} {team or '-':<7} {discord_name or '-':<18} {created}")
             print("-" * 130)
             print(f"🟢 Active players: {active_count}")
+
+def list_leaders():
+    """Listet alle Spieler mit is_leader = 1 (unabhängig von 'active')."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, COALESCE(discord_name, '-')
+            FROM players
+            WHERE COALESCE(is_leader, 0) = 1
+            ORDER BY name COLLATE NOCASE
+        """)
+        rows = cur.fetchall()
+
+    if not rows:
+        print("❌ No leaders found.")
+        return
+
+    print(f"{'ID':<4} {'Name':<25} {'Discord':<30}")
+    print("-" * 64)
+    for pid, name, discord_name in rows:
+        print(f"{pid:<4} {name:<25} {discord_name:<30}")
+    print("-" * 64)
+    print(f"👑 Leaders: {len(rows)}")
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     alias = alias.strip() if alias else None
@@ -476,6 +502,7 @@ def print_help():
     print("\nAvailable commands:")
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
+    print("  list-leader                                 Show only leaders (id, name, discord)")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
     print("  edit <id> --gp 90000 --team PL3 --birthday 15.07. --discord foo#1234 --leader true|false "
           "--about '...' --vehicles '...' --playstyle '...' --language 'en' --emoji '🚗'")
