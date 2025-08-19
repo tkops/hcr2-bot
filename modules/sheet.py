@@ -1,14 +1,15 @@
 import sqlite3
-import os
+from typing import Optional, List, Tuple
 import re
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment
 from pathlib import Path
-import sys
 from secrets_config import NEXTCLOUD_AUTH
 import subprocess
+from datetime import datetime, date
 
 DB_PATH = "db/hcr2.db"
-NEXTCLOUD_BASE = Path("Power-Ladys/Scores")
+NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
 
@@ -27,14 +28,43 @@ def get_match_info(conn, match_id):
     return c.fetchone()
 
 
-def get_active_players(conn):
+def get_active_players(conn) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
     c = conn.cursor()
     c.execute("""
-        SELECT id, name FROM players
+        SELECT id, name, away_from, away_until
+        FROM players
         WHERE active = 1 AND team = 'PLTE'
         ORDER BY name
     """)
     return c.fetchall()
+
+
+def _parse_date_or_none(s: str):
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s, "%d.%m.%Y").date()
+    except Exception:
+        return None
+
+
+def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> bool:
+    d_from = _parse_date_or_none(frm)
+    d_until = _parse_date_or_none(until)
+    if d_from and d_until:
+        return d_from <= match_day <= d_until
+    if d_from and not d_until:
+        return d_from <= match_day
+    if not d_from and d_until:
+        return match_day <= d_until
+    return False
 
 
 def upload_to_nextcloud(local_path, remote_path):
@@ -43,10 +73,12 @@ def upload_to_nextcloud(local_path, remote_path):
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
+    # existiert Datei schon?
     res = requests.head(url, auth=(user, password))
     if res.status_code == 200:
         return url, False
 
+    # Ordnerkette anlegen (MKCOL)
     parts = remote_path.split("/")[:-1]
     current_path = ""
     for part in parts:
@@ -63,17 +95,99 @@ def upload_to_nextcloud(local_path, remote_path):
 
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
-    remote_path = f"Power-Ladys/Scores/S{season}/{filename}"
+    remote_path = f"Power-Ladys-Scores/S{season}/{filename}"
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
-
-    curl_cmd = [
-        "curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url
-    ]
+    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
     subprocess.run(curl_cmd, capture_output=True)
 
 
+# -------------------- Ranking-Logik --------------------
+
+def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            ms.player_id,
+            p.name,
+            p.team,
+            p.active,
+            ms.score,
+            m.id,
+            t.tracks
+        FROM matchscore ms
+        JOIN players p ON ms.player_id = p.id
+        JOIN match m ON ms.match_id = m.id
+        JOIN teamevent t ON m.teamevent_id = t.id
+        WHERE m.season_number = ?
+    """, (season_number,))
+    return cur.fetchall()
+
+
+def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, away_from, away_until
+        FROM players
+        WHERE active = 1 AND team = 'PLTE'
+    """)
+    base_players = cur.fetchall()
+    if not base_players:
+        return []
+    id_to_player = {pid: (pid, name, a_from, a_until) for (pid, name, a_from, a_until) in base_players}
+
+    rows = _fetch_season_rows(conn, season_number)
+
+    scores_by_match = {}
+    for pid, name, team, active, score, match_id, tracks in rows:
+        if team != "PLTE" or not active:
+            continue
+        if score is None:
+            continue
+        scaled = score * 4 / tracks if tracks else score
+        scores_by_match.setdefault(match_id, []).append((pid, scaled))
+
+    import statistics
+    player_deltas, player_counts = {}, {}
+    for _, entries in scores_by_match.items():
+        vals = [s for _, s in entries]
+        if not vals:
+            continue
+        try:
+            med = statistics.median(vals)
+        except statistics.StatisticsError:
+            continue
+        for pid, s in entries:
+            delta = s - med
+            player_deltas.setdefault(pid, []).append(delta)
+            player_counts[pid] = player_counts.get(pid, 0) + 1
+
+    with_scores, without_scores = [], []
+    for pid, (pid_, name, a_from, a_until) in id_to_player.items():
+        deltas = player_deltas.get(pid)
+        if deltas:
+            avg_delta = round(sum(deltas) / len(deltas))
+            cnt = player_counts.get(pid, 0)
+            with_scores.append((avg_delta, -cnt, name.lower(), (pid_, name, a_from, a_until)))
+        else:
+            without_scores.append((name.lower(), (pid_, name, a_from, a_until)))
+
+    with_scores_sorted = [p for _, _, _, p in sorted(with_scores, key=lambda x: (x[0], x[1], x[2]), reverse=True)]
+    without_scores_sorted = [p for _, p in sorted(without_scores, key=lambda x: x[0])]
+    return with_scores_sorted + without_scores_sorted
+
+
+# -------------------- Excel-Generierung & Import --------------------
+
 def generate_excel(match, players, output_path):
-    match_id, match_date, season, opponent, event = match
+    """
+    players: (id, name, away_from, away_until) – in Zielreihenfolge.
+    Spalten:
+      A: MatchID | B: PlayerID | C: Player | D: Score | E: Points | F: Absent | G: Checkin | H: Hinweise
+    """
+    match_id, match_date_str, season, opponent, event = match
+
+    md = _parse_date_or_none(match_date_str) or date(1970, 1, 1)
+
     safe_event = sanitize_filename(event)
     safe_opponent = sanitize_filename(opponent)
     filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
@@ -85,24 +199,49 @@ def generate_excel(match, players, output_path):
     ws = wb.active
     ws.title = "Match Info"
 
-    ws.append([f"Match ID: {match_id}", f"Date: {match_date}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
-    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points"])
+    # Kopfzeile + Header
+    ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
+    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Hinweise"])
 
-    for pid, name in players:
-        ws.append([match_id, pid, name, "", ""])
+    # Spaltenbreiten
+    ws.column_dimensions["A"].width = 15
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 26
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 8
+    ws.column_dimensions["G"].width = 9
+    ws.column_dimensions["H"].width = 120
+
+    # Hinweise H1–H3
+    ws["H1"] = "H1: Nicht gefahren → Score=0 und Points=0 eintragen."
+    ws["H2"] = "H2: Absent wird automatisch 'true', wenn Spieler auf Away steht. Kann (true/false) manuell überschrieben werden."
+    ws["H3"] = "H3: Nicht abgemeldet + eingeloggt + nicht gefahren ⇒ Checkin=true setzen."
+    for cell_addr in ("H1", "H2", "H3"):
+        ws[cell_addr].alignment = Alignment(wrap_text=True, vertical="top")
+
+    # Datenzeilen
+    for pid, name, a_from, a_until in players:
+        absent_flag = _is_absent_on(md, a_from, a_until)
+        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
+
+    # A/B zentrieren (alle Zeilen)
+    align_center = Alignment(horizontal="center", vertical="center")
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+        for cell in row:
+            cell.alignment = align_center
 
     wb.save(filepath)
 
     remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
     upload_to_nextcloud(filepath, remote_path)
 
-    if filepath.exists():
-        try:
-            filepath.unlink()
-        except:
-            pass
+    try:
+        filepath.unlink()
+    except Exception:
+        pass
 
-    web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
+    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
     return f"[{filename}]({web_url})", True
 
 
@@ -126,41 +265,152 @@ def import_excel_to_matchscore(match_id):
         wb = load_workbook(filename=local_path, data_only=True)
         ws = wb.active
 
+        # ---------- Einlesen + Plausi-Checks ----------
+        errors = []
+        entries = []  # dicts: {'row': r, 'pid': pid, 'score': s, 'points': p, 'absent': a, 'checkin': c}
+
+        def strict_int(cell_val, label, row_idx):
+            # Pflichtfeld: keine Leere, kein Text-Müll, nur ganze Zahlen
+            if cell_val is None or (isinstance(cell_val, str) and cell_val.strip() == ""):
+                errors.append(f"Row {row_idx}: {label} must not be empty.")
+                return None
+            if isinstance(cell_val, float):
+                if cell_val.is_integer():
+                    return int(cell_val)
+                errors.append(f"Row {row_idx}: {label} must be an integer, got float={cell_val}.")
+                return None
+            if isinstance(cell_val, int):
+                return cell_val
+            if isinstance(cell_val, str):
+                s = cell_val.strip()
+                if s.isdigit():
+                    return int(s)
+                errors.append(f"Row {row_idx}: {label} must be a number, got '{cell_val}'.")
+                return None
+            # other types
+            errors.append(f"Row {row_idx}: {label} has invalid type {type(cell_val).__name__}.")
+            return None
+
+        def to_bool01(x):
+            if x is None:
+                return 0
+            s = str(x).strip().lower()
+            if s in ("1", "true", "yes", "y", "ja"):
+                return 1
+            if s in ("0", "false", "no", "n", "nein", ""):
+                return 0
+            return 0
+
+        # Sammle alle Zeilen (ab Zeile 3)
+        row_idx = 3
+        for row in ws.iter_rows(min_row=3, values_only=True):
+            # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
+            if not row or len(row) < 5 or not row[1]:
+                row_idx += 1
+                continue
+
+            mid = row[0]
+            pid = row[1]
+            score_cell = row[3] if len(row) >= 4 else None
+            points_cell = row[4] if len(row) >= 5 else None
+            absent_raw = row[5] if len(row) >= 6 else "false"
+            checkin_raw = row[6] if len(row) >= 7 else "false"
+
+            # Pflichtfeld- und Typprüfung
+            score_val = strict_int(score_cell, "Score", row_idx)
+            points_val = strict_int(points_cell, "Points", row_idx)
+
+            # Range
+            if score_val is not None and not (0 <= score_val <= 75000):
+                errors.append(f"Row {row_idx}: Score out of range (0..75000): {score_val}")
+            if points_val is not None and not (0 <= points_val <= 300):
+                errors.append(f"Row {row_idx}: Points out of range (0..300): {points_val}")
+
+            # Absent/Checkin
+            absent01 = to_bool01(absent_raw)
+            checkin01 = to_bool01(checkin_raw)
+
+            # Nur aufnehmen, wenn Score/Points nicht None (sonst Fehlerliste, aber wir prüfen weiter)
+            if score_val is not None and points_val is not None:
+                entries.append({
+                    "row": row_idx,
+                    "pid": int(pid),
+                    "score": int(score_val),
+                    "points": int(points_val),
+                    "absent": int(absent01),
+                    "checkin": int(checkin01),
+                })
+
+            row_idx += 1
+
+        # High Points > 20 dürfen nicht doppelt vorkommen
+        seen_high = {}
+        for e in entries:
+            p = e["points"]
+            if p > 20:
+                seen_high.setdefault(p, []).append(e)
+        for pval, rows in seen_high.items():
+            if len(rows) > 1:
+                ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows)
+                errors.append(f"High points duplicated (>20): {pval} appears in {ids}")
+
+        # Monotonie: Sortiere nach Score DESC; Points müssen non-increasing sein;
+        # Gleichstand bei Points nur erlaubt, wenn beide Points < 20.
+        entries_sorted = sorted(entries, key=lambda x: (-x["score"], x["pid"]))
+        for i in range(len(entries_sorted) - 1):
+            a = entries_sorted[i]
+            b = entries_sorted[i + 1]
+            # a hat >= Score von b
+            if a["points"] < b["points"]:
+                errors.append(
+                    f"Monotony violation: row {a['row']} (score {a['score']}, points {a['points']}) "
+                    f"vs row {b['row']} (score {b['score']}, points {b['points']})"
+                )
+            if a["points"] == b["points"] and a["points"] >= 20:
+                errors.append(
+                    f"Equal high points not allowed (>=20): rows {a['row']} & {b['row']} both {a['points']}"
+                )
+
+        # Falls Fehler → abbrechen
+        if errors:
+            print("❌ Import aborted due to validation errors:")
+            for msg in errors:
+                print(" -", msg)
+            return
+
+        # ---------- TSV schreiben + an matchscore weiterreichen ----------
         with open(tsv_path, "w", encoding="utf-8") as f:
-            for row in ws.iter_rows(min_row=3, values_only=True):
-                if not row or len(row) < 5 or not row[1]:
-                    continue
-                mid, pid, _, score, points = row
-                try:
-                    score = int(score) if score not in (None, "") else 0
-                except:
-                    score = 0
-                try:
-                    points = int(points) if points not in (None, "") else 0
-                except:
-                    points = 0
-                f.write(f"{mid}\t{pid}\t{score}\t{points}\n")
+            for e in entries:
+                f.write(f"{match_id}\t{e['pid']}\t{e['score']}\t{e['points']}\t{e['absent']}\t{e['checkin']}\n")
 
         imported = 0
         changed = 0
         with open(tsv_path, encoding="utf-8") as f:
             for line in f:
-                mid, player_id, score, points = line.strip().split("\t")
-                cmd = ["python", "hcr2.py", "matchscore", "add", mid, player_id, score, points]
+                parts = line.strip().split("\t")
+                if len(parts) < 6:
+                    parts = parts + ["0"]
+                mid, player_id, score, points, absent01, checkin01 = parts[:6]
+                cmd = [
+                    "python", "hcr2.py", "matchscore", "add",
+                    mid, player_id, score, points, absent01, checkin01
+                ]
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     imported += 1
-                    if "CHANGED" in result.stdout:
+                    out = (result.stdout or "").upper()
+                    if "UNCHANGED" in out:
+                        pass
+                    elif "CHANGED" in out:
                         changed += 1
 
         for path in (local_path, tsv_path):
-            if path.exists():
-                try:
-                    path.unlink()
-                except:
-                    pass
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
-        web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
+        web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
         print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed)")
 
@@ -188,8 +438,11 @@ def handle_command(command, args):
             if not match:
                 print("[ERROR] No match found")
                 return
-            players = get_active_players(conn)
-            url, uploaded = generate_excel(match, players, output_path=NEXTCLOUD_BASE)
+
+            _, _, season, _, _ = match
+            ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
+
+            url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
             print(f"[OK] {url} ({'Created' if uploaded else 'Already existed'})")
 
     elif command == "import":

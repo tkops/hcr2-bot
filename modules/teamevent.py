@@ -181,13 +181,13 @@ def show_teamevent(args):
 
 def edit_teamevent(args):
     if len(args) < 1:
-        print("Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
+        print("Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3|codes] [--score SCORE]")
         return
 
     eid = int(args[0])
     name = None
     tracks = max_score = None
-    vehicle_ids = None
+    vehicles_arg = None  # roher String nach --vehicles
 
     i = 1
     while i < len(args):
@@ -202,13 +202,13 @@ def edit_teamevent(args):
             max_score = int(args[i])
         elif args[i] == "--vehicles":
             i += 1
-            vehicle_ids = [int(v.strip()) for v in args[i].split(",") if v.strip().isdigit()]
+            vehicles_arg = args[i].strip()
         i += 1
 
     fields = []
     values = []
 
-    if name:
+    if name is not None:
         fields.append("name = ?")
         values.append(name)
     if tracks is not None:
@@ -218,24 +218,77 @@ def edit_teamevent(args):
         fields.append("max_score_per_track = ?")
         values.append(max_score)
 
+    import sqlite3
     with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Basis-Felder updaten
         if fields:
-            query = f"UPDATE teamevent SET {', '.join(fields)} WHERE id = ?"
             values.append(eid)
-            conn.execute(query, values)
+            query = f"UPDATE teamevent SET {', '.join(fields)} WHERE id = ?"
+            cur.execute(query, values)
             print(f"✅ Teamevent {eid} updated.")
 
-        if vehicle_ids is not None:
-            conn.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
-            for vid in vehicle_ids:
-                try:
-                    conn.execute(
-                        "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
-                        (eid, vid)
-                    )
-                except sqlite3.IntegrityError:
-                    print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
-            print(f"✅ Updated vehicles for Teamevent {eid}.")
+        # Vehicles verarbeiten (optional)
+        if vehicles_arg is not None:
+            # Spezialfall: '-' bedeutet Liste leeren
+            if vehicles_arg == "-":
+                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
+                print(f"✅ Cleared vehicles for Teamevent {eid}.")
+            else:
+                # Tokens splitten und normalisieren
+                tokens = [t.strip() for t in vehicles_arg.split(",") if t.strip()]
+                resolved_ids = []
+                warnings = []
+
+                def resolve_token(tok: str):
+                    # 1) Direkte ID?
+                    if tok.isdigit():
+                        return int(tok)
+                    # 2) Lookup per code/kurzname oder name (case-insensitive)
+                    cur.execute("""
+                        SELECT id
+                        FROM vehicle
+                        WHERE LOWER(shortname) = LOWER(?)
+                           OR LOWER(name) = LOWER(?)
+                        ORDER BY id
+                        LIMIT 1
+                    """, (tok, tok))
+                    row = cur.fetchone()
+                    return row[0] if row else None
+
+                for tok in tokens:
+                    vid = resolve_token(tok)
+                    if vid is None:
+                        warnings.append(tok)
+                    else:
+                        resolved_ids.append(vid)
+
+                # Duplikate entfernen, Reihenfolge beibehalten
+                seen = set()
+                resolved_ids = [v for v in resolved_ids if not (v in seen or seen.add(v))]
+
+                # Liste neu schreiben
+                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
+                for vid in resolved_ids:
+                    try:
+                        cur.execute(
+                            "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
+                            (eid, vid)
+                        )
+                    except sqlite3.IntegrityError:
+                        # Fremdschlüssel verletzt o.ä.
+                        warnings.append(str(vid))
+
+                if resolved_ids:
+                    print(f"✅ Updated vehicles for Teamevent {eid}: {','.join(map(str, resolved_ids))}")
+                else:
+                    print(f"✅ Updated vehicles for Teamevent {eid}: (none)")
+
+                if warnings:
+                    print("⚠️  Unresolved/invalid vehicle tokens: " + ", ".join(warnings))
+
+
 
 
 def delete_teamevent(eid):

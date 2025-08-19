@@ -1,21 +1,164 @@
+#!/usr/bin/env python3
+import re
 import sqlite3
+from pathlib import Path
 
 DB_PATH = "db/hcr2.db"
 SCHEMA_OUTPUT = "schema.sql"
 
+# --- Helpers ---------------------------------------------------------------
+
+def add_if_not_exists(sql: str) -> str:
+    """Inject IF NOT EXISTS for table/view/index/trigger."""
+    s = sql.strip()
+
+    s = re.sub(r"^CREATE\s+TABLE\s+", "CREATE TABLE IF NOT EXISTS ", s, flags=re.IGNORECASE)
+    s = re.sub(r"^CREATE\s+VIEW\s+", "CREATE VIEW IF NOT EXISTS ", s, flags=re.IGNORECASE)
+
+    s = re.sub(r"^CREATE\s+(TEMP|TEMPORARY)\s+TRIGGER\s+",
+               r"CREATE \1 TRIGGER IF NOT EXISTS ", s, flags=re.IGNORECASE)
+    s = re.sub(r"^CREATE\s+TRIGGER\s+", "CREATE TRIGGER IF NOT EXISTS ", s, flags=re.IGNORECASE)
+
+    s = re.sub(r"^CREATE\s+(TEMP|TEMPORARY)\s+(UNIQUE\s+)?INDEX\s+",
+               lambda m: f"CREATE {m.group(1)} " + (m.group(2) or "") + "INDEX IF NOT EXISTS ",
+               s, flags=re.IGNORECASE)
+    s = re.sub(r"^CREATE\s+(UNIQUE\s+)?INDEX\s+",
+               lambda m: "CREATE " + (m.group(1) or "") + "INDEX IF NOT EXISTS ",
+               s, flags=re.IGNORECASE)
+    return s
+
+def fetch_schema(cur, types):
+    cur.execute(
+        f"""
+        SELECT type, name, tbl_name, sql
+        FROM sqlite_master
+        WHERE type IN ({",".join("?"*len(types))})
+          AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+        """,
+        types,
+    )
+    return [row for row in cur.fetchall() if row[3]]  # skip entries with NULL sql
+
+def _split_top_level_commas(s: str):
+    """Split by commas only at top-level (depth == 0) – ignores commas inside parentheses."""
+    parts, buf, depth = [], [], 0
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch == '(':
+            depth += 1
+            buf.append(ch)
+        elif ch == ')':
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif ch == ',' and depth == 0:
+            parts.append(''.join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    tail = ''.join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+def format_create_table(sql: str, indent: int = 4) -> str:
+    """
+    Pretty-print a CREATE TABLE statement:
+      - one column/constraint per line
+      - consistent indentation
+      - keeps table options after closing ')', e.g. WITHOUT ROWID
+    """
+    s = sql.strip().rstrip(';')
+    # Match header "CREATE TABLE IF NOT EXISTS <name> ("
+    m = re.match(r"^(CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+\S+\s*)\((.*)\)\s*(.*)$",
+                 s, flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        # Fallback: try without IF NOT EXISTS (then caller should have injected it already)
+        m = re.match(r"^(CREATE\s+TABLE\s+\S+\s*)\((.*)\)\s*(.*)$",
+                     s, flags=re.IGNORECASE | re.DOTALL)
+        if not m:
+            return s + ';'
+    header, body, tail = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+
+    # Clean body whitespace and split top-level by commas
+    # Replace newlines/tabs with single spaces first for robust splitting
+    body_compact = re.sub(r"\s+", " ", body).strip()
+    items = _split_top_level_commas(body_compact)
+
+    # Post-process items: put commas at end of lines (except last)
+    pad = ' ' * indent
+    lines = []
+    for idx, item in enumerate(items):
+        pretty = item.strip()
+        # Optional: move table-level constraints (FOREIGN KEY, UNIQUE, CHECK) to their own lines unchanged
+        # Keep as-is; add trailing comma except for last.
+        suffix = ',' if idx < len(items) - 1 else ''
+        lines.append(f"{pad}{pretty}{suffix}")
+
+    # Reassemble
+    tail_part = f" {tail}" if tail else ""
+    out = header + "(\n" + "\n".join(lines) + "\n)" + tail_part + ";"
+    return out
+
+def maybe_pretty(sql: str) -> str:
+    """Pretty format CREATE TABLE statements; pass others through after IF NOT EXISTS injection."""
+    s = add_if_not_exists(sql)
+    # Detect CREATE TABLE at start
+    if re.match(r"^CREATE\s+TABLE\s+", s, flags=re.IGNORECASE):
+        return format_create_table(s)
+    return s if s.endswith(';') else s + ';'
+
+# --- Main -----------------------------------------------------------------
+
 def backup_schema():
-    with sqlite3.connect(DB_PATH) as conn:
+    Path(SCHEMA_OUTPUT).parent.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(DB_PATH) as conn, open(SCHEMA_OUTPUT, "w", encoding="utf-8") as f:
         cur = conn.cursor()
 
-        cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-        tables = cur.fetchall()
+        # Optional: persist user_version
+        cur.execute("PRAGMA user_version;")
+        user_version = cur.fetchone()[0]
 
-        with open(SCHEMA_OUTPUT, "w") as f:
-            for name, sql in tables:
-                if not sql:
-                    continue
-                modified_sql = sql.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
-                f.write(modified_sql.strip() + ";\n\n")
+        # Collect schema objects
+        tables   = fetch_schema(cur, ["table"])
+        views    = fetch_schema(cur, ["view"])
+        indexes  = fetch_schema(cur, ["index"])
+        triggers = fetch_schema(cur, ["trigger"])
+
+        f.write("-- Schema dump (tables, views, indexes, triggers)\n")
+        f.write("-- Generated by backup_schema.py\n\n")
+        f.write("PRAGMA foreign_keys=OFF;\n")
+        f.write("BEGIN;\n\n")
+
+        # Tables first
+        f.write("-- Tables\n")
+        for _type, name, tbl, sql in tables:
+            f.write(maybe_pretty(sql) + "\n\n")
+
+        # Views next (may depend on tables)
+        if views:
+            f.write("-- Views\n")
+            for _type, name, tbl, sql in views:
+                f.write(maybe_pretty(sql) + "\n\n")
+
+        # Indexes (may depend on tables)
+        if indexes:
+            f.write("-- Indexes\n")
+            for _type, name, tbl, sql in indexes:
+                f.write(maybe_pretty(sql) + "\n\n")
+
+        # Triggers last
+        if triggers:
+            f.write("-- Triggers\n")
+            for _type, name, tbl, sql in triggers:
+                f.write(maybe_pretty(sql) + "\n\n")
+
+        # Persist user_version
+        f.write(f"PRAGMA user_version = {user_version};\n\n")
+        f.write("COMMIT;\n")
 
     print(f"✅ Schema saved to {SCHEMA_OUTPUT}")
 
