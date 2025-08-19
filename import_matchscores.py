@@ -31,11 +31,10 @@ def player_exists(conn, player_id):
 
 def run_hcr2_add(match_id, player_id, score, points):
     cmd = [*HCR2_CLI.split(), "matchscore", "add", str(match_id), str(player_id), str(score), str(points)]
-    # Unterdrücke jede Ausgabe von hcr2.py (CHANGED/UNCHANGED etc.)
     subprocess.run(
         cmd,
         check=True,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,  # CHANGED/UNCHANGED unterdrücken
         stderr=subprocess.DEVNULL,
         text=True,
     )
@@ -44,8 +43,8 @@ def run_hcr2_add(match_id, player_id, score, points):
 def import_matchscores():
     with sqlite3.connect(DB_PATH) as conn:
         counts = Counter()
-        # Fälle, die dich interessieren: echte Importfehler bei DO_IMPORT
         import_failed_details = []
+        match_missing_details = []
 
         with open(TSV_FILE, newline='', encoding="utf-8") as f:
             reader = csv.reader(f, delimiter="\t")
@@ -53,16 +52,13 @@ def import_matchscores():
             header_map = {h.strip(): i for i, h in enumerate(headers)}
 
             for row in reader:
-                # 1) Parsen/Validieren
                 try:
                     player_id = int(row[0].strip())
                     score = int(row[header_map["Score"]].strip())
-
                     if "Points" in header_map and row[header_map["Points"]].strip():
                         points = int(row[header_map["Points"]].strip())
                     else:
                         points = 0
-
                     event = row[header_map["Event"]].strip()
                     opponent = row[header_map["Gegner"]].strip()
                     date_str = row[header_map["Datum"]].strip()
@@ -71,7 +67,6 @@ def import_matchscores():
                     counts["malformed"] += 1
                     continue
 
-                # 2) Checks in DB
                 if not player_exists(conn, player_id):
                     counts["player_missing"] += 1
                     continue
@@ -79,17 +74,22 @@ def import_matchscores():
                 match_id = get_match_id(conn, event, opponent, date_str)
                 if not match_id:
                     counts["match_missing"] += 1
+                    match_missing_details.append({
+                        "player_id": player_id,
+                        "score": score,
+                        "points": points,
+                        "event": event,
+                        "opponent": opponent,
+                        "date": date_str,
+                    })
                     continue
 
                 cur = conn.cursor()
-                cur.execute("""
-                    SELECT 1 FROM matchscore WHERE match_id = ? AND player_id = ?
-                """, (match_id, player_id))
+                cur.execute("SELECT 1 FROM matchscore WHERE match_id = ? AND player_id = ?", (match_id, player_id))
                 if cur.fetchone():
                     counts["duplicate"] += 1
                     continue
 
-                # 3) Import / Dry Run
                 if DO_IMPORT:
                     try:
                         run_hcr2_add(match_id, player_id, score, points)
@@ -106,10 +106,9 @@ def import_matchscores():
                             "date": date_str,
                         })
                 else:
-                    # Dry Run – nur zählen, keine Ausgabe pro Eintrag
                     counts["simulated"] += 1
 
-        # 4) Zusammenfassung ausgeben
+        # --- Zusammenfassung ---
         mode = "imported" if DO_IMPORT else "simulated"
         total_done = counts["imported"] if DO_IMPORT else counts["simulated"]
         total_skipped = (
@@ -122,7 +121,6 @@ def import_matchscores():
 
         print(f"\n✅ {total_done} entries {mode}, {total_skipped} skipped.")
 
-        # Detailierte Skip-Zusammenfassung (ohne Einzelzeilen)
         def line(name, key):
             if counts[key]:
                 print(f"  - {name}: {counts[key]}")
@@ -135,8 +133,14 @@ def import_matchscores():
         if DO_IMPORT:
             line("Import failed (subprocess)", "import_failed")
 
-        # 5) Nur die wirklich „nicht verarbeiteten“ (Importfehler) zeigen
-        if DO_IMPORT and counts["import_failed"]:
+        # --- Details für bestimmte Fälle ---
+        if match_missing_details:
+            print("\n❓ Match not found entries (details):")
+            for e in match_missing_details:
+                print(f"  player={e['player_id']} | score={e['score']} | points={e['points']} | "
+                      f"event='{e['event']}' | opponent='{e['opponent']}' | date={e['date']}")
+
+        if DO_IMPORT and import_failed_details:
             print("\n❌ Import failed entries (details):")
             for e in import_failed_details:
                 print(f"  match={e['match_id']} | player={e['player_id']} | "
