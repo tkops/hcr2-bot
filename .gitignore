@@ -1,4 +1,4 @@
 modules/__pycache__
 __pycache__
 secrets_config.py
-db/hcr2.db
+db/
