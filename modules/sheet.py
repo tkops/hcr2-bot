@@ -1,5 +1,5 @@
 import sqlite3
-from typing import Optional
+from typing import Optional, List, Tuple
 import os
 import re
 from openpyxl import Workbook, load_workbook
@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime, date
 
 DB_PATH = "db/hcr2.db"
-NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
+NEXTCLOUD_BASE = Path("Power-Ladys-Scores")  # Upload-Ziel (Ordnerstruktur bleibt darunter S{season}/...)
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
 
@@ -29,9 +29,10 @@ def get_match_info(conn, match_id):
     return c.fetchone()
 
 
-def get_active_players(conn):
+def get_active_players(conn) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
     """
     Holt aktive PLTE-Spieler inkl. Abwesenheitsfenster.
+    Rückgabe: [(id, name, away_from, away_until), ...]
     """
     c = conn.cursor()
     c.execute("""
@@ -106,6 +107,7 @@ def upload_to_nextcloud(local_path, remote_path):
 
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
+    # Beachte: Download-Pfad bleibt wie gehabt unter "Power-Ladys/Scores"
     remote_path = f"Power-Ladys/Scores/S{season}/{filename}"
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
@@ -115,22 +117,120 @@ def download_from_nextcloud(season, filename, local_path):
     subprocess.run(curl_cmd, capture_output=True)
 
 
+# -------------------- Ranking-Logik für Sheet-Reihenfolge --------------------
+
+def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
+    """
+    Lädt alle Scores der Season mit nötigen Joins.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            ms.player_id,
+            p.name,
+            p.team,
+            p.active,
+            ms.score,
+            m.id,
+            t.tracks
+        FROM matchscore ms
+        JOIN players p ON ms.player_id = p.id
+        JOIN match m ON ms.match_id = m.id
+        JOIN teamevent t ON m.teamevent_id = t.id
+        WHERE m.season_number = ?
+    """, (season_number,))
+    return cur.fetchall()
+
+
+def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
+    """
+    Ermittelt die Reihenfolge ALLER aktiven PLTE-Spieler für die gegebene Season.
+    - Metrik: Ø(Score-Delta ggü. Median pro Match), Score wird auf 4 Tracks skaliert
+    - Kein 80%-Filter
+    - Spieler ohne Scores: alphabetisch ans Ende
+
+    Rückgabe: Liste [(id, name, away_from, away_until), ...] in Ziel-Reihenfolge.
+    """
+    # Basis: aktive PLTE + Abwesenheitsdaten
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, away_from, away_until
+        FROM players
+        WHERE active = 1 AND team = 'PLTE'
+    """)
+    base_players = cur.fetchall()  # [(id, name, away_from, away_until), ...]
+    if not base_players:
+        return []
+
+    id_to_player = {pid: (pid, name, a_from, a_until) for (pid, name, a_from, a_until) in base_players}
+
+    # Rohdaten der Season
+    rows = _fetch_season_rows(conn, season_number)
+
+    # Pro Match sammeln (nur aktive PLTE, nur vorhandene Scores)
+    scores_by_match = {}
+    for pid, name, team, active, score, match_id, tracks in rows:
+        if team != "PLTE" or not active:
+            continue
+        if score is None:
+            continue
+        scaled = score * 4 / tracks if tracks else score
+        scores_by_match.setdefault(match_id, []).append((pid, scaled))
+
+    # Delta ggü. Median je Match
+    import statistics
+    player_deltas = {}
+    player_counts = {}
+    for match_id, entries in scores_by_match.items():
+        vals = [s for _, s in entries]
+        if not vals:
+            continue
+        try:
+            med = statistics.median(vals)
+        except statistics.StatisticsError:
+            continue
+        for pid, s in entries:
+            delta = s - med
+            player_deltas.setdefault(pid, []).append(delta)
+            player_counts[pid] = player_counts.get(pid, 0) + 1
+
+    with_scores = []
+    without_scores = []
+    for pid, (pid_, name, a_from, a_until) in id_to_player.items():
+        deltas = player_deltas.get(pid)
+        if deltas:
+            avg_delta = round(sum(deltas) / len(deltas))
+            cnt = player_counts.get(pid, 0)
+            with_scores.append((avg_delta, -cnt, name.lower(), (pid_, name, a_from, a_until)))
+        else:
+            without_scores.append((name.lower(), (pid_, name, a_from, a_until)))
+
+    # Sortierung:
+    # - mit Scores: avg_delta DESC, bei Gleichstand mehr Matches zuerst (deshalb -cnt), dann Name
+    with_scores_sorted = [p for _, _, _, p in sorted(with_scores, key=lambda x: (x[0], x[1], x[2]), reverse=True)]
+    # - ohne Scores: alphabetisch
+    without_scores_sorted = [p for _, p in sorted(without_scores, key=lambda x: x[0])]
+
+    return with_scores_sorted + without_scores_sorted
+
+
+# -------------------- Excel-Generierung & Import --------------------
+
 def generate_excel(match, players, output_path):
     """
-    players: Liste von Tupeln (id, name, away_from, away_until)
+    players: Liste von Tupeln (id, name, away_from, away_until) – bereits in Zielreihenfolge.
     Excel-Spalten:
       A: MatchID
       B: PlayerID
       C: Player
       D: Score
       E: Points
-      F: Absent   <-- neu
+      F: Absent
     """
     match_id, match_date_str, season, opponent, event = match
 
     # Match-Datum bestimmen (für Abwesenheitsprüfung)
     md = _parse_date_or_none(match_date_str)
-    # Fallback, falls None: setze auf ein Datum, das nie im Intervall liegt.
     if md is None:
         md = date(1970, 1, 1)
 
@@ -163,6 +263,7 @@ def generate_excel(match, players, output_path):
         except Exception:
             pass
 
+    # Öffentlicher Web-Ordner (unverändert)
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
     return f"[{filename}]({web_url})", True
 
@@ -189,8 +290,7 @@ def import_excel_to_matchscore(match_id):
 
         with open(tsv_path, "w", encoding="utf-8") as f:
             for row in ws.iter_rows(min_row=3, values_only=True):
-                # Row hat jetzt bis zu 6 Spalten: MatchID, PlayerID, Player, Score, Points, Absent
-                # Wir ignorieren "Player" (Index 2) und lesen Absent (Index 5), falls vorhanden.
+                # Row: MatchID, PlayerID, Player, Score, Points, Absent
                 if not row or len(row) < 5 or not row[1]:
                     continue
                 mid = row[0]
@@ -199,7 +299,6 @@ def import_excel_to_matchscore(match_id):
                 points = row[4] if len(row) >= 5 else 0
                 absent_raw = row[5] if len(row) >= 6 else "false"
 
-                # Robust in int (0/1) normalisieren:
                 def _to_bool01(x):
                     if x is None:
                         return 0
@@ -208,7 +307,6 @@ def import_excel_to_matchscore(match_id):
                         return 1
                     if s in ("0", "false", "no", "n", "nein", ""):
                         return 0
-                    # falls was Komisches steht: 0
                     return 0
 
                 try:
@@ -222,7 +320,6 @@ def import_excel_to_matchscore(match_id):
 
                 absent01 = _to_bool01(absent_raw)
 
-                # TSV Zeile: mid  pid  score  points  absent01
                 f.write(f"{mid}\t{pid}\t{score}\t{points}\t{absent01}\n")
 
         imported = 0
@@ -231,7 +328,6 @@ def import_excel_to_matchscore(match_id):
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) < 5:
-                    # Backward-compat, falls alte Dateien ohne absent auftauchen
                     parts = parts + ["0"]
                 mid, player_id, score, points, absent01 = parts[:5]
                 cmd = [
@@ -279,8 +375,15 @@ def handle_command(command, args):
             if not match:
                 print("[ERROR] No match found")
                 return
-            players = get_active_players(conn)
-            url, uploaded = generate_excel(match, players, output_path=NEXTCLOUD_BASE)
+
+            # Season aus dem Match nehmen und Ranking ermitteln
+            _, _, season, _, _ = match
+            ranked_players = rank_active_plte_for_season(conn, season)
+            if not ranked_players:
+                # Fallback: unsortiert nach Name (sollte selten passieren)
+                ranked_players = get_active_players(conn)
+
+            url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
             print(f"[OK] {url} ({'Created' if uploaded else 'Already existed'})")
 
     elif command == "import":
