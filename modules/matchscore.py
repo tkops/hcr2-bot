@@ -246,12 +246,37 @@ def list_scores(*args):
         match_id = block_rows[0][1]
         match_date = block_rows[0][2]
         opponent = block_rows[0][3]
-        season = block_rows[0][4].lstrip("S")
+        season = block_rows[0][4]
+    
+        # Scores laden
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT score_ladys, score_opponent FROM match WHERE id = ?",
+                (match_id,)
+            )
+            res = cur.fetchone()
+            score_ladys, score_opponent = res if res else (0, 0)
+    
+        print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season}")
+    
+        # Ergebniszeile
+        if score_ladys or score_opponent:  # nur wenn etwas eingetragen
+            if score_ladys > score_opponent:
+                emoji = "🏆"
+            elif score_ladys < score_opponent:
+                emoji = "😢"
+            else:
+                emoji = "🤝"
+            print(f"Result: {score_ladys} : {score_opponent} {emoji}")
+    
+        print()
         print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3} {'A'}")
         print("-" * 35)
         for row in block_rows:
-            # row = (ms.id, m.id, m.start, m.opponent, s.name, p.name, score, points, absent)
             print(f"{row[0]:<6} {row[6]:<16.16} {row[7]:>5} {row[8]:>3} {('x' if row[9] else '')}")
+        print()
+
 
     if show_all or match_filter:
         current = []
