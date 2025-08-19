@@ -750,27 +750,31 @@ async def on_message(message):
     # --- Matchscores ---
     if cmd == ".x":
         if not args:
-            await message.channel.send("Usage: .x <id> <score|-> [points]")
+            # Keine Argumente -> letztes Match anzeigen
+            output = await run_hcr2(["matchscore", "list"])
+            await send_codeblock(message.channel, output)
             return
-
+    
         match_id = args[0]
         if len(args) == 1:
+            # Nur ID -> Scores für dieses Match anzeigen
             output = await run_hcr2(["matchscore", "list", "--match", match_id])
             await send_codeblock(message.channel, output)
             return
-
+    
         score_arg = args[1]
         points_arg = args[2] if len(args) > 2 else None
-
+    
         cmd_args = ["matchscore", "edit", match_id]
         if score_arg != "-":
             cmd_args += ["--score", score_arg]
         if points_arg:
             cmd_args += ["--points", points_arg]
-
+    
         output = await run_hcr2(cmd_args)
         await send_codeblock(message.channel, output)
         return
+
 
     # --- Version ---
     if cmd == ".version":
