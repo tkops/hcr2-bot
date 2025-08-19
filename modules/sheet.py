@@ -3,6 +3,7 @@ from typing import Optional, List, Tuple
 import os
 import re
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment
 from pathlib import Path
 import sys
 from secrets_config import NEXTCLOUD_AUTH
@@ -247,10 +248,23 @@ def generate_excel(match, players, output_path):
 
     ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
     ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent"])
+    # Spaltenbreiten einstellen
+    ws.column_dimensions["A"].width = 16   # MatchID
+    ws.column_dimensions["B"].width = 20  # PlayerID
+    ws.column_dimensions["C"].width = 28  # Player
+    ws.column_dimensions["D"].width = 20  # Score
+    ws.column_dimensions["E"].width = 20  # Points
+    ws.column_dimensions["F"].width = 8   # Absent
 
     for pid, name, a_from, a_until in players:
         absent_flag = _is_absent_on(md, a_from, a_until)
         ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false"])
+
+    for row in ws["A"]:  # gesamte Spalte A
+        row.alignment = Alignment(horizontal="center", vertical="center")
+    
+    for row in ws["B"]:  # gesamte Spalte B
+        row.alignment = Alignment(horizontal="center", vertical="center")
 
     wb.save(filepath)
 

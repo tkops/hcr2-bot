@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS matchscore(
     score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 75000),
     points INTEGER NOT NULL DEFAULT 0 CHECK(points BETWEEN 0 AND 300),
     absent BOOL,
+    checkin INTEGER CHECK (checkin IN (0,1)),
     UNIQUE (match_id, player_id),
     FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
