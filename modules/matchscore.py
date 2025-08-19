@@ -1,3 +1,5 @@
+# matchscore.py
+
 import sqlite3
 from datetime import datetime
 
@@ -16,15 +18,6 @@ def handle_command(cmd, args):
         delete_score(int(args[0]))
     elif cmd == "edit":
         edit_score(args)
-    elif cmd == "autoadd":
-        if len(args) > 1:
-            print("Usage: matchscore autoadd [<match_id>]")
-            return
-        match_id = int(args[0]) if args else get_latest_match_id()
-        if match_id is None:
-            print("❌ No match found.")
-            return
-        auto_add_scores(match_id)
     else:
         print(f"❌ Unknown matchscore command: {cmd}")
         print_help()
@@ -34,21 +27,12 @@ def print_help():
     print("Usage: python hcr2.py matchscore <command> [args]")
     print("\nAvailable commands:")
     print("  add <match_id> <player_id|name> <score> <points> [<absent01>]")
-    print("  list [--match <id>] [--season [<number>]]")
+    print("  list [--all] [--match <id>] [--season [<name_or_pattern>]]")
     print("  delete <id>")
     print("  edit <id> [--score <newscore>] [--points <newpoints>] [--absent true|false]")
-    print("  autoadd [<match_id>]")
 
 
-def get_latest_match_id():
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT MAX(id) FROM match")
-        row = cur.fetchone()
-        return row[0] if row and row[0] is not None else None
-
-
-# ---------- Absent-Helfer ----------
+# ---------- Absent helpers ----------
 
 def _parse_ymd(s):
     try:
@@ -70,7 +54,7 @@ def _is_absent_on(match_day, from_str, until_str):
 
 
 def _compute_absent(conn, match_id, player_id):
-    """Liest Match-Datum + Spieler-Abwesenheit und berechnet absent=True/False."""
+    """Read match date + player's away window and compute absent=True/False."""
     cur = conn.cursor()
     cur.execute("SELECT start FROM match WHERE id = ?", (match_id,))
     row = cur.fetchone()
@@ -78,7 +62,6 @@ def _compute_absent(conn, match_id, player_id):
         return False
     match_day = _parse_ymd(row[0])
 
-    # Spieler-Felder: away_from / away_until (nicht: absent_from/absent_until)
     cur.execute("SELECT away_from, away_until FROM players WHERE id = ?", (player_id,))
     prow = cur.fetchone()
     if not prow:
@@ -90,7 +73,7 @@ def _compute_absent(conn, match_id, player_id):
 # ---------- Commands ----------
 
 def add_score(args):
-    # Optionales 5. Argument: absent01 (0/1/true/false/yes/no/ja/nein)
+    # Optional 5th arg: absent01 (0/1/true/false/yes/no/ja/nein)
     if len(args) not in (4, 5):
         print("Usage: matchscore add <match_id> <player_id|name> <score> <points> [<absent01>]")
         return
@@ -104,7 +87,7 @@ def add_score(args):
         print("❌ Score or points out of valid range.")
         return
 
-    # absent-Override parsen (optional)
+    # Optional absent override
     absent_override = None
     if len(args) == 5:
         s = str(args[4]).strip().lower()
@@ -113,13 +96,12 @@ def add_score(args):
         elif s in ("0", "false", "no", "n", "nein", ""):
             absent_override = 0
         else:
-            # Unbekanntes Format: ignorieren -> None
             absent_override = None
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # player auflösen
+        # resolve player
         try:
             player_id = int(player_input)
         except ValueError:
@@ -140,10 +122,10 @@ def add_score(args):
             else:
                 player_id = matches[0][0]
 
-        # absent berechnen (oder Override verwenden)
+        # compute absent (or use override)
         absent = bool(absent_override) if absent_override is not None else _compute_absent(conn, match_id, player_id)
 
-        # Vorheriger Wert da? -> CHANGED/UNCHANGED ermitteln
+        # determine CHANGED / UNCHANGED
         cur.execute("""
             SELECT score, points, absent FROM matchscore
             WHERE match_id = ? AND player_id = ?
@@ -165,7 +147,6 @@ def add_score(args):
                               points = excluded.points,
                               absent = excluded.absent
             """, (match_id, player_id, score, points, int(absent)))
-            # Kontext-Manager commitet bei normalem Exit automatisch.
         except Exception as e:
             print(f"❌ Failed to save score: match={match_id}, player={player_input}, score={score}, points={points}")
             print(f"Error: {e}")
@@ -200,85 +181,17 @@ def delete_score(score_id):
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} {row[4]:<12} {row[5]:<6} {row[6]:<20} {row[7]:<6} {row[8]}")
 
 
-def auto_add_scores(match_id):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-
-        cur.execute("""
-            SELECT id, name FROM players
-            WHERE active = 1 AND team = 'PLTE'
-        """)
-        players = cur.fetchall()
-
-        for pid, name in players:
-            cur.execute("""
-                SELECT score, points FROM matchscore
-                WHERE match_id = ? AND player_id = ?
-            """, (match_id, pid))
-            if cur.fetchone():
-                print(f"➡️  Player {name} (ID {pid}) already has a score. Skipping.")
-                continue
-
-            while True:
-                score_input = input(f"🔢 Score for {name}: ")
-                if score_input.lower() == "cancel":
-                    print("⛔ Aborted.")
-                    return
-                if score_input.lower() == "skip":
-                    print(f"↪️  Skipping {name}.")
-                    break
-                try:
-                    score = int(score_input)
-                    if 0 <= score <= 75000:
-                        break
-                except ValueError:
-                    pass
-                print("❌ Invalid score. Try again.")
-
-            if score_input.lower() == "skip":
-                continue
-
-            while True:
-                points_input = input(f"⭐ Points for {name}: ")
-                if points_input.lower() == "cancel":
-                    print("⛔ Aborted.")
-                    return
-                if points_input.lower() == "skip":
-                    print(f"↪️  Skipping {name}.")
-                    break
-                try:
-                    points = int(points_input)
-                    if 0 <= points <= 300:
-                        break
-                except ValueError:
-                    pass
-                print("❌ Invalid points. Try again.")
-
-            if points_input.lower() == "skip":
-                continue
-
-            # absent berechnen
-            absent = _compute_absent(conn, match_id, pid)
-
-            conn.execute("""
-                INSERT INTO matchscore (match_id, player_id, score, points, absent)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(match_id, player_id)
-                DO UPDATE SET score = excluded.score,
-                              points = excluded.points,
-                              absent = excluded.absent
-            """, (match_id, pid, score, points, int(absent)))
-
-            print(f"✅ Saved for {name}: Score {score}, Points {points} (absent={'yes' if absent else 'no'})")
-
-
 def list_scores(*args):
-    match_filter = None
+    show_all = False
     season_filter = None
+    match_filter = None
 
     i = 0
     while i < len(args):
-        if args[i] == "--match" and i + 1 < len(args):
+        if args[i] == "--all":
+            show_all = True
+            i += 1
+        elif args[i] == "--match" and i + 1 < len(args):
             match_filter = int(args[i + 1])
             i += 2
         elif args[i] == "--season":
@@ -291,7 +204,7 @@ def list_scores(*args):
         else:
             i += 1
 
-    query = """
+    base_query = """
         SELECT ms.id, m.id, m.start, m.opponent,
                s.name, s.division, p.name, ms.score, ms.points, ms.absent
         FROM matchscore ms
@@ -302,16 +215,16 @@ def list_scores(*args):
     filters = []
     values = []
 
-    if match_filter:
-        filters.append("m.id = ?")
-        values.append(match_filter)
     if season_filter:
         filters.append("s.name LIKE ?")
         values.append(season_filter)
+    if match_filter:
+        filters.append("m.id = ?")
+        values.append(match_filter)
 
+    query = base_query
     if filters:
         query += " WHERE " + " AND ".join(filters)
-
     query += " ORDER BY m.id DESC, ms.score DESC"
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -323,17 +236,43 @@ def list_scores(*args):
         print("⚠️ No scores found.")
         return
 
-    if match_filter:
-        match_id = rows[0][1]
-        match_date = rows[0][2]
-        opponent = rows[0][3]
-        season = rows[0][4].lstrip("S")  # z. B. "S51" → "51"
-        print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season}\n")
+    # Default: only the latest match (within the filtered set)
+    if not show_all and not match_filter:
+        last_match_id = rows[0][1]
+        rows = [r for r in rows if r[1] == last_match_id]
 
-    print(f"{'ID':<4} {'Player':<20} {'Score':<6} {'Points':<6} {'Absent'}")
-    print("-" * 50)
-    for row in rows:
-        print(f"{row[0]:<4} {row[6]:<20} {row[7]:<6} {row[8]:<6} {('yes' if row[9] else 'no')}")
+    # Printing
+    def print_block(block_rows):
+        match_id = block_rows[0][1]
+        match_date = block_rows[0][2]
+        opponent = block_rows[0][3]
+        season = block_rows[0][4].lstrip("S")
+        print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season}\n")
+        print(f"{'ID':<4} {'Player':<20} {'Score':<6} {'Points':<6} {'Absent'}")
+        print("-" * 50)
+        for row in block_rows:
+            print(f"{row[0]:<4} {row[6]:<20} {row[7]:<6} {row[8]:<6} {('yes' if row[9] else 'no')}")
+        print()
+
+    if show_all or match_filter:
+        # group by match id and print each block
+        current = []
+        current_mid = None
+        for r in rows:
+            if current_mid is None:
+                current_mid = r[1]
+                current = [r]
+            elif r[1] == current_mid:
+                current.append(r)
+            else:
+                print_block(current)
+                current_mid = r[1]
+                current = [r]
+        if current:
+            print_block(current)
+    else:
+        # only one block (latest)
+        print_block(rows)
 
 
 def edit_score(args):
@@ -344,7 +283,7 @@ def edit_score(args):
     score_id = int(args[0])
     new_score = None
     new_points = None
-    new_absent = None  # <-- neu
+    new_absent = None
 
     i = 1
     while i < len(args):
@@ -354,7 +293,7 @@ def edit_score(args):
         elif args[i] == "--points" and i + 1 < len(args):
             new_points = int(args[i + 1])
             i += 2
-        elif args[i] == "--absent" and i + 1 < len(args):  # <-- neu
+        elif args[i] == "--absent" and i + 1 < len(args):
             val = args[i + 1].strip().lower()
             if val in ("1", "true", "yes", "y", "ja"):
                 new_absent = 1
@@ -381,7 +320,7 @@ def edit_score(args):
         if new_absent is not None:
             cur.execute("UPDATE matchscore SET absent = ? WHERE id = ?", (new_absent, score_id))
         elif new_score is not None or new_points is not None:
-            # nur wenn absent nicht manuell gesetzt wurde: neu berechnen
+            # Recompute absent only if not manually set this call
             cur.execute("SELECT match_id, player_id FROM matchscore WHERE id = ?", (score_id,))
             res = cur.fetchone()
             if res:
@@ -410,6 +349,4 @@ def edit_score(args):
         print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} "
               f"{row[4]:<12} {row[5]:<6} {row[6]:<20} "
               f"{row[7]:<6} {row[8]:<6} {('yes' if row[9] else 'no')}")
-
-# keep this at end
 
