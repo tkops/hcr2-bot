@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime, date
 
 DB_PATH = "db/hcr2.db"
-NEXTCLOUD_BASE = Path("Power-Ladys/Scores")
+NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
 
@@ -163,7 +163,7 @@ def generate_excel(match, players, output_path):
         except Exception:
             pass
 
-    web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
+    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
     return f"[{filename}]({web_url})", True
 
 
@@ -251,7 +251,7 @@ def import_excel_to_matchscore(match_id):
                 except Exception:
                     pass
 
-        web_url = f"http://cloud-pl.de?path=/Scores/S{season}"
+        web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
         print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed)")
 
