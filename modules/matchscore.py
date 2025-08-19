@@ -247,12 +247,11 @@ def list_scores(*args):
         match_date = block_rows[0][2]
         opponent = block_rows[0][3]
         season = block_rows[0][4].lstrip("S")
-        print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season}\n")
-        print(f"{'ID':<4} {'Player':<20} {'Score':<6} {'Points':<6} {'Absent'}")
-        print("-" * 50)
+        print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3} {'A'}")
+        print("-" * 35)
         for row in block_rows:
-            print(f"{row[0]:<4} {row[6]:<20} {row[7]:<6} {row[8]:<6} {('yes' if row[9] else 'no')}")
-        print()
+            # row = (ms.id, m.id, m.start, m.opponent, s.name, p.name, score, points, absent)
+            print(f"{row[0]:<6} {row[6]:<16.16} {row[7]:>5} {row[8]:>3} {('x' if row[9] else '')}")
 
     if show_all or match_filter:
         current = []
@@ -340,25 +339,27 @@ def edit_score(args):
         conn.commit()
         _print_score_row(score_id)
 
-
 def _print_score_row(score_id: int):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT ms.id, m.id, m.start, m.opponent,
-                   s.name, s.division, p.name, ms.score, ms.points, ms.absent
+            SELECT
+                ms.id, m.id, m.start, m.opponent,
+                s.name, s.division, p.name,
+                ms.score, ms.points, ms.absent
             FROM matchscore ms
-            JOIN match m ON ms.match_id = m.id
-            JOIN season s ON m.season_number = s.number
-            JOIN players p ON ms.player_id = p.id
+            JOIN match   m ON ms.match_id      = m.id
+            JOIN season  s ON m.season_number  = s.number
+            JOIN players p ON ms.player_id     = p.id
             WHERE ms.id = ?
         """, (score_id,))
         row = cur.fetchone()
+
         if not row:
             print(f"⚠️ No entry found with ID {score_id}.")
             return
 
-        print(f"\n✅ Entry updated:")
+        print("\n✅ Entry updated:")
         print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} "
               f"{'Season':<12} {'Div':<6} {'Player':<20} "
               f"{'Score':<6} {'Points':<6} {'Absent'}")
