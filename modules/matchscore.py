@@ -364,6 +364,7 @@ def edit_score(args):
         conn.commit()
         _print_score_row(score_id)
 
+
 def _print_score_row(score_id: int):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -384,12 +385,23 @@ def _print_score_row(score_id: int):
             print(f"⚠️ No entry found with ID {score_id}.")
             return
 
+        # Variablen aus row extrahieren
+        ms_id      = row[0]
+        match_id   = row[1]
+        match_date = row[2]
+        opponent   = row[3]
+        season     = row[4]
+        division   = row[5]
+        player     = row[6]
+        score      = row[7]
+        points     = row[8]
+        absent     = row[9]
+
         print("\n✅ Entry updated:")
-        print(f"{'ID':<3} {'Match':<6} {'Date':<10} {'Opponent':<15} "
-              f"{'Season':<12} {'Div':<6} {'Player':<20} "
-              f"{'Score':<6} {'Points':<6} {'Absent'}")
-        print("-" * 112)
-        print(f"{row[0]:<3} {row[1]:<6} {row[2]:<10} {row[3]:<15} "
-              f"{row[4]:<12} {row[5]:<6} {row[6]:<20} "
-              f"{row[7]:<6} {row[8]:<6} {('yes' if row[9] else 'no')}")
+        print(f"📊 Match {match_id} – {opponent} | {match_date}")
+        print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3} {'Abs'}")
+        print("-" * 37)
+        print(f"{ms_id:<6} {player:<16.16} {score:>5} {points:>3} {('yes' if absent else 'no')}")
+        print()
+
 
