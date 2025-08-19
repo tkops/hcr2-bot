@@ -7,7 +7,7 @@ import sys
 import subprocess
 import shlex  # für .p++ mit Anführungszeichen
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
-from version import get_version
+from version import get_version, get_history
 
 from discord.ext import tasks  # Scheduler
 from zoneinfo import ZoneInfo   # Zeitzone Europe/Berlin
@@ -778,8 +778,12 @@ async def on_message(message):
 
     # --- Version ---
     if cmd == ".version":
-        await message.channel.send(f"📦 Current version: `{get_version()}`")
+        msg = [f"📦 Current version: `{get_version()}`\n\n**Recent changes:**"]
+        for v, d, c in get_history(10):
+            msg.append(f"- `{v}` ({d}):\n{c}")
+        await message.channel.send("\n".join(msg))
         return
+
 
     if cmd == ".t+":
         # Erwartet: .t+ <name> <kw>  (kw = 2025/38 oder 2025-38)
