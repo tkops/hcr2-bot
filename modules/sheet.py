@@ -95,7 +95,6 @@ def upload_to_nextcloud(local_path, remote_path):
 
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
-    # Download bleibt unter dem alten WebDAV-Pfad
     remote_path = f"Power-Ladys-Scores/S{season}/{filename}"
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
     curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
@@ -266,42 +265,123 @@ def import_excel_to_matchscore(match_id):
         wb = load_workbook(filename=local_path, data_only=True)
         ws = wb.active
 
+        # ---------- Einlesen + Plausi-Checks ----------
+        errors = []
+        entries = []  # dicts: {'row': r, 'pid': pid, 'score': s, 'points': p, 'absent': a, 'checkin': c}
+
+        def strict_int(cell_val, label, row_idx):
+            # Pflichtfeld: keine Leere, kein Text-Müll, nur ganze Zahlen
+            if cell_val is None or (isinstance(cell_val, str) and cell_val.strip() == ""):
+                errors.append(f"Row {row_idx}: {label} must not be empty.")
+                return None
+            if isinstance(cell_val, float):
+                if cell_val.is_integer():
+                    return int(cell_val)
+                errors.append(f"Row {row_idx}: {label} must be an integer, got float={cell_val}.")
+                return None
+            if isinstance(cell_val, int):
+                return cell_val
+            if isinstance(cell_val, str):
+                s = cell_val.strip()
+                if s.isdigit():
+                    return int(s)
+                errors.append(f"Row {row_idx}: {label} must be a number, got '{cell_val}'.")
+                return None
+            # other types
+            errors.append(f"Row {row_idx}: {label} has invalid type {type(cell_val).__name__}.")
+            return None
+
+        def to_bool01(x):
+            if x is None:
+                return 0
+            s = str(x).strip().lower()
+            if s in ("1", "true", "yes", "y", "ja"):
+                return 1
+            if s in ("0", "false", "no", "n", "nein", ""):
+                return 0
+            return 0
+
+        # Sammle alle Zeilen (ab Zeile 3)
+        row_idx = 3
+        for row in ws.iter_rows(min_row=3, values_only=True):
+            # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
+            if not row or len(row) < 5 or not row[1]:
+                row_idx += 1
+                continue
+
+            mid = row[0]
+            pid = row[1]
+            score_cell = row[3] if len(row) >= 4 else None
+            points_cell = row[4] if len(row) >= 5 else None
+            absent_raw = row[5] if len(row) >= 6 else "false"
+            checkin_raw = row[6] if len(row) >= 7 else "false"
+
+            # Pflichtfeld- und Typprüfung
+            score_val = strict_int(score_cell, "Score", row_idx)
+            points_val = strict_int(points_cell, "Points", row_idx)
+
+            # Range
+            if score_val is not None and not (0 <= score_val <= 75000):
+                errors.append(f"Row {row_idx}: Score out of range (0..75000): {score_val}")
+            if points_val is not None and not (0 <= points_val <= 300):
+                errors.append(f"Row {row_idx}: Points out of range (0..300): {points_val}")
+
+            # Absent/Checkin
+            absent01 = to_bool01(absent_raw)
+            checkin01 = to_bool01(checkin_raw)
+
+            # Nur aufnehmen, wenn Score/Points nicht None (sonst Fehlerliste, aber wir prüfen weiter)
+            if score_val is not None and points_val is not None:
+                entries.append({
+                    "row": row_idx,
+                    "pid": int(pid),
+                    "score": int(score_val),
+                    "points": int(points_val),
+                    "absent": int(absent01),
+                    "checkin": int(checkin01),
+                })
+
+            row_idx += 1
+
+        # High Points > 20 dürfen nicht doppelt vorkommen
+        seen_high = {}
+        for e in entries:
+            p = e["points"]
+            if p > 20:
+                seen_high.setdefault(p, []).append(e)
+        for pval, rows in seen_high.items():
+            if len(rows) > 1:
+                ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows)
+                errors.append(f"High points duplicated (>20): {pval} appears in {ids}")
+
+        # Monotonie: Sortiere nach Score DESC; Points müssen non-increasing sein;
+        # Gleichstand bei Points nur erlaubt, wenn beide Points < 20.
+        entries_sorted = sorted(entries, key=lambda x: (-x["score"], x["pid"]))
+        for i in range(len(entries_sorted) - 1):
+            a = entries_sorted[i]
+            b = entries_sorted[i + 1]
+            # a hat >= Score von b
+            if a["points"] < b["points"]:
+                errors.append(
+                    f"Monotony violation: row {a['row']} (score {a['score']}, points {a['points']}) "
+                    f"vs row {b['row']} (score {b['score']}, points {b['points']})"
+                )
+            if a["points"] == b["points"] and a["points"] >= 20:
+                errors.append(
+                    f"Equal high points not allowed (>=20): rows {a['row']} & {b['row']} both {a['points']}"
+                )
+
+        # Falls Fehler → abbrechen
+        if errors:
+            print("❌ Import aborted due to validation errors:")
+            for msg in errors:
+                print(" -", msg)
+            return
+
+        # ---------- TSV schreiben + an matchscore weiterreichen ----------
         with open(tsv_path, "w", encoding="utf-8") as f:
-            for row in ws.iter_rows(min_row=3, values_only=True):
-                # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
-                if not row or len(row) < 5 or not row[1]:
-                    continue
-                mid = row[0]
-                pid = row[1]
-                score = row[3] if len(row) >= 4 else 0
-                points = row[4] if len(row) >= 5 else 0
-                absent_raw = row[5] if len(row) >= 6 else "false"
-                checkin_raw = row[6] if len(row) >= 7 else "false"
-
-                def _to_bool01(x):
-                    if x is None:
-                        return 0
-                    s = str(x).strip().lower()
-                    if s in ("1", "true", "yes", "y", "ja"):
-                        return 1
-                    if s in ("0", "false", "no", "n", "nein", ""):
-                        return 0
-                    return 0
-
-                try:
-                    score = int(score) if score not in (None, "") else 0
-                except Exception:
-                    score = 0
-                try:
-                    points = int(points) if points not in (None, "") else 0
-                except Exception:
-                    points = 0
-
-                absent01 = _to_bool01(absent_raw)
-                checkin01 = _to_bool01(checkin_raw)
-
-                # TSV: 6 Spalten (inkl. checkin)
-                f.write(f"{mid}\t{pid}\t{score}\t{points}\t{absent01}\t{checkin01}\n")
+            for e in entries:
+                f.write(f"{match_id}\t{e['pid']}\t{e['score']}\t{e['points']}\t{e['absent']}\t{e['checkin']}\n")
 
         imported = 0
         changed = 0
@@ -309,7 +389,7 @@ def import_excel_to_matchscore(match_id):
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) < 6:
-                    parts = parts + ["0"]  # falls checkin fehlt
+                    parts = parts + ["0"]
                 mid, player_id, score, points, absent01, checkin01 = parts[:6]
                 cmd = [
                     "python", "hcr2.py", "matchscore", "add",
@@ -359,7 +439,6 @@ def handle_command(command, args):
                 print("[ERROR] No match found")
                 return
 
-            # Season holen und Ranking ermitteln
             _, _, season, _, _ = match
             ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
 
