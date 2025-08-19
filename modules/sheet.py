@@ -1,17 +1,15 @@
 import sqlite3
 from typing import Optional, List, Tuple
-import os
 import re
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment
 from pathlib import Path
-import sys
 from secrets_config import NEXTCLOUD_AUTH
 import subprocess
 from datetime import datetime, date
 
 DB_PATH = "db/hcr2.db"
-NEXTCLOUD_BASE = Path("Power-Ladys-Scores")  # Upload-Ziel (Ordnerstruktur bleibt darunter S{season}/...)
+NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
 
@@ -31,10 +29,6 @@ def get_match_info(conn, match_id):
 
 
 def get_active_players(conn) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
-    """
-    Holt aktive PLTE-Spieler inkl. Abwesenheitsfenster.
-    Rückgabe: [(id, name, away_from, away_until), ...]
-    """
     c = conn.cursor()
     c.execute("""
         SELECT id, name, away_from, away_until
@@ -51,12 +45,10 @@ def _parse_date_or_none(s: str):
     s = str(s).strip()
     if not s:
         return None
-    # Versuche ISO first (YYYY-MM-DD)
     try:
         return datetime.fromisoformat(s).date()
     except Exception:
         pass
-    # Fallback: DD.MM.YYYY
     try:
         return datetime.strptime(s, "%d.%m.%Y").date()
     except Exception:
@@ -64,13 +56,8 @@ def _parse_date_or_none(s: str):
 
 
 def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> bool:
-    """
-    True, wenn match_day innerhalb [away_from, away_until] (inkl. Grenzen) liegt.
-    Beide Felder sind TEXT / NULL. Teilintervalle werden sinnvoll interpretiert.
-    """
     d_from = _parse_date_or_none(frm)
     d_until = _parse_date_or_none(until)
-
     if d_from and d_until:
         return d_from <= match_day <= d_until
     if d_from and not d_until:
@@ -108,22 +95,16 @@ def upload_to_nextcloud(local_path, remote_path):
 
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
-    # Beachte: Download-Pfad bleibt wie gehabt unter "Power-Ladys/Scores"
-    remote_path = f"Power-Ladys/Scores/S{season}/{filename}"
+    # Download bleibt unter dem alten WebDAV-Pfad
+    remote_path = f"Power-Ladys-Scores/S{season}/{filename}"
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
-
-    curl_cmd = [
-        "curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url
-    ]
+    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
     subprocess.run(curl_cmd, capture_output=True)
 
 
-# -------------------- Ranking-Logik für Sheet-Reihenfolge --------------------
+# -------------------- Ranking-Logik --------------------
 
 def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
-    """
-    Lädt alle Scores der Season mit nötigen Joins.
-    """
     cur = conn.cursor()
     cur.execute("""
         SELECT
@@ -144,31 +125,19 @@ def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
 
 
 def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
-    """
-    Ermittelt die Reihenfolge ALLER aktiven PLTE-Spieler für die gegebene Season.
-    - Metrik: Ø(Score-Delta ggü. Median pro Match), Score wird auf 4 Tracks skaliert
-    - Kein 80%-Filter
-    - Spieler ohne Scores: alphabetisch ans Ende
-
-    Rückgabe: Liste [(id, name, away_from, away_until), ...] in Ziel-Reihenfolge.
-    """
-    # Basis: aktive PLTE + Abwesenheitsdaten
     cur = conn.cursor()
     cur.execute("""
         SELECT id, name, away_from, away_until
         FROM players
         WHERE active = 1 AND team = 'PLTE'
     """)
-    base_players = cur.fetchall()  # [(id, name, away_from, away_until), ...]
+    base_players = cur.fetchall()
     if not base_players:
         return []
-
     id_to_player = {pid: (pid, name, a_from, a_until) for (pid, name, a_from, a_until) in base_players}
 
-    # Rohdaten der Season
     rows = _fetch_season_rows(conn, season_number)
 
-    # Pro Match sammeln (nur aktive PLTE, nur vorhandene Scores)
     scores_by_match = {}
     for pid, name, team, active, score, match_id, tracks in rows:
         if team != "PLTE" or not active:
@@ -178,11 +147,9 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
         scaled = score * 4 / tracks if tracks else score
         scores_by_match.setdefault(match_id, []).append((pid, scaled))
 
-    # Delta ggü. Median je Match
     import statistics
-    player_deltas = {}
-    player_counts = {}
-    for match_id, entries in scores_by_match.items():
+    player_deltas, player_counts = {}, {}
+    for _, entries in scores_by_match.items():
         vals = [s for _, s in entries]
         if not vals:
             continue
@@ -195,8 +162,7 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
             player_deltas.setdefault(pid, []).append(delta)
             player_counts[pid] = player_counts.get(pid, 0) + 1
 
-    with_scores = []
-    without_scores = []
+    with_scores, without_scores = [], []
     for pid, (pid_, name, a_from, a_until) in id_to_player.items():
         deltas = player_deltas.get(pid)
         if deltas:
@@ -206,12 +172,8 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
         else:
             without_scores.append((name.lower(), (pid_, name, a_from, a_until)))
 
-    # Sortierung:
-    # - mit Scores: avg_delta DESC, bei Gleichstand mehr Matches zuerst (deshalb -cnt), dann Name
     with_scores_sorted = [p for _, _, _, p in sorted(with_scores, key=lambda x: (x[0], x[1], x[2]), reverse=True)]
-    # - ohne Scores: alphabetisch
     without_scores_sorted = [p for _, p in sorted(without_scores, key=lambda x: x[0])]
-
     return with_scores_sorted + without_scores_sorted
 
 
@@ -219,21 +181,13 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
 
 def generate_excel(match, players, output_path):
     """
-    players: Liste von Tupeln (id, name, away_from, away_until) – bereits in Zielreihenfolge.
-    Excel-Spalten:
-      A: MatchID
-      B: PlayerID
-      C: Player
-      D: Score
-      E: Points
-      F: Absent
+    players: (id, name, away_from, away_until) – in Zielreihenfolge.
+    Spalten:
+      A: MatchID | B: PlayerID | C: Player | D: Score | E: Points | F: Absent | G: Checkin | H: Hinweise
     """
     match_id, match_date_str, season, opponent, event = match
 
-    # Match-Datum bestimmen (für Abwesenheitsprüfung)
-    md = _parse_date_or_none(match_date_str)
-    if md is None:
-        md = date(1970, 1, 1)
+    md = _parse_date_or_none(match_date_str) or date(1970, 1, 1)
 
     safe_event = sanitize_filename(event)
     safe_opponent = sanitize_filename(opponent)
@@ -246,38 +200,48 @@ def generate_excel(match, players, output_path):
     ws = wb.active
     ws.title = "Match Info"
 
+    # Kopfzeile + Header
     ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
-    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent"])
-    # Spaltenbreiten einstellen
-    ws.column_dimensions["A"].width = 16   # MatchID
-    ws.column_dimensions["B"].width = 20  # PlayerID
-    ws.column_dimensions["C"].width = 28  # Player
-    ws.column_dimensions["D"].width = 20  # Score
-    ws.column_dimensions["E"].width = 20  # Points
-    ws.column_dimensions["F"].width = 8   # Absent
+    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Hinweise"])
 
+    # Spaltenbreiten
+    ws.column_dimensions["A"].width = 15
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 26
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 8
+    ws.column_dimensions["G"].width = 9
+    ws.column_dimensions["H"].width = 120
+
+    # Hinweise H1–H3
+    ws["H1"] = "H1: Nicht gefahren → Score=0 und Points=0 eintragen."
+    ws["H2"] = "H2: Absent wird automatisch 'true', wenn Spieler auf Away steht. Kann (true/false) manuell überschrieben werden."
+    ws["H3"] = "H3: Nicht abgemeldet + eingeloggt + nicht gefahren ⇒ Checkin=true setzen."
+    for cell_addr in ("H1", "H2", "H3"):
+        ws[cell_addr].alignment = Alignment(wrap_text=True, vertical="top")
+
+    # Datenzeilen
     for pid, name, a_from, a_until in players:
         absent_flag = _is_absent_on(md, a_from, a_until)
-        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false"])
+        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
 
-    for row in ws["A"]:  # gesamte Spalte A
-        row.alignment = Alignment(horizontal="center", vertical="center")
-    
-    for row in ws["B"]:  # gesamte Spalte B
-        row.alignment = Alignment(horizontal="center", vertical="center")
+    # A/B zentrieren (alle Zeilen)
+    align_center = Alignment(horizontal="center", vertical="center")
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+        for cell in row:
+            cell.alignment = align_center
 
     wb.save(filepath)
 
     remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
     upload_to_nextcloud(filepath, remote_path)
 
-    if filepath.exists():
-        try:
-            filepath.unlink()
-        except Exception:
-            pass
+    try:
+        filepath.unlink()
+    except Exception:
+        pass
 
-    # Öffentlicher Web-Ordner (unverändert)
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
     return f"[{filename}]({web_url})", True
 
@@ -304,7 +268,7 @@ def import_excel_to_matchscore(match_id):
 
         with open(tsv_path, "w", encoding="utf-8") as f:
             for row in ws.iter_rows(min_row=3, values_only=True):
-                # Row: MatchID, PlayerID, Player, Score, Points, Absent
+                # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
                 if not row or len(row) < 5 or not row[1]:
                     continue
                 mid = row[0]
@@ -312,6 +276,7 @@ def import_excel_to_matchscore(match_id):
                 score = row[3] if len(row) >= 4 else 0
                 points = row[4] if len(row) >= 5 else 0
                 absent_raw = row[5] if len(row) >= 6 else "false"
+                checkin_raw = row[6] if len(row) >= 7 else "false"
 
                 def _to_bool01(x):
                     if x is None:
@@ -333,33 +298,37 @@ def import_excel_to_matchscore(match_id):
                     points = 0
 
                 absent01 = _to_bool01(absent_raw)
+                checkin01 = _to_bool01(checkin_raw)
 
-                f.write(f"{mid}\t{pid}\t{score}\t{points}\t{absent01}\n")
+                # TSV: 6 Spalten (inkl. checkin)
+                f.write(f"{mid}\t{pid}\t{score}\t{points}\t{absent01}\t{checkin01}\n")
 
         imported = 0
         changed = 0
         with open(tsv_path, encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split("\t")
-                if len(parts) < 5:
-                    parts = parts + ["0"]
-                mid, player_id, score, points, absent01 = parts[:5]
+                if len(parts) < 6:
+                    parts = parts + ["0"]  # falls checkin fehlt
+                mid, player_id, score, points, absent01, checkin01 = parts[:6]
                 cmd = [
                     "python", "hcr2.py", "matchscore", "add",
-                    mid, player_id, score, points, absent01
+                    mid, player_id, score, points, absent01, checkin01
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     imported += 1
-                    if "CHANGED" in result.stdout:
+                    out = (result.stdout or "").upper()
+                    if "UNCHANGED" in out:
+                        pass
+                    elif "CHANGED" in out:
                         changed += 1
 
         for path in (local_path, tsv_path):
-            if path.exists():
-                try:
-                    path.unlink()
-                except Exception:
-                    pass
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
         web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
@@ -390,12 +359,9 @@ def handle_command(command, args):
                 print("[ERROR] No match found")
                 return
 
-            # Season aus dem Match nehmen und Ranking ermitteln
+            # Season holen und Ranking ermitteln
             _, _, season, _, _ = match
-            ranked_players = rank_active_plte_for_season(conn, season)
-            if not ranked_players:
-                # Fallback: unsortiert nach Name (sollte selten passieren)
-                ranked_players = get_active_players(conn)
+            ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
 
             url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
             print(f"[OK] {url} ({'Created' if uploaded else 'Already existed'})")
