@@ -20,6 +20,14 @@ def handle_command(cmd, args):
         show_season_score_scatter(last_n=n, height=12, symbol="🔵")
     elif cmd == "bdayplot":
         show_birthday_plot(width=32, height=31, cols_per_month=1)
+    elif cmd == "battle":
+        if len(args) < 2:
+            print("Usage: stats battle <id1> <id2> [season]")
+            return
+        id1 = int(args[0])
+        id2 = int(args[1])
+        season = int(args[2]) if len(args) > 2 else None
+        show_battle(id1, id2, season)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -32,6 +40,7 @@ def print_help():
     print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
     print("  scatter [N]               Avergage Score Plot for last N seasons")
     print("  bdayplot                  Birthday Plot")
+    print("  battle <id> <id> [s]      Seasonstat Compair")
 
 def format_k(value):
     if value is None:
@@ -461,3 +470,88 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
 
     print("```\n" + "\n".join(lines) + "\n```")
 
+
+def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15):
+    import math
+    CW = 3   # column width
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        if season_number is None:
+            season_number = find_current_season(cur)
+
+        cur.execute("""
+            SELECT m.id, m.start
+            FROM match m
+            WHERE m.season_number = ?
+            ORDER BY m.start ASC
+        """, (season_number,))
+        matches = cur.fetchall()
+        if not matches:
+            print("⚠️ No matches found.")
+            return
+
+        matches = matches[-max_matches:]
+        match_ids = [m[0] for m in matches]
+        n = len(match_ids)
+
+        cur.execute("SELECT id,name,COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
+                    (player1_id, player2_id))
+        meta = {pid: (name, emoji) for pid,name,emoji in cur.fetchall()}
+        name1, emo1 = meta.get(player1_id, (f"ID{player1_id}", "🅰️"))
+        name2, emo2 = meta.get(player2_id, (f"ID{player2_id}", "🅱️"))
+
+        cur.execute(f"""
+            SELECT ms.match_id, ms.player_id, ms.score
+            FROM matchscore ms
+            WHERE ms.match_id IN ({','.join('?'*len(match_ids))})
+              AND ms.player_id IN (?,?)
+        """, match_ids + [player1_id, player2_id])
+        rows = cur.fetchall()
+        scores = {(mid,pid):sc for mid,pid,sc in rows if sc is not None}
+
+        vals = list(scores.values())
+        if not vals:
+            print("⚠️ No scores for these players in this season.")
+            return
+        vmin, vmax = min(vals), max(vals)
+        if vmin == vmax:
+            vmin, vmax = max(0,vmin-1000), vmax+1000
+        pad = max(500, int(0.05*(vmax-vmin)))
+        vmin, vmax = max(0,vmin-pad), vmax+pad
+
+        def y_to_row(v):
+            return int(round((v-vmin)/(vmax-vmin)*(height-1)))
+
+        grid = [[" "]* (n*CW) for _ in range(height)]
+
+        for x, mid in enumerate(match_ids):
+            col = x*CW
+            for pid, emo in [(player1_id, emo1), (player2_id, emo2)]:
+                sc = scores.get((mid,pid))
+                if sc:
+                    r = height-1 - y_to_row(sc)
+                    # falls schon was drin → beide nebeneinander
+                    if grid[r][col] == " ":
+                        grid[r][col] = emo
+                    else:
+                        grid[r][col+1 if col+1<n*CW else col] = emo
+
+        # Label-Rows (oben/mitte/unten/zwischen)
+        tick_rows = {0,height//4,height//2,3*height//4,height-1}
+
+        print(f"Battle {name1} {emo1} vs {name2} {emo2} (Season {season_number})")
+        for r in range(height):
+            if r in tick_rows:
+                val = vmax - (vmax-vmin)*r/(height-1)
+                label = f"{int(val/1000)}k".rjust(4)  # exakt 4 Spalten inkl. "k"
+            else:
+                label = "    "
+            print(f"{label}│{''.join(grid[r])}")
+
+        # X-Achse (unter der │-Spalte)
+        print(" " * 4 + "└" + "─" * (n * CW))
+        
+        # X-Labels (unter der Plotfläche, also 1 weiter rechts)
+        labels = "".join(f"{i+1:>{CW}}" for i in range(n))
+        print(" " * 5 + labels)
