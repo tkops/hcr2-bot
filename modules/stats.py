@@ -1,8 +1,10 @@
 import sqlite3
 import statistics
 import datetime
+import re
 
 DB_PATH = "db/hcr2.db"
+BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # z. B. 08-18, 7/3, 07.03.
 
 def handle_command(cmd, args):
     if cmd == "avg":
@@ -16,6 +18,8 @@ def handle_command(cmd, args):
     elif cmd == "scatter":
         n = int(args[0]) if args else 20
         show_season_score_scatter(last_n=n, height=12, symbol="🔵")
+    elif cmd == "bdayplot":
+        show_birthday_plot(width=87, height=31, cols_per_month=3)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -26,7 +30,8 @@ def print_help():
     print("  avg [season]              Show player averages for current or given season")
     print("  alias                     Show alias of active players in plte team sorted by rank")
     print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
-    print("  scatter [N]               Avergage Score Plot for last N seasons)")
+    print("  scatter [N]               Avergage Score Plot for last N seasons")
+    print("  bdayplot                  Birthday Plot")
 
 def format_k(value):
     if value is None:
@@ -378,4 +383,81 @@ def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol
         print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
 
 
+def show_birthday_plot(width=77, height=31, cols_per_month=3, cell_w=2):
+    """
+    31 Zeilen (Tage 1..31, oben=31). 12 Monate, je 3 Zellen à 2 Spalten.
+    Gesamtbreite: 77 = 5 Gutter + 12*3*2.
+    Setzt EXAKT das Emoji aus players.emoji (keine Ersatzzeichen).
+    """
+    assert height == 31, "height muss 31 sein"
+    months = 12
+    gutter = 5  # "DD │ "
+
+    # Raster: keine Gaps
+    plot_cols = months * cols_per_month * cell_w      # 72
+    cells_per_row = plot_cols // cell_w               # 36
+
+    # Grid in ZELLEN (jede Zelle = String mit Breite cell_w)
+    grid = [[" " * cell_w for _ in range(cells_per_row)] for _ in range(height)]
+    slots = {(m+1, d+1): 0 for m in range(months) for d in range(height)}
+
+    placed = skipped_format = skipped_range = skipped_empty_emoji = 0
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT name, birthday, COALESCE(emoji,'')
+            FROM players
+            WHERE birthday IS NOT NULL AND birthday <> ''
+        """)
+        for name, bday, emo in cur.fetchall():
+            s = (bday or "").strip()
+            m = BIRTHDAY_RE.match(s)
+            if not m:
+                skipped_format += 1
+                continue
+            a, b = int(m.group(1)), int(m.group(2))
+            # Heuristik: a<=12 ⇒ a=Monat,b=Tag; sonst a=Tag,b=Monat
+            if 1 <= a <= 12 and 1 <= b <= 31:
+                mm, dd = a, b
+            elif 1 <= b <= 12 and 1 <= a <= 31:
+                mm, dd = b, a
+            else:
+                skipped_range += 1
+                continue
+
+            if not (1 <= dd <= 31 and 1 <= mm <= 12):
+                skipped_range += 1
+                continue
+            sym = emo.strip()
+            if not sym:
+                skipped_empty_emoji += 1
+                continue
+
+            # Position
+            row = dd - 1                  # 31 oben → Index 30
+            month_cell0 = (mm - 1) * cols_per_month
+            slot = slots[(mm, dd)]
+            cell_idx = month_cell0 + (slot if slot < cols_per_month else cols_per_month - 1)
+            if slot < cols_per_month:
+                slots[(mm, dd)] = slot + 1
+
+            grid[row][cell_idx] = sym
+            placed += 1
+
+    lines = ["Birthdays per month/day"]
+    for r in range(height - 1, -1, -1):
+        lines.append(f"{r+1:02d} │ " + "".join(grid[r]))
+
+    lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
+
+    # Monatslabels zentriert über 3 Zellen
+    label_cells = [" "] * cells_per_row
+    for mth in range(1, months + 1):
+        center_cell = (mth - 1) * cols_per_month + (cols_per_month // 2)
+        label_cells[center_cell] = str(mth)
+    label_line = "".join(s.center(cell_w) for s in label_cells)
+    lines.append(" " * gutter + label_line.rstrip())
+
+    print("```\n" + "\n".join(lines) + "\n```")
 
