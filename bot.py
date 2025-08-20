@@ -165,13 +165,25 @@ async def update_self_field(discord_key: str, flag: str, value: str):
     args = ["player", "edit", str(pid), flag, value]
     return await run_hcr2(args)
 
+
 async def send_codeblock(channel, text: str):
     if not text:
         await channel.send("⚠️ No data found or error occurred.")
-    elif len(text) <= MAX_DISCORD_MSG_LEN:
-        await channel.send(f"```\n{text}```")
+        return
+    s = text.strip()
+    if s.startswith("```") and s.endswith("```"):
+        # schon als Codeblock formatiert → direkt senden
+        if len(s) <= MAX_DISCORD_MSG_LEN:
+            await channel.send(s)
+        else:
+            await channel.send("⚠️ Output too long to display.")
     else:
-        await channel.send("⚠️ Output too long to display.")
+        # selbst einpacken
+        if len(text) + 8 <= MAX_DISCORD_MSG_LEN:
+            await channel.send(f"```\n{text}```")
+        else:
+            await channel.send("⚠️ Output too long to display.")
+
 
 # ===================== Birthday Scheduler ===================================
 
@@ -610,8 +622,16 @@ async def on_message(message):
 
     # --- Stats ---
     if cmd == ".stats":
-        full_args = ["stats", "avg"] + args
-        output = await run_hcr2(full_args)
+        sub = args[0].lower() if args else "avg"
+        rest = args[1:] if args else []
+    
+        # Alias: .stats bday → stats bdayplot
+        if sub in ("bday", "birthday"):
+            call = ["stats", "bdayplot"] + rest
+        else:
+            call = ["stats", sub] + rest
+    
+        output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return
 

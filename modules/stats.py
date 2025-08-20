@@ -19,7 +19,7 @@ def handle_command(cmd, args):
         n = int(args[0]) if args else 20
         show_season_score_scatter(last_n=n, height=12, symbol="🔵")
     elif cmd == "bdayplot":
-        show_birthday_plot(width=87, height=31, cols_per_month=3)
+        show_birthday_plot(width=32, height=31, cols_per_month=1)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -383,7 +383,7 @@ def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol
         print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
 
 
-def show_birthday_plot(width=77, height=31, cols_per_month=3, cell_w=2):
+def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     """
     31 Zeilen (Tage 1..31, oben=31). 12 Monate, je 3 Zellen à 2 Spalten.
     Gesamtbreite: 77 = 5 Gutter + 12*3*2.
@@ -445,7 +445,7 @@ def show_birthday_plot(width=77, height=31, cols_per_month=3, cell_w=2):
             grid[row][cell_idx] = sym
             placed += 1
 
-    lines = ["Birthdays per month/day"]
+    lines = ["Power Ladys Birthday Map"]
     for r in range(height - 1, -1, -1):
         lines.append(f"{r+1:02d} │ " + "".join(grid[r]))
 
