@@ -471,15 +471,27 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     print("```\n" + "\n".join(lines) + "\n```")
 
 
-def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15):
+def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15, col_width=3):
+    """
+    Battle-Plot zweier Spieler in einer Season.
+    - Höhe: 30 Zeilen (Y = Score in k, mit 5 Ticks)
+    - X: Matches (neueste 15) als Spalten, jede Spalte col_width Zeichen breit
+    - Marker: Spieler-Emojis (Fallback: 🅰️ / 🅱️)
+    """
     import math
-    CW = 3   # column width
+    CW = max(2, int(col_width))  # Spaltenbreite je Match
+
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
+        # Season bestimmen
         if season_number is None:
             season_number = find_current_season(cur)
+        if not season_number:
+            print("⚠️ No season.")
+            return
 
+        # Matches dieser Season (chronologisch)
         cur.execute("""
             SELECT m.id, m.start
             FROM match m
@@ -491,67 +503,111 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
             print("⚠️ No matches found.")
             return
 
+        # Beschränken auf letzte max_matches
         matches = matches[-max_matches:]
-        match_ids = [m[0] for m in matches]
+        match_ids = [mid for mid, _ in matches]
         n = len(match_ids)
 
-        cur.execute("SELECT id,name,COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
+        # Spieler-Namen + Emojis (mit Fallback)
+        cur.execute("SELECT id, name, COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
                     (player1_id, player2_id))
-        meta = {pid: (name, emoji) for pid,name,emoji in cur.fetchall()}
-        name1, emo1 = meta.get(player1_id, (f"ID{player1_id}", "🅰️"))
-        name2, emo2 = meta.get(player2_id, (f"ID{player2_id}", "🅱️"))
+        meta = {pid: (name, emoji or "") for pid, name, emoji in cur.fetchall()}
 
-        cur.execute(f"""
+        name1, emo1 = meta.get(player1_id, (f"ID {player1_id}", ""))
+        name2, emo2 = meta.get(player2_id, (f"ID {player2_id}", ""))
+
+        if not emo1.strip():
+            emo1 = "🅰️"
+        if not emo2.strip():
+            emo2 = "🅱️"
+
+        # Scores der beiden Spieler in den gewählten Matches
+        q = """
             SELECT ms.match_id, ms.player_id, ms.score
             FROM matchscore ms
-            WHERE ms.match_id IN ({','.join('?'*len(match_ids))})
+            WHERE ms.match_id IN ({})
               AND ms.player_id IN (?,?)
-        """, match_ids + [player1_id, player2_id])
+        """.format(",".join("?" * len(match_ids)))
+        cur.execute(q, match_ids + [player1_id, player2_id])
         rows = cur.fetchall()
-        scores = {(mid,pid):sc for mid,pid,sc in rows if sc is not None}
+        scores = {(mid, pid): sc for mid, pid, sc in rows if sc is not None}
 
         vals = list(scores.values())
         if not vals:
             print("⚠️ No scores for these players in this season.")
             return
+
+        # Y-Bereich mit etwas Luft, auf 1k runden
         vmin, vmax = min(vals), max(vals)
         if vmin == vmax:
-            vmin, vmax = max(0,vmin-1000), vmax+1000
-        pad = max(500, int(0.05*(vmax-vmin)))
-        vmin, vmax = max(0,vmin-pad), vmax+pad
+            vmin = max(0, vmin - 1000)
+            vmax = vmax + 1000
+        pad = max(500, int(0.05 * (vmax - vmin)))
+        vmin = max(0, (vmin - pad) // 1000 * 1000)
+        vmax = math.ceil((vmax + pad) / 1000) * 1000
 
-        def y_to_row(v):
-            return int(round((v-vmin)/(vmax-vmin)*(height-1)))
+        def y_to_row(v: int) -> int:
+            r = (v - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+            return int(round(r * (height - 1)))  # 0..height-1
 
-        grid = [[" "]* (n*CW) for _ in range(height)]
+        # Plot-Grid
+        plot_w = n * CW
+        grid = [[" "] * plot_w for _ in range(height)]
 
+        # Helper: Zelle (CW breit) an Position x in Zeile r setzen
+        def place_cell(row_idx: int, col_x: int, text: str):
+            s = (text or "")[:CW]
+            # zentriert in CW
+            leftpad = (CW - len(s)) // 2
+            cell = (" " * leftpad) + s
+            cell = cell.ljust(CW, " ")
+            for k, ch in enumerate(cell):
+                pos = col_x + k
+                if 0 <= pos < plot_w:
+                    grid[row_idx][pos] = ch
+
+        # Punkte setzen
         for x, mid in enumerate(match_ids):
-            col = x*CW
-            for pid, emo in [(player1_id, emo1), (player2_id, emo2)]:
-                sc = scores.get((mid,pid))
-                if sc:
-                    r = height-1 - y_to_row(sc)
-                    # falls schon was drin → beide nebeneinander
-                    if grid[r][col] == " ":
-                        grid[r][col] = emo
-                    else:
-                        grid[r][col+1 if col+1<n*CW else col] = emo
+            col = x * CW
+            here = []  # (row_idx, emoji)
+            sc1 = scores.get((mid, player1_id))
+            if sc1 is not None:
+                r = height - 1 - y_to_row(sc1)
+                here.append((r, emo1))
+            sc2 = scores.get((mid, player2_id))
+            if sc2 is not None:
+                r = height - 1 - y_to_row(sc2)
+                here.append((r, emo2))
 
-        # Label-Rows (oben/mitte/unten/zwischen)
-        tick_rows = {0,height//4,height//2,3*height//4,height-1}
+            # Falls beide gleiches y → beide in dieselbe Spalte nebeneinander
+            if len(here) == 2 and here[0][0] == here[1][0]:
+                row_idx = here[0][0]
+                combo = (here[0][1] + here[1][1])[:CW]
+                place_cell(row_idx, col, combo)
+            else:
+                for row_idx, mark in here:
+                    place_cell(row_idx, col, mark)
 
+        # Y-Achsen-Ticks (Top, 75%, 50%, 25%, Bottom)
+        tick_rows = {0, height // 4, height // 2, (3 * height) // 4, height - 1}
+
+        # Header
         print(f"Battle {name1} {emo1} vs {name2} {emo2} (Season {season_number})")
+
+        # Plot mit Y-Labels in k, sauber bündig
         for r in range(height):
             if r in tick_rows:
-                val = vmax - (vmax-vmin)*r/(height-1)
-                label = f"{int(val/1000)}k".rjust(4)  # exakt 4 Spalten inkl. "k"
+                val = vmax - (vmax - vmin) * (r / (height - 1))
+                label = f"{int(round(val/1000))}k".rjust(4)  # exakt 4 inkl. 'k'
             else:
-                label = "    "
+                label = " " * 4
+            # '│' direkt hinter die 4 Zeichen
             print(f"{label}│{''.join(grid[r])}")
 
-        # X-Achse (unter der │-Spalte)
-        print(" " * 4 + "└" + "─" * (n * CW))
-        
-        # X-Labels (unter der Plotfläche, also 1 weiter rechts)
+        # X-Achse unter die │-Spalte (1 Zeichen rechts von Label)
+        print(" " * 4 + "└" + "─" * plot_w)
+
+        # X-Labels (1..n), unter Plotstart = 1 weiter rechts
         labels = "".join(f"{i+1:>{CW}}" for i in range(n))
         print(" " * 5 + labels)
+
