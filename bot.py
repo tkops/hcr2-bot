@@ -633,16 +633,31 @@ async def on_message(message):
     if cmd == ".stats":
         sub = args[0].lower() if args else "avg"
         rest = args[1:] if args else []
-
-        # Alias: .stats bday → stats bdayplot
+    
+        # .stats bday → stats bdayplot
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
+    
+        # .stats perf → stats avg
+        # .stats perf <id> → stats avg <id>
+        elif sub == "perf":
+            call = ["stats", "avg"] + (rest[:1] if rest else [])
+    
+        # .stats battle <id1> <id2> → stats battle <id1> <id2>
+        elif sub == "battle":
+            if len(rest) != 2 or not rest[0].isdigit() or not rest[1].isdigit():
+                await message.channel.send("Usage: .stats battle <id1> <id2>")
+                return
+            call = ["stats", "battle", rest[0], rest[1]]
+    
+        # Default: .stats → stats avg  |  .stats <sub> → stats <sub> ...
         else:
             call = ["stats", sub] + rest
-
+    
         output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return
+
 
     # --- Seasons ---
     if cmd == ".s":
@@ -940,6 +955,9 @@ async def on_message(message):
                 (".acc",            "Show your account info."),
                 (".search <term>",  "Search players."),
                 (".show <id>",      "Show player by ID."),
+                (".stats",          "Show Performance Stats for current season"),
+                (".stats [type]",   "Show stats for misc types:\n"
+                                    "perf [seasonid], battle <playerid1> <playerid2>, bday"),
                 (".help",           "Show this help message."),
             ],
             total_width=68,
