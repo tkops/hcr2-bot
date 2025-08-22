@@ -299,7 +299,7 @@ HELP_PH = help_block(
                                  "keys: name, alias, gp, active, birthday, team, discord, "
                                  "about, vehicles, playstyle, language, leader, emoji."),
         (".P <term>",            "Search for Player."),
-        (".pl bday [--active t|f] [--num N]", "List birthdays sorted by next upcoming."),
+        (".pl bday",             "List birthdays sorted by next upcoming."),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".p+ <id>",             "Reactivate Player."),
