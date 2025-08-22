@@ -24,7 +24,6 @@ BIRTHDAY_IDS_RE = re.compile(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", re.MULTILINE)
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$", re.IGNORECASE)
 
 COMMANDS = {
-    ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
     ".p": ["player", "list"],
     ".m": ["match", "list"],
@@ -36,7 +35,8 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show"
+    ".search", ".show",
+    # .pl ist **kein** Public-Command
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -189,7 +189,7 @@ async def send_codeblock(channel, text: str):
 
 def _parse_birthday_ids(output: str):
     """
-    Erwartet eine Zeile 'BIRTHDAY_IDS: 12,45,78' im Output von 'player birthday'.
+    Erwartet eine Zeile 'BIRTHDAY_IDS: 12,45,78' im Output von 'player bday today'.
     Gibt Liste von IDs (Strings) zurück.
     """
     if not output:
@@ -218,7 +218,7 @@ def get_birthday_channel():
 
 async def post_birthdays_now():
     """
-    Holt IDs der Geburtstagskinder via 'player birthday',
+    Holt IDs der Geburtstagskinder via 'player bday today',
     postet Glückwunsch + für jede ID ein 'player show <id>'.
     """
     if not BIRTHDAY_CHANNEL_ID:
@@ -230,7 +230,8 @@ async def post_birthdays_now():
         print(f"⚠️ Could not resolve channel id {BIRTHDAY_CHANNEL_ID}")
         return
 
-    out = await run_hcr2(["player", "birthday"])
+    # Neu: Modulwechsel auf 'bday today'
+    out = await run_hcr2(["player", "bday", "today"])
     ids = _parse_birthday_ids(out)
 
     if not ids:
@@ -290,7 +291,7 @@ def is_public(cmd: str) -> bool:
 # ===================== Admin Sub-Help Texte (2 Spalten) ======================
 
 HELP_PH = help_block(
-    "Players (.p / .P) – Admin-Details",
+    "Players (.p / .P / .pl) – Admin-Details",
     rows=[
         (".p",                   "List active PLTE Players."),
         (".p <id>",              "Show Player details."),
@@ -298,6 +299,7 @@ HELP_PH = help_block(
                                  "keys: name, alias, gp, active, birthday, team, discord, "
                                  "about, vehicles, playstyle, language, leader, emoji."),
         (".P <term>",            "Search for Player."),
+        (".pl bday [--active t|f] [--num N]", "List birthdays sorted by next upcoming."),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".p+ <id>",             "Reactivate Player."),
@@ -388,6 +390,20 @@ async def on_message(message):
         return
 
     # ================== NEUE ADMIN-KOMMANDOS ==================
+
+    # .pl bday [--active true|false] [--num N]  → player bday list ...
+    if cmd == ".pl":
+        if not args:
+            await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+            return
+        sub = args[0].lower()
+        rest = args[1:]
+        if sub == "bday":
+            output = await run_hcr2(["player", "bday", "list"] + rest)
+            await send_codeblock(message.channel, output)
+            return
+        await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+        return
 
     # .pa <id> [1w..4w]  → player away --id <id> [--dur ...]
     if cmd == ".pa":
@@ -635,15 +651,30 @@ async def on_message(message):
         sub = args[0].lower() if args else "avg"
         rest = args[1:] if args else []
 
-        # Alias: .stats bday → stats bdayplot
+        # .stats bday → stats bdayplot
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
+
+        # .stats perf → stats avg
+        # .stats perf <id> → stats avg <id>
+        elif sub == "perf":
+            call = ["stats", "avg"] + (rest[:1] if rest else [])
+
+        # .stats battle <id1> <id2> → stats battle <id1> <id2>
+        elif sub == "battle":
+            if len(rest) != 2 or not rest[0].isdigit() or not rest[1].isdigit():
+                await message.channel.send("Usage: .stats battle <id1> <id2>")
+                return
+            call = ["stats", "battle", rest[0], rest[1]]
+
+        # Default: .stats → stats avg  |  .stats <sub> → stats <sub> ...
         else:
             call = ["stats", sub] + rest
 
         output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return
+
 
     # --- Seasons ---
     if cmd == ".s":
@@ -669,7 +700,7 @@ async def on_message(message):
         season_str, teamevent_str, date_str = tokens[0], tokens[1], tokens[2]
         opponent = " ".join(tokens[3:]).strip()
 
-        if not season_str.isdigit() or not teameevent_str.isdigit():
+        if not season_str.isdigit() or not teamevent_str.isdigit():
             await message.channel.send("⚠️ seasonid und teameventid müssen Zahlen sein.")
             return
 
@@ -914,7 +945,6 @@ async def on_message(message):
                 (".x[h]",        "Manages scores or show help."),
                 (".c <matchid>", "Create match sheet in nextcloud."),
                 (".i <matchid>", "Import match sheet from nextcloud."),
-                (".a",           "Alias-Map PLTE Team."),
                 (".v",           "List vehicles."),
                 (".s [s]",       "List matches in season [s] (default=current season)."),
                 (".version",     "Show bot version."),
@@ -942,6 +972,9 @@ async def on_message(message):
                 (".acc",            "Show your account info."),
                 (".search <term>",  "Search players."),
                 (".show <id>",      "Show player by ID."),
+                (".stats",          "Show Performance Stats for current season"),
+                (".stats [type]",   "Show stats for misc types:\n"
+                                    "perf [seasonid], battle <playerid1> <playerid2>, bday"),
                 (".help",           "Show this help message."),
             ],
             total_width=68,

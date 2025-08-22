@@ -37,8 +37,27 @@ def handle_command(cmd, args):
     elif cmd == "list-leader":
         list_leaders()
 
+    elif cmd == "bday":
+        sub = args[0].lower() if args else "today"
+        if sub == "today":
+            bday_today()
+        elif sub == "list":
+            active_val = get_arg_value(args, "--active")
+            num_val = get_arg_value(args, "--num")
+            active_only = parse_bool(active_val, default=False)
+            try:
+                num = int(num_val) if num_val is not None else None
+            except ValueError:
+                print("❌ --num expects an integer")
+                return
+            bday_list(active_only=active_only, num=num)
+        else:
+            print("Usage: player bday today | player bday list [--active true|false] [--num N]")
+
+    # --- Legacy alias (Kompatibilität) ---
     elif cmd == "birthday":
-        birthday_command()
+        bday_today()
+
 
     elif cmd == "show":
         # Flags: --id / --name / --discord
@@ -175,6 +194,43 @@ def db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = lambda cur, row: {d[0]: row[i] for i, d in enumerate(cur.description)}
     return conn
+
+def parse_bool(s, default=False):
+    if s is None:
+        return default
+    v = s.strip().lower()
+    if v in ("1", "true", "yes", "y", "on"):
+        return True
+    if v in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+def _days_until_mmdd(mmdd: str):
+    """Gibt Tage bis zum nächsten Auftreten von MM-DD zurück (ab heute)."""
+    from datetime import date
+    try:
+        m, d = map(int, mmdd.split("-"))
+    except Exception:
+        return None
+    today = date.today()
+    # handle 29.02 in Nicht-Schaltjahren → auf 01.03 schieben
+    def safe_date(y, m, d):
+        try:
+            return date(y, m, d)
+        except ValueError:
+            # 29.02 → 01.03 (einfachste robuste Wahl)
+            if m == 2 and d == 29:
+                return date(y, 3, 1)
+            return None
+    target = safe_date(today.year, m, d)
+    if target is None:
+        return None
+    if target < today:
+        target = safe_date(today.year + 1, m, d)
+        if target is None:
+            return None
+    return (target - today).days
+
 
 def get_arg_value(args, key):
     if key in args:
@@ -391,8 +447,9 @@ def list_leaders():
     print("-" * 64)
     print(f"👑 Leaders: {len(rows)}")
 
-def birthday_command():
-    """Druckt NUR 'BIRTHDAY_IDS: 12,45,78' (eine Zeile) – keine weiteren Texte."""
+
+def bday_today():
+    """Druckt 'BIRTHDAY_IDS: 12,45,78' für HEUTE (eine Zeile)."""
     today = today_mm_dd()
     with db() as conn:
         cur = conn.cursor()
@@ -403,9 +460,46 @@ def birthday_command():
             ORDER BY name COLLATE NOCASE
         """, (today,))
         ids = [str(r["id"]) for r in cur.fetchall()]
-
     if ids:
         print("BIRTHDAY_IDS: " + ",".join(ids))
+
+# Legacy-Alias für Alt-Code
+def birthday_command():
+    bday_today()
+
+def bday_list(*, active_only=False, num=None):
+    """Listet Geburtstage (ID, Name, Geburtstag, Emoji), sortiert nach nächstem Termin."""
+    with db() as conn:
+        cur = conn.cursor()
+        q = """
+            SELECT id, name, birthday, COALESCE(emoji,'') AS emoji, COALESCE(active,0) AS active
+            FROM players
+            WHERE birthday IS NOT NULL AND birthday != ''
+        """
+        if active_only:
+            q += " AND active = 1"
+        cur.execute(q)
+        rows = cur.fetchall()
+
+    items = []
+    for r in rows:
+        mmdd = r["birthday"]
+        du = _days_until_mmdd(mmdd) if mmdd else None
+        if du is None:
+            continue
+        items.append((du, r))
+
+    items.sort(key=lambda x: x[0])
+    if num is not None and num >= 0:
+        items = items[:num]
+
+    print(f"{'ID':<4} {'Name':<20} {'Birthday':<10} {'Emoji'}")
+    print("-" * 43)
+    for du, r in items:
+        print(f"{r['id']:<4} {r['name']:<20} {format_birthday(r['birthday']):<10} {r['emoji']}")
+    print("-" * 43)
+    scope = "(active only)" if active_only else "(all)"
+    print(f"Count: {len(items)} {scope}")
 
 def show_player(pid: int):
     with db() as conn:
@@ -751,7 +845,8 @@ def print_help():
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  list-leader                                 Show only leaders (id, name, discord)")
-    print("  birthday                                    Print 'BIRTHDAY_IDS: ...' for today's birthdays")
+    print("  bday today                                 Print 'BIRTHDAY_IDS: ...' for today's birthdays")
+    print("  bday list [--active true|false] [--num N]  List birthdays (ID, Name, Birthday, Emoji), sorted by next upcoming")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
     print("  edit <id>                                   Edit fields, e.g.:")
     print("      --name NAME --alias ALIAS --gp 90000 --active true|false")
