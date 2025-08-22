@@ -494,10 +494,10 @@ def bday_list(*, active_only=False, num=None):
         items = items[:num]
 
     print(f"{'ID':<4} {'Name':<20} {'Birthday':<10} {'Emoji'}")
-    print("-" * 54)
+    print("-" * 43)
     for du, r in items:
         print(f"{r['id']:<4} {r['name']:<20} {format_birthday(r['birthday']):<10} {r['emoji']}")
-    print("-" * 54)
+    print("-" * 43)
     scope = "(active only)" if active_only else "(all)"
     print(f"Count: {len(items)} {scope}")
 
