@@ -34,7 +34,7 @@ COMMANDS = {
 # Befehle, die auch normale User ausführen dürfen
 PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
-    ".vehicles", ".about", ".language", ".playstyle", ".birthday",
+    ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
     ".search", ".show"
 ]
@@ -132,6 +132,7 @@ def help_block(title: str, rows, total_width=78, left_col=30):
             first = False
     lines.append("```")
     return "\n".join(lines)
+
 # ===================== Utilities ============================================
 
 def parse_teamevent_add_args(args):
@@ -183,7 +184,6 @@ async def send_codeblock(channel, text: str):
             await channel.send(f"```\n{text}```")
         else:
             await channel.send("⚠️ Output too long to display.")
-
 
 # ===================== Birthday Scheduler ===================================
 
@@ -493,8 +493,8 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
-    # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday ---
-    if cmd in (".vehicles", ".about", ".language", ".playstyle", ".birthday"):
+    # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday / .emoji ---
+    if cmd in (".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji"):
         if not args:
             usage = {
                 ".vehicles": "Usage: .vehicles <text>",
@@ -502,6 +502,7 @@ async def on_message(message):
                 ".language": "Usage: .language <code or text>",
                 ".playstyle": "Usage: .playstyle <text>",
                 ".birthday": "Usage: .birthday <DD.MM or DD.MM.>",
+                ".emoji": "Usage: .emoji <emoji>",
             }[cmd]
             await message.channel.send(usage)
             return
@@ -514,6 +515,13 @@ async def on_message(message):
                 await message.channel.send("⚠️ Invalid format. Use `DD.MM` or `DD.MM.` (no year).")
                 return
             flag = "--birthday"
+        elif cmd == ".emoji":
+            # nimm das erste Token; erlaubt auch Custom-Emoji-Formen wie <:name:id>
+            value = args[0].strip()
+            if not value or (" " in value):
+                await message.channel.send("⚠️ Invalid format. Use `.emoji <emoji>` (single token, no spaces).")
+                return
+            flag = "--emoji"
         else:
             value = " ".join(args).strip()
             flag_map = {
@@ -624,13 +632,13 @@ async def on_message(message):
     if cmd == ".stats":
         sub = args[0].lower() if args else "avg"
         rest = args[1:] if args else []
-    
+
         # Alias: .stats bday → stats bdayplot
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
         else:
             call = ["stats", sub] + rest
-    
+
         output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return
@@ -659,7 +667,7 @@ async def on_message(message):
         season_str, teamevent_str, date_str = tokens[0], tokens[1], tokens[2]
         opponent = " ".join(tokens[3:]).strip()
 
-        if not season_str.isdigit() or not teamevent_str.isdigit():
+        if not season_str.isdigit() or not teameevent_str.isdigit():
             await message.channel.send("⚠️ seasonid und teameventid müssen Zahlen sein.")
             return
 
@@ -695,7 +703,6 @@ async def on_message(message):
         output = await run_hcr2(args)
         await send_codeblock(message.channel, output)
         return
-
 
     if cmd == ".m":
         if not args:
@@ -744,7 +751,6 @@ async def on_message(message):
         await message.channel.send("⚠️ Invalid .m format. Use `.m`, `.m <id>`, or `.m <id> key:value [...]`")
         return
 
-
     if cmd == ".M":
         if len(args) == 1 and args[0].isdigit():
             output = await run_hcr2(["match", "show", args[0]])
@@ -766,7 +772,6 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
-
     # --- Matchscores ---
     if cmd == ".x":
         if not args:
@@ -774,27 +779,26 @@ async def on_message(message):
             output = await run_hcr2(["matchscore", "list"])
             await send_codeblock(message.channel, output)
             return
-    
+
         match_id = args[0]
         if len(args) == 1:
             # Nur ID -> Scores für dieses Match anzeigen
             output = await run_hcr2(["matchscore", "list", "--match", match_id])
             await send_codeblock(message.channel, output)
             return
-    
+
         score_arg = args[1]
         points_arg = args[2] if len(args) > 2 else None
-    
+
         cmd_args = ["matchscore", "edit", match_id]
         if score_arg != "-":
             cmd_args += ["--score", score_arg]
         if points_arg:
             cmd_args += ["--points", points_arg]
-    
+
         output = await run_hcr2(cmd_args)
         await send_codeblock(message.channel, output)
         return
-
 
     # --- Version ---
     if cmd == ".version":
@@ -804,13 +808,12 @@ async def on_message(message):
         await message.channel.send("\n".join(msg))
         return
 
-
     if cmd == ".t+":
         # Erwartet: .t+ <name> <kw>  (kw = 2025/38 oder 2025-38)
         if not args:
             await message.channel.send("Usage: .t+ <name> <kw>  (e.g. .t+ Teamcup 2025/38)")
             return
-    
+
         parsed_args = parse_teamevent_add_args(args)
         output = await run_hcr2(["teamevent", "add"] + parsed_args)
         if not output:
@@ -821,7 +824,6 @@ async def on_message(message):
             await message.channel.send("```\n" + output + "```")
         return
 
-
     # --- Teamevents ---
     if cmd == ".t":
         if not args:
@@ -829,13 +831,13 @@ async def on_message(message):
             output = await run_hcr2(["teamevent", "list"])
             await send_codeblock(message.channel, output)
             return
-    
+
         if len(args) == 1 and args[0].isdigit():
             # Details eines Events anzeigen
             output = await run_hcr2(["teamevent", "show", args[0]])
             await send_codeblock(message.channel, output)
             return
-    
+
         if args[0].isdigit() and len(args) > 1:
             # Editieren: .t <id> key:value ...
             event_id = args[0]
@@ -854,7 +856,7 @@ async def on_message(message):
                 value = value.strip()
                 if key in flag_map:
                     edit_args += [flag_map[key], value]
-    
+
             output = await run_hcr2(edit_args)
             await send_codeblock(message.channel, output)
 
@@ -862,7 +864,7 @@ async def on_message(message):
             await send_codeblock(message.channel, show_out)
 
             return
-    
+
         await message.channel.send("⚠️ Invalid .t format. Use `.t`, `.t <id>`, or `.t <id> key:value [...]`")
         return
 
@@ -928,11 +930,12 @@ async def on_message(message):
             rows=[
                 (".away [1w..4w]",  "Mark yourself absent (default 1w)."),
                 (".back",           "Clear your absence."),
-                (".vehicles <t>",   "Set your preferred vehicles."),
-                (".about <t>",      "Set your about/bio text."),
-                (".language <t>",   "Set your language (e.g., german, english)."),
-                (".playstyle <t>",  "Set your playstyle."),
-                (".birthday DD.MM", "Set your birthday (no year)."),
+                (".vehicles <text>","Set your preferred vehicles."),
+                (".about <text>",      "Set your about/bio text."),
+                (".language <text>",   "Set your language (e.g., german, english)."),
+                (".playstyle <text>",  "Set your playstyle."),
+                (".birthday <DD.MM.>", "Set your birthday (no year)."),
+                (".emoji <emoji>",  "Set your personal emoji."),
                 (".leader",         "Show all leaders."),
                 (".acc",            "Show your account info."),
                 (".search <term>",  "Search players."),
