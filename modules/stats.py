@@ -1,8 +1,10 @@
 import sqlite3
 import statistics
 import datetime
+import re
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
+BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # z. B. 08-18, 7/3, 07.03.
 
 def handle_command(cmd, args):
     if cmd == "avg":
@@ -13,6 +15,19 @@ def handle_command(cmd, args):
     elif cmd == "rank":
         season_arg = int(args[0]) if args else None
         rank_active_plte(season_arg)
+    elif cmd == "scatter":
+        n = int(args[0]) if args else 20
+        show_season_score_scatter(last_n=n, height=12, symbol="🔵")
+    elif cmd == "bdayplot":
+        show_birthday_plot(width=32, height=31, cols_per_month=1)
+    elif cmd == "battle":
+        if len(args) < 2:
+            print("Usage: stats battle <id1> <id2> [season]")
+            return
+        id1 = int(args[0])
+        id2 = int(args[1])
+        season = int(args[2]) if len(args) > 2 else None
+        show_battle(id1, id2, season)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -23,6 +38,9 @@ def print_help():
     print("  avg [season]              Show player averages for current or given season")
     print("  alias                     Show alias of active players in plte team sorted by rank")
     print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
+    print("  scatter [N]               Avergage Score Plot for last N seasons")
+    print("  bdayplot                  Birthday Plot")
+    print("  battle <id> <id> [s]      Seasonstat Compair")
 
 def format_k(value):
     if value is None:
@@ -249,4 +267,347 @@ def rank_active_plte(season_number=None):
         print("-" * 31)
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
+def _fetch_avg_score_last_seasons(cur, last_n=20):
+    """
+    Liefert [(season_number, avg_score_scaled), ...] für die letzten N Seasons.
+    score wird auf 4 Tracks skaliert (wie üblich): score * 4 / tracks
+    Es werden nur aktive PLTE-Spieler berücksichtigt.
+    """
+    cur.execute("""
+        SELECT m.season_number,
+               AVG( ms.score * 4.0 / NULLIF(t.tracks, 0) ) AS avg_scaled
+        FROM matchscore ms
+        JOIN match m       ON m.id = ms.match_id
+        JOIN teamevent t   ON t.id = m.teamevent_id
+        JOIN players p     ON p.id = ms.player_id
+        WHERE ms.score IS NOT NULL
+          AND p.team = 'PLTE'
+          AND p.active = 1
+        GROUP BY m.season_number
+        ORDER BY m.season_number DESC
+        LIMIT ?
+    """, (last_n,))
+    rows = cur.fetchall()  # [(season, avg)]
+    # Für Plot: älteste→neueste (links→rechts)
+    rows.reverse()
+    return rows
+
+
+def _format_k(v):
+    return f"{int(round(v/1000.0))}k"
+
+def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
+                   title="Avg score per season (scaled)"):
+    """
+    rows: [(season_number, avg_score), ...]  (aufsteigend nach Season!)
+    width:  Gesamtbreite inkl. Y-Achse/Labels
+    height: Plot-Höhe (Zeilen)
+    x_labels: Anzahl X-Achsenlabels (z.B. 6) – gleichmäßig verteilt
+    """
+    if not rows:
+        return "```No data.```"
+    #symbol = "●"
+    symbol = "."
+
+    # --- Helpers ---
+    def _format_k(v: float) -> str:
+        return f"{int(round(v/1000.0))}k"
+
+    seasons = [int(s) for s, _ in rows]
+    vals    = [float(v) for _, v in rows]
+    n = len(seasons)
+
+    vmin, vmax = min(vals), max(vals)
+    if vmax == vmin:
+        vmax = vmin + 1.0
+
+    # Fester linker Rand (Y-Label + ' │ ') = 9 Zeichen
+    gutter = 9
+    plot_cols = max(10, width - gutter)  # Plotbreite
+    # Spaltenindex 0..plot_cols-1 gleichmäßig über alle Seasons mappen
+    col_idx = [0] * n
+    if n == 1:
+        col_idx[0] = plot_cols - 1  # rechts
+    else:
+        for i in range(n):
+            col_idx[i] = round(i * (plot_cols - 1) / (n - 1))
+
+    # Werte → Y-Level (0..height-1), unten=0
+    def to_level(v: float) -> int:
+        r = (v - vmin) / (vmax - vmin)
+        return int(round(r * (height - 1)))
+    y_levels = [to_level(v) for v in vals]
+
+    lines = [f"{title} (min={int(vmin)}, max={int(vmax)})"]
+
+    # Plotzeilen (top → bottom)
+    for h in range(height - 1, -1, -1):
+        # Y-Labels: oben / Mitte / unten in k
+        if h in {height - 1, (height - 1) // 2, 0}:
+            y_val = vmin + (vmax - vmin) * (h / (height - 1))
+            ylab = _format_k(y_val).rjust(6)
+            left = f"{ylab} │ "
+        else:
+            left = " " * (gutter - 2) + "│ "
+
+        row = [" "] * plot_cols
+        for ci, yl in zip(col_idx, y_levels):
+            if yl == h and 0 <= ci < plot_cols:
+                row[ci] = symbol
+        lines.append(left + "".join(row))
+
+    # X-Achse
+    lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
+
+    # X-Labels: exakt x_labels Positionen gleichmäßig über Plotbreite
+    if x_labels < 2:
+        x_labels = 2
+    # Zielspalten (gleichmäßiger Abstand, inkl. links/rechts)
+    label_positions = [round(j * (plot_cols - 1) / (x_labels - 1)) for j in range(x_labels)]
+    # Zu druckende Seasons (gleichmäßig über Index 0..n-1, inkl. erste/letzte)
+    label_indices   = [round(j * (n - 1) / (x_labels - 1)) for j in range(x_labels)]
+
+    lbl_buf = [" "] * plot_cols
+    for pos, idx in zip(label_positions, label_indices):
+        lab = f"S{seasons[idx]}"
+        start = min(max(0, pos - len(lab)//2), max(0, plot_cols - len(lab)))
+        for k, ch in enumerate(lab):
+            p = start + k
+            if 0 <= p < plot_cols:
+                lbl_buf[p] = ch
+
+    lines.append(" " * gutter + "".join(lbl_buf).rstrip())
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+
+def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        rows = _fetch_avg_score_last_seasons(cur, last_n=last_n)  # wie zuvor
+        if not rows:
+            print("⚠️ No data.")
+            return
+        print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
+
+
+def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
+    """
+    31 Zeilen (Tage 1..31, oben=31). 12 Monate, je 3 Zellen à 2 Spalten.
+    Gesamtbreite: 77 = 5 Gutter + 12*3*2.
+    Setzt EXAKT das Emoji aus players.emoji (keine Ersatzzeichen).
+    """
+    assert height == 31, "height muss 31 sein"
+    months = 12
+    gutter = 5  # "DD │ "
+
+    # Raster: keine Gaps
+    plot_cols = months * cols_per_month * cell_w      # 72
+    cells_per_row = plot_cols // cell_w               # 36
+
+    # Grid in ZELLEN (jede Zelle = String mit Breite cell_w)
+    grid = [[" " * cell_w for _ in range(cells_per_row)] for _ in range(height)]
+    slots = {(m+1, d+1): 0 for m in range(months) for d in range(height)}
+
+    placed = skipped_format = skipped_range = skipped_empty_emoji = 0
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT name, birthday, COALESCE(emoji,'')
+            FROM players
+            WHERE birthday IS NOT NULL AND birthday <> ''
+        """)
+        for name, bday, emo in cur.fetchall():
+            s = (bday or "").strip()
+            m = BIRTHDAY_RE.match(s)
+            if not m:
+                skipped_format += 1
+                continue
+            a, b = int(m.group(1)), int(m.group(2))
+            # Heuristik: a<=12 ⇒ a=Monat,b=Tag; sonst a=Tag,b=Monat
+            if 1 <= a <= 12 and 1 <= b <= 31:
+                mm, dd = a, b
+            elif 1 <= b <= 12 and 1 <= a <= 31:
+                mm, dd = b, a
+            else:
+                skipped_range += 1
+                continue
+
+            if not (1 <= dd <= 31 and 1 <= mm <= 12):
+                skipped_range += 1
+                continue
+            sym = emo.strip()
+            if not sym:
+                skipped_empty_emoji += 1
+                continue
+
+            # Position
+            row = dd - 1                  # 31 oben → Index 30
+            month_cell0 = (mm - 1) * cols_per_month
+            slot = slots[(mm, dd)]
+            cell_idx = month_cell0 + (slot if slot < cols_per_month else cols_per_month - 1)
+            if slot < cols_per_month:
+                slots[(mm, dd)] = slot + 1
+
+            grid[row][cell_idx] = sym
+            placed += 1
+
+    lines = ["Power Ladys Birthday Map"]
+    for r in range(height - 1, -1, -1):
+        lines.append(f"{r+1:02d} │ " + "".join(grid[r]))
+
+    lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
+
+    # Monatslabels zentriert über 3 Zellen
+    label_cells = [" "] * cells_per_row
+    for mth in range(1, months + 1):
+        center_cell = (mth - 1) * cols_per_month + (cols_per_month // 2)
+        label_cells[center_cell] = str(mth)
+    label_line = "".join(s.center(cell_w) for s in label_cells)
+    lines.append(" " * gutter + label_line.rstrip())
+
+    print("```\n" + "\n".join(lines) + "\n```")
+
+
+def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15, col_width=3):
+    """
+    Battle-Plot zweier Spieler in einer Season.
+    - Höhe: 30 Zeilen (Y = Score in k, mit 5 Ticks)
+    - X: Matches (neueste 15) als Spalten, jede Spalte col_width Zeichen breit
+    - Marker: Spieler-Emojis (Fallback: 🅰️ / 🅱️)
+    """
+    import math
+    CW = max(2, int(col_width))  # Spaltenbreite je Match
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Season bestimmen
+        if season_number is None:
+            season_number = find_current_season(cur)
+        if not season_number:
+            print("⚠️ No season.")
+            return
+
+        # Matches dieser Season (chronologisch)
+        cur.execute("""
+            SELECT m.id, m.start
+            FROM match m
+            WHERE m.season_number = ?
+            ORDER BY m.start ASC
+        """, (season_number,))
+        matches = cur.fetchall()
+        if not matches:
+            print("⚠️ No matches found.")
+            return
+
+        # Beschränken auf letzte max_matches
+        matches = matches[-max_matches:]
+        match_ids = [mid for mid, _ in matches]
+        n = len(match_ids)
+
+        # Spieler-Namen + Emojis (mit Fallback)
+        cur.execute("SELECT id, name, COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
+                    (player1_id, player2_id))
+        meta = {pid: (name, emoji or "") for pid, name, emoji in cur.fetchall()}
+
+        name1, emo1 = meta.get(player1_id, (f"ID {player1_id}", ""))
+        name2, emo2 = meta.get(player2_id, (f"ID {player2_id}", ""))
+
+        if not emo1.strip():
+            emo1 = "🅰️"
+        if not emo2.strip():
+            emo2 = "🅱️"
+
+        # Scores der beiden Spieler in den gewählten Matches
+        q = """
+            SELECT ms.match_id, ms.player_id, ms.score
+            FROM matchscore ms
+            WHERE ms.match_id IN ({})
+              AND ms.player_id IN (?,?)
+        """.format(",".join("?" * len(match_ids)))
+        cur.execute(q, match_ids + [player1_id, player2_id])
+        rows = cur.fetchall()
+        scores = {(mid, pid): sc for mid, pid, sc in rows if sc is not None}
+
+        vals = list(scores.values())
+        if not vals:
+            print("⚠️ No scores for these players in this season.")
+            return
+
+        # Y-Bereich mit etwas Luft, auf 1k runden
+        vmin, vmax = min(vals), max(vals)
+        if vmin == vmax:
+            vmin = max(0, vmin - 1000)
+            vmax = vmax + 1000
+        pad = max(500, int(0.05 * (vmax - vmin)))
+        vmin = max(0, (vmin - pad) // 1000 * 1000)
+        vmax = math.ceil((vmax + pad) / 1000) * 1000
+
+        def y_to_row(v: int) -> int:
+            r = (v - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+            return int(round(r * (height - 1)))  # 0..height-1
+
+        # Plot-Grid
+        plot_w = n * CW
+        grid = [[" "] * plot_w for _ in range(height)]
+
+        # Helper: Zelle (CW breit) an Position x in Zeile r setzen
+        def place_cell(row_idx: int, col_x: int, text: str):
+            s = (text or "")[:CW]
+            # zentriert in CW
+            leftpad = (CW - len(s)) // 2
+            cell = (" " * leftpad) + s
+            cell = cell.ljust(CW, " ")
+            for k, ch in enumerate(cell):
+                pos = col_x + k
+                if 0 <= pos < plot_w:
+                    grid[row_idx][pos] = ch
+
+        # Punkte setzen
+        for x, mid in enumerate(match_ids):
+            col = x * CW
+            here = []  # (row_idx, emoji)
+            sc1 = scores.get((mid, player1_id))
+            if sc1 is not None:
+                r = height - 1 - y_to_row(sc1)
+                here.append((r, emo1))
+            sc2 = scores.get((mid, player2_id))
+            if sc2 is not None:
+                r = height - 1 - y_to_row(sc2)
+                here.append((r, emo2))
+
+            # Falls beide gleiches y → beide in dieselbe Spalte nebeneinander
+            if len(here) == 2 and here[0][0] == here[1][0]:
+                row_idx = here[0][0]
+                combo = (here[0][1] + here[1][1])[:CW]
+                place_cell(row_idx, col, combo)
+            else:
+                for row_idx, mark in here:
+                    place_cell(row_idx, col, mark)
+
+        # Y-Achsen-Ticks (Top, 75%, 50%, 25%, Bottom)
+        tick_rows = {0, height // 4, height // 2, (3 * height) // 4, height - 1}
+
+        # Header
+        print(f"Battle {name1} {emo1} vs {name2} {emo2} (Season {season_number})")
+
+        # Plot mit Y-Labels in k, sauber bündig
+        for r in range(height):
+            if r in tick_rows:
+                val = vmax - (vmax - vmin) * (r / (height - 1))
+                label = f"{int(round(val/1000))}k".rjust(4)  # exakt 4 inkl. 'k'
+            else:
+                label = " " * 4
+            # '│' direkt hinter die 4 Zeichen
+            print(f"{label}│{''.join(grid[r])}")
+
+        # X-Achse unter die │-Spalte (1 Zeichen rechts von Label)
+        print(" " * 4 + "└" + "─" * plot_w)
+
+        # X-Labels (1..n), unter Plotstart = 1 weiter rechts
+        labels = "".join(f"{i+1:>{CW}}" for i in range(n))
+        print(" " * 5 + labels)
 

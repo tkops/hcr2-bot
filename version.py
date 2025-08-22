@@ -1,6 +1,7 @@
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 HISTORY = [
+    ("0.3.0", "2025-08-19", "Plot stats and some optimizations"),
     ("0.2.0", "2025-08-19", "Base functions optimized"),
     ("0.1.1", "2025-07-30", "Nextcloud Integration"),
     ("0.1.0", "2025-07-15", "Initial version"),

@@ -2,7 +2,7 @@ import csv
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 TSV_FILE = "all.tsv"
 
 def get_season_number(date: datetime) -> int:

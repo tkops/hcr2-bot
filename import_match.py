@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import argparse
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 TSV_FILE = "all.tsv"
 WINDOW_DAYS = 15  # ±7 Tage "grob passt"
 

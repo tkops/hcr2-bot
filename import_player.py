@@ -1,7 +1,7 @@
 import sqlite3
 import sys
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 TSV_FILE = "all.tsv"
 
 def import_players(do_import=False):
