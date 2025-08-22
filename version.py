@@ -1,6 +1,7 @@
 VERSION = "0.3.2"
 
 HISTORY = [
+    ("0.3.3", "2025-08-22", "Fix bday help"),
     ("0.3.2", "2025-08-22", "Add birthday list"),
     ("0.3.1", "2025-08-22", "Update/Add some help messages"),
     ("0.3.0", "2025-08-22", "Plot stats and some optimizations"),
