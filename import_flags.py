@@ -1,7 +1,7 @@
 import sqlite3
 import requests
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 JSON_URL = "https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.json"
 
 def ensure_table(conn):

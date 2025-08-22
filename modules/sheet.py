@@ -8,7 +8,7 @@ from secrets_config import NEXTCLOUD_AUTH
 import subprocess
 from datetime import datetime, date
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 

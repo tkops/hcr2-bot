@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 from collections import Counter, defaultdict
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 TSV_FILE = "all.tsv"
 HCR2_CLI = "python hcr2.py"
 DO_IMPORT = "--import" in sys.argv

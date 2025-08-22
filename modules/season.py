@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 VALID_DIVISIONS = {"DIV1", "DIV2", "DIV3", "DIV4", "DIV5", "DIV6", "DIV7", "CC"}
 
 

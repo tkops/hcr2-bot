@@ -3,7 +3,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 SCHEMA_OUTPUT = "schema.sql"
 
 # --- Helpers ---------------------------------------------------------------

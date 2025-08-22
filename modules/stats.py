@@ -3,7 +3,7 @@ import statistics
 import datetime
 import re
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # z. B. 08-18, 7/3, 07.03.
 
 def handle_command(cmd, args):

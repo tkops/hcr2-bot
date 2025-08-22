@@ -3,7 +3,7 @@ import yaml
 import sys
 import os
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 
 
 def handle_command(cmd, args):

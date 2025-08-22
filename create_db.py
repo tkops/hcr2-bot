@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import difflib
 
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 SCHEMA_FILE = "schema.sql"
 
 def dump_schema(conn):

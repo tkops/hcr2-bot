@@ -5,7 +5,7 @@ import textwrap
 from datetime import datetime, timedelta
 
 # =====================[ Konfiguration ]=====================
-DB_PATH = "db/hcr2.db"
+DB_PATH = "../hcr2-db/hcr2.db"
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
 
 # =====================[ CLI Dispatcher ]====================
@@ -290,13 +290,15 @@ def grep_players(term):
     print("-" * 74)
 
 # =====================[ Listen & Anzeigen ]================
+
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with db() as conn:
         cur = conn.cursor()
         q = """
             SELECT id, name, alias, garage_power, active, created_at,
                    birthday, team, COALESCE(discord_name,'-') AS discord_name,
-                   COALESCE(is_leader,0) AS is_leader
+                   COALESCE(is_leader,0) AS is_leader,
+                   active_modified, away_until
             FROM players
         """
         cond, params = [], []
@@ -307,28 +309,64 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
             params.append(team_filter.upper())
         if cond:
             q += " WHERE " + " AND ".join(cond)
-        q += " ORDER BY " + ("name COLLATE NOCASE" if sort_by == "name" else "garage_power DESC")
+
+        # Spezialfall: list-active --team <X> → nach active_modified aufsteigend (neueste unten)
+        if active_only and team_filter:
+            q += " ORDER BY datetime(active_modified) ASC"
+        else:
+            q += " ORDER BY " + ("name COLLATE NOCASE" if sort_by == "name" else "garage_power DESC")
 
         cur.execute(q, params)
         rows = cur.fetchall()
 
-        if team_filter:
-            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15} {'Leader':<6}")
-            print("-" * 70)
+        # Schlanke Ausgabe für list-active --team <X>
+        if team_filter and active_only:
+            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'✈️':<3}")
+            print("-" * 32)
             for i, r in enumerate(rows, start=1):
-                print(f"{i:<3} {r['id']:<4} {r['name']:<20} {r['alias'] or '-':<15} {bool(r['is_leader']):<6}")
-            print("-" * 70)
-        else:
-            cur.execute("SELECT COUNT(*) AS cnt FROM players WHERE active = 1")
-            active_count = cur.fetchone()["cnt"]
+                abs_mark = "x" if r["away_until"] and r["away_until"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else ""
+                print(f"{i:<3} {r['id']:<4} {r['name']:<20} {abs_mark:<3}")
+            print("-" * 32)
+            return
 
-            print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Lead':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created'}")
-            print("-" * 130)
-            for r in rows:
-                bday_fmt = format_birthday(r['birthday'])
-                print(f"{r['id']:<4} {r['name']:<20} {r['alias'] or '':<15} {r['garage_power']:>6} {str(bool(r['active'])):>5} {str(bool(r['is_leader'])):>5} {bday_fmt:<10} {r['team'] or '-':<7} {r['discord_name']:<18} {r['created_at']}")
-            print("-" * 130)
-            print(f"🟢 Active players: {active_count}")
+        # Bisherige Team-Ansicht (nur --team, ohne list-active)
+        if team_filter:
+            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15} {'Leader':<6} {'ABS':<3}")
+            print("-" * 80)
+            for i, r in enumerate(rows, start=1):
+                abs_mark = "x" if r["away_until"] and r["away_until"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else ""
+                print(f"{i:<3} {r['id']:<4} {r['name']:<20} {r['alias'] or '-':<15} {bool(r['is_leader']):<6} {abs_mark:<3}")
+            print("-" * 80)
+            return
+
+        # Standard-Gesamtansicht
+        cur.execute("SELECT COUNT(*) AS cnt FROM players WHERE active = 1")
+        active_count = cur.fetchone()["cnt"]
+
+        print(f"{'ID':<4} {'Name':<20} {'Alias':<15} {'GP':>6} {'Act':<5} {'Lead':<5} {'Birthday':<10} {'Team':<7} {'Discord':<18} {'Created':<20} {'ABS':<3}")
+        print("-" * 140)
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for r in rows:
+            bday_fmt = format_birthday(r["birthday"])
+            abs_mark = "x" if r["away_until"] and r["away_until"] > now else ""
+            created = (r["created_at"] or "-")[:19]
+            print(
+                f"{r['id']:<4} "
+                f"{(r['name'] or '-'):<20} "
+                f"{(r['alias'] or '-'):<15} "
+                f"{int(r['garage_power']):>6} "
+                f"{str(bool(r['active'])):<5} "
+                f"{str(bool(r['is_leader'])):<5} "
+                f"{bday_fmt:<10} "
+                f"{(r['team'] or '-'):<7} "
+                f"{(r['discord_name'] or '-'):<18} "
+                f"{created:<20} "
+                f"{abs_mark:<3}"
+            )
+        print("-" * 140)
+        print(f"Active players: {active_count}")
+
 
 def list_leaders():
     """Listet alle Spieler mit is_leader = 1 (unabhängig von 'active')."""
