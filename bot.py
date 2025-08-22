@@ -24,7 +24,6 @@ BIRTHDAY_IDS_RE = re.compile(r"^BIRTHDAY_IDS:\s*([\d,\s]+)$", re.MULTILINE)
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$", re.IGNORECASE)
 
 COMMANDS = {
-    ".a": ["stats", "alias"],
     ".v": ["vehicle", "list"],
     ".p": ["player", "list"],
     ".m": ["match", "list"],
@@ -914,7 +913,6 @@ async def on_message(message):
                 (".x[h]",        "Manages scores or show help."),
                 (".c <matchid>", "Create match sheet in nextcloud."),
                 (".i <matchid>", "Import match sheet from nextcloud."),
-                (".a",           "Alias-Map PLTE Team."),
                 (".v",           "List vehicles."),
                 (".s [s]",       "List matches in season [s] (default=current season)."),
                 (".version",     "Show bot version."),
