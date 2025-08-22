@@ -313,6 +313,8 @@ HELP_TH = help_block(
     rows=[
         (".t",                   "List last 10 teamevents"),
         (".t <id>",              "Show teamevent incl. vehicles."),
+        (".t <id> key:value",    "Edit Teamevent\n"
+                                 "keys: name, tracks, score, vehicles"),
         (".t+ <name> <week>",    "Add teamevent (week-format: 2025/38 or 2025-38). "),
     ],
     total_width=65,
