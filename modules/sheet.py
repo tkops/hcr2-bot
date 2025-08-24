@@ -12,6 +12,9 @@ DB_PATH = "../hcr2-db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
+# --- Regex zum Parsen der neuen Player-ID aus der player add-Ausgabe ---
+ID_RE = re.compile(r"\bID\s*:\s*(\d+)", re.IGNORECASE)
+
 
 def sanitize_filename(s):
     return re.sub(r'[^A-Za-z0-9_]', '', s.replace(' ', '_'))
@@ -213,12 +216,20 @@ def generate_excel(match, players, output_path):
     ws.column_dimensions["G"].width = 9
     ws.column_dimensions["H"].width = 120
 
-    # Hinweise H1–H3
-    ws["H1"] = "H1: Nicht gefahren → Score=0 und Points=0 eintragen."
-    ws["H2"] = "H2: Absent wird automatisch 'true', wenn Spieler auf Away steht. Kann (true/false) manuell überschrieben werden."
-    ws["H3"] = "H3: Nicht abgemeldet + eingeloggt + nicht gefahren ⇒ Checkin=true setzen."
-    for cell_addr in ("H1", "H2", "H3"):
-        ws[cell_addr].alignment = Alignment(wrap_text=True, vertical="top")
+
+
+
+    # Hinweise
+    ws["H2"] = (
+        "H1: Nicht gefahren → Score=0 und Points=0 eintragen.\n"
+        "H2: Absent true, wenn ein Spieler entschuldigt ist (Urlaub etc.)\n"
+        "H3: Checkin true, wenn Spieler sich ins Match eingeloghgt hat aber nicht gefahren ist\n"
+        "H4: Falls ein Spieler das Team verlassen hat aber noch in der Liste steht, Zeile einfach löschen\n"
+        "H5: Sollte ein Spieler fehlen, kann er einfach mit richtiger ID hinzugefügt werden\n"
+        "H6: Sollte ein Spieler fehlen, der noch nicht angelegt wurde, dann statt der der ID ein 'a' für add in Spalte B. Spieler wird dann beim Import  angelegt"
+    )
+    ws["H2"].alignment = Alignment(wrap_text=True, vertical="top")
+
 
     # Datenzeilen
     for pid, name, a_from, a_until in players:
@@ -243,6 +254,67 @@ def generate_excel(match, players, output_path):
 
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
     return f"[{filename}]({web_url})", True
+
+
+# --- Helfer: Player-ID aus Spalte B interpretieren ---
+def _parse_pid_marker(pid_cell):
+    """
+    ('SKIP', None)   -> leere PlayerID: ganze Zeile ignorieren
+    ('CREATE', None) -> 'a', 'add', 'new', '+', 'none', '-'
+    ('OK', pid:int)  -> gültige numerische ID
+    ('ERROR', msg)   -> harter Fehlertext
+    """
+    if pid_cell is None:
+        return ("SKIP", None)
+
+    if isinstance(pid_cell, float) and float(pid_cell).is_integer():
+        return ("OK", int(pid_cell))
+    if isinstance(pid_cell, int):
+        return ("OK", int(pid_cell))
+
+    s = str(pid_cell).strip().lower()
+    if s == "":
+        return ("SKIP", None)
+    if s in ("a", "add", "new", "+", "none", "-"):
+        return ("CREATE", None)
+    if s.isdigit():
+        return ("OK", int(s))
+
+    return ("ERROR", f"invalid playerID '{pid_cell}' – use a number or 'a'")
+
+
+# --- Helfer: Spieler anlegen und vergebene ID zurückgeben ---
+def _add_player_plte_and_get_id(name: str) -> Optional[int]:
+    name = (name or "").strip()
+    if not name:
+        return None
+    # Spieler ohne Alias anlegen (Alias generiert player.py automatisch)
+    cmd = ["python", "hcr2.py", "player", "add", "PLTE", name]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception:
+        return None
+
+    if res.returncode != 0:
+        return None
+
+    out = (res.stdout or "") + "\n" + (res.stderr or "")
+    # Erwartete Ausgabe enthält z.B. "ID: 123"
+    m = ID_RE.search(out)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            pass
+
+    # Fallback: letzte Zahl in der Ausgabe nehmen (vorsichtig)
+    fallback = re.findall(r"\b(\d{1,9})\b", out)
+    if fallback:
+        try:
+            return int(fallback[-1])
+        except Exception:
+            return None
+    return None
 
 
 def import_excel_to_matchscore(match_id):
@@ -301,23 +373,49 @@ def import_excel_to_matchscore(match_id):
                 return 0
             return 0
 
-        # Sammle alle Zeilen (ab Zeile 3)
+        # Sammle alle Zeilen (ab Zeile 3 oder 4 – durch SKIP robust gegenüber Leerzeilen)
         row_idx = 3
         for row in ws.iter_rows(min_row=3, values_only=True):
             # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
-            if not row or len(row) < 5 or not row[1]:
+            if not row or len(row) < 3:
                 row_idx += 1
                 continue
 
             mid = row[0]
-            pid = row[1]
-            score_cell = row[3] if len(row) >= 4 else None
-            points_cell = row[4] if len(row) >= 5 else None
-            absent_raw = row[5] if len(row) >= 6 else "false"
-            checkin_raw = row[6] if len(row) >= 7 else "false"
+            pid_cell = row[1]
+            player_name_cell = row[2]
 
-            # Pflichtfeld- und Typprüfung
-            score_val = strict_int(score_cell, "Score", row_idx)
+            # PlayerID interpretieren
+            mode, pid_or_msg = _parse_pid_marker(pid_cell)
+            if mode == "SKIP":
+                row_idx += 1
+                continue
+            if mode == "ERROR":
+                errors.append(f"Row {row_idx}: {pid_or_msg}")
+                row_idx += 1
+                continue
+            if mode == "CREATE":
+                name = (player_name_cell or "").strip()
+                if not name:
+                    errors.append(f"Row {row_idx}: cannot create player – column C (Player) is empty.")
+                    row_idx += 1
+                    continue
+                new_id = _add_player_plte_and_get_id(name)
+                if not new_id:
+                    errors.append(f"Row {row_idx}: failed to create player '{name}'.")
+                    row_idx += 1
+                    continue
+                pid = int(new_id)
+            else:  # OK
+                pid = int(pid_or_msg)
+
+            score_cell   = row[3] if len(row) >= 4 else None
+            points_cell  = row[4] if len(row) >= 5 else None
+            absent_raw   = row[5] if len(row) >= 6 else "false"
+            checkin_raw  = row[6] if len(row) >= 7 else "false"
+
+            # Pflichtfelder prüfen
+            score_val  = strict_int(score_cell,  "Score",  row_idx)
             points_val = strict_int(points_cell, "Points", row_idx)
 
             # Range
@@ -327,10 +425,9 @@ def import_excel_to_matchscore(match_id):
                 errors.append(f"Row {row_idx}: Points out of range (0..300): {points_val}")
 
             # Absent/Checkin
-            absent01 = to_bool01(absent_raw)
+            absent01  = to_bool01(absent_raw)
             checkin01 = to_bool01(checkin_raw)
 
-            # Nur aufnehmen, wenn Score/Points nicht None (sonst Fehlerliste, aber wir prüfen weiter)
             if score_val is not None and points_val is not None:
                 entries.append({
                     "row": row_idx,
@@ -349,9 +446,9 @@ def import_excel_to_matchscore(match_id):
             p = e["points"]
             if p > 20:
                 seen_high.setdefault(p, []).append(e)
-        for pval, rows in seen_high.items():
-            if len(rows) > 1:
-                ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows)
+        for pval, rows_dup in seen_high.items():
+            if len(rows_dup) > 1:
+                ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows_dup)
                 errors.append(f"High points duplicated (>20): {pval} appears in {ids}")
 
         # Monotonie: Sortiere nach Score DESC; Points müssen non-increasing sein;
