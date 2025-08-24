@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Optional
 import sys
 import re
 import textwrap
@@ -9,6 +10,32 @@ DB_PATH = "../hcr2-db/hcr2.db"
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
 
 # =====================[ CLI Dispatcher ]====================
+# die Helfer mit Optional statt "X | None"
+ALIAS_BASE_RE = re.compile(r"[^a-z0-9]+")
+
+def _alias_base_from_name(name: str) -> str:
+    base = ALIAS_BASE_RE.sub("", (name or "").lower())
+    return base or "player"
+
+def _sanitize_alias_token(alias: str) -> str:
+    return ALIAS_BASE_RE.sub("", (alias or "").lower())
+
+def _alias_exists(conn: sqlite3.Connection, alias: str, team_scope: Optional[str]) -> bool:
+    cur = conn.cursor()
+    if team_scope == "PLTE":
+        cur.execute("SELECT 1 FROM players WHERE LOWER(alias)=LOWER(?) AND team='PLTE' LIMIT 1", (alias,))
+    else:
+        cur.execute("SELECT 1 FROM players WHERE LOWER(alias)=LOWER(?) LIMIT 1", (alias,))
+    return cur.fetchone() is not None
+
+def _next_free_alias(conn: sqlite3.Connection, base: str, team_scope: Optional[str]) -> Optional[str]:
+    for n in range(1, 10):
+        candidate = f"{base}{n}"
+        if not _alias_exists(conn, candidate, team_scope):
+            return candidate
+    return None
+
+
 def handle_command(cmd, args):
     if cmd == "list":
         sort = "gp"
@@ -539,37 +566,59 @@ def show_player(pid: int):
     _print_wrapped("Emoji", r['emoji'])
 
 # =====================[ Mutationen ]=======================
+
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
-    alias = alias.strip() if alias else None
+    """
+    - Alias wird sanitisiert (nur [a-z0-9]).
+    - Falls kein Alias angegeben oder (bei PLTE) leer → aus Name erzeugen + Ziffernsuffix 1..9 (eindeutig).
+    - Nach Insert wird die neue ID ausgegeben.
+    """
+    team = (team or "").upper().strip()
+    if not is_valid_team(team):
+        print("❌ Invalid team name. Allowed: PLTE or PL1–PL9")
+        return
 
-    if team == "PLTE":
-        if not alias:
-            print("❌ Alias is required for team PLTE.")
-            return
+    # 1) Alias vorbereiten/sanitisieren
+    alias = _sanitize_alias_token(alias) if alias else None
+    alias_generated = False
 
-        with db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT id, alias FROM players
-                WHERE team = 'PLTE'
-            """)
-            for row in cur.fetchall():
-                existing_alias = row["alias"]
-                if alias in existing_alias or existing_alias in alias:
-                    print(f"❌ Alias conflict: '{alias}' vs '{existing_alias}' (ID {row['id']})")
+    with db() as conn:
+        cur = conn.cursor()
+
+        # 2) Für PLTE ist Alias-Pflicht → wenn fehlt, automatisch generieren
+        #    Für andere Teams: Alias optional; wenn fehlt, wird NICHT erzwungen – außer du möchtest es global.
+        if team == "PLTE":
+            if not alias:
+                base = _alias_base_from_name(name)
+                alias_candidate = _next_free_alias(conn, base, team_scope="PLTE")
+                if not alias_candidate:
+                    print(f"❌ Could not generate unique alias for base '{base}' (1..9 all taken).")
                     return
+                alias = alias_candidate
+                alias_generated = True
+            else:
+                # expliziter Alias → prüfen, ob exakt belegt in PLTE
+                if _alias_exists(conn, alias, team_scope="PLTE"):
+                    print(f"❌ Alias conflict in PLTE: '{alias}' already exists.")
+                    return
+        else:
+            # Nicht-PLTE: sanitizen; Doppelt erlaubt, aber falls du global Eindeutigkeit willst:
+            # if alias and _alias_exists(conn, alias, team_scope=None):
+            #     print(f"❌ Alias conflict: '{alias}' already exists.")
+            #     return
+            pass
 
-            cur.execute("""
-                INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, alias, gp, int(active), birthday, team, discord_name))
-    else:
-        with db() as conn:
-            conn.execute("""
-                INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, alias, gp, int(active), birthday, team, discord_name))
-    print(f"✅ Player '{name}' added.")
+        # 3) Insert
+        cur.execute("""
+            INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (name, alias, gp, int(active), birthday, team, discord_name))
+        new_id = cur.lastrowid
+
+    alias_info = f" | Alias: {alias}" if alias else ""
+    gen_info = " (generated)" if alias_generated else ""
+    print(f"✅ Player '{name}' added. ID: {new_id}{alias_info}{gen_info} | Team: {team}")
+
 
 def edit_player(args):
     if len(args) < 1:
