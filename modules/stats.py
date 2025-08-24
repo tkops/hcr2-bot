@@ -57,6 +57,24 @@ def find_current_season(cur):
     row = cur.fetchone()
     return row[0] if row else None
 
+def _get_season_meta(cur, season_number):
+    """
+    Liefert (name, division) für die Season.
+    Falls Spalten nicht existieren, werden leere Strings zurückgegeben.
+    """
+    name = ""
+    division = ""
+    try:
+        cur.execute("SELECT name, division FROM season WHERE number = ?", (season_number,))
+        row = cur.fetchone()
+        if row:
+            name = row[0] or ""
+            division = row[1] or ""
+    except sqlite3.OperationalError:
+        # name/division-Spalten existieren evtl. nicht -> ignorieren
+        pass
+    return name, division
+
 def _fetch_season_rows(cur, season_number):
     cur.execute("""
         SELECT
@@ -83,10 +101,14 @@ def show_average(season_number=None):
 
         if season_number is None:
             season_number = find_current_season(cur)
-
         if not season_number:
             print("⚠️ No matching season found.")
             return
+
+        # Header-Zeile ergänzen
+        s_name, s_div = _get_season_meta(cur, season_number)
+        header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
+        print(header_line)
 
         rows = _fetch_season_rows(cur, season_number)
         if not rows:
@@ -293,7 +315,6 @@ def _fetch_avg_score_last_seasons(cur, last_n=20):
     rows.reverse()
     return rows
 
-
 def _format_k(v):
     return f"{int(round(v/1000.0))}k"
 
@@ -380,8 +401,6 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
     lines.append(" " * gutter + "".join(lbl_buf).rstrip())
     return "```\n" + "\n".join(lines) + "\n```"
 
-
-
 def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -390,7 +409,6 @@ def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol
             print("⚠️ No data.")
             return
         print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
-
 
 def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     """
@@ -469,7 +487,6 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     lines.append(" " * gutter + label_line.rstrip())
 
     print("```\n" + "\n".join(lines) + "\n```")
-
 
 def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15, col_width=3):
     """
