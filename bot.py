@@ -35,8 +35,7 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show",
-    # .pl ist **kein** Public-Command
+    ".search", ".show", ".stats"
 ]
 
 # ===================== Mode/Config laden ====================================
