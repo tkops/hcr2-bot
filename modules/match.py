@@ -91,6 +91,13 @@ def _to_int(val, field_name):
         print(f"❌ Invalid integer for '{field_name}': {val!r}")
         return None
 
+# --------------------------- Exists-Check -----------------------------------
+
+def _teamevent_exists(cur, te_id: int) -> bool:
+    cur.execute("SELECT 1 FROM teamevent WHERE id = ? LIMIT 1", (te_id,))
+    return cur.fetchone() is not None
+
+
 
 # ------------------------------- Add Match ----------------------------------
 
@@ -122,7 +129,15 @@ def add_match(args):
         return
 
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
+        cur = conn.cursor()
+
+        # >>> neue Prüfung
+        if not _teamevent_exists(cur, teamevent_id):
+            print(f"❌ Teamevent-ID {teamevent_id} nicht gefunden.")
+            return
+        # <<<
+
+        cur.execute(
             """
             INSERT INTO match (teamevent_id, season_number, start, opponent, score_ladys, score_opponent)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -147,59 +162,54 @@ def edit_match(args):
               "[--opponent NAME] [--score N] [--scoreopp N]")
         return
 
-    # Felder einsammeln
-    set_clauses = []
-    values = []
-
-    if "teamevent" in flags:
-        teamevent_id = _to_int(flags.get("teamevent"), "teamevent")
-        if teamevent_id is None:
-            return
-        set_clauses.append("teamevent_id = ?")
-        values.append(teamevent_id)
-
-    if "season" in flags:
-        season_number = _to_int(flags.get("season"), "season")
-        if season_number is None:
-            return
-        set_clauses.append("season_number = ?")
-        values.append(season_number)
-
-    if "start" in flags:
-        start = flags.get("start")
-        set_clauses.append("start = ?")
-        values.append(start)
-
-    if "opponent" in flags:
-        opponent = flags.get("opponent")
-        set_clauses.append("opponent = ?")
-        values.append(opponent)
-
-    if "score" in flags:
-        score_ladys = _to_int(flags.get("score"), "score")
-        if score_ladys is None:
-            return
-        set_clauses.append("score_ladys = ?")
-        values.append(score_ladys)
-
-    if "scoreopp" in flags:
-        score_opponent = _to_int(flags.get("scoreopp"), "scoreopp")
-        if score_opponent is None:
-            return
-        set_clauses.append("score_opponent = ?")
-        values.append(score_opponent)
-
-    if not set_clauses:
-        print("Nothing to update. Provide at least one of: "
-              "--teamevent / --season / --start / --opponent / --score / --scoreopp")
-        return
+    set_clauses, values = [], []
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        cur.execute(
-            f"UPDATE match SET {', '.join(set_clauses)} WHERE id = ?",
-            (*values, mid)
-        )
+
+        if "teamevent" in flags:
+            teamevent_id = _to_int(flags.get("teamevent"), "teamevent")
+            if teamevent_id is None:
+                return
+            # >>> neue Prüfung
+            if not _teamevent_exists(cur, teamevent_id):
+                print(f"❌ Teamevent-ID {teamevent_id} nicht gefunden.")
+                return
+            # <<<
+            set_clauses.append("teamevent_id = ?")
+            values.append(teamevent_id)
+
+        if "season" in flags:
+            season_number = _to_int(flags.get("season"), "season")
+            if season_number is None:
+                return
+            set_clauses.append("season_number = ?")
+            values.append(season_number)
+
+        if "start" in flags:
+            start = flags.get("start"); set_clauses.append("start = ?"); values.append(start)
+
+        if "opponent" in flags:
+            opponent = flags.get("opponent"); set_clauses.append("opponent = ?"); values.append(opponent)
+
+        if "score" in flags:
+            score_ladys = _to_int(flags.get("score"), "score")
+            if score_ladys is None:
+                return
+            set_clauses.append("score_ladys = ?"); values.append(score_ladys)
+
+        if "scoreopp" in flags:
+            score_opponent = _to_int(flags.get("scoreopp"), "scoreopp")
+            if score_opponent is None:
+                return
+            set_clauses.append("score_opponent = ?"); values.append(score_opponent)
+
+        if not set_clauses:
+            print("Nothing to update. Provide at least one of: "
+                  "--teamevent / --season / --start / --opponent / --score / --scoreopp")
+            return
+
+        cur.execute(f"UPDATE match SET {', '.join(set_clauses)} WHERE id = ?", (*values, mid))
         if cur.rowcount == 0:
             print(f"❌ Match ID {mid} not found.")
         else:
