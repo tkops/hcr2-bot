@@ -202,9 +202,26 @@ def generate_excel(match, players, output_path):
     ws = wb.active
     ws.title = "Match Info"
 
-    # Kopfzeile + Header
+    # Kopfzeile
     ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
+
+
+
+    # Ergebniszeile (neu) zwischen 1 und 2
+    ws.insert_rows(2, amount=1)
+    ws["A2"] = "Ergebnis"
+    ws["B2"] = "Power-Ladys -->"
+    ws["C2"] = ""  # Score Power-Ladys
+    ws["D2"] = ""  # Score Gegner
+    ws["E2"] = f"<-- {opponent}"
+
+    # Tabellen-Header (rutscht auf Zeile 3)
     ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Hinweise"])
+
+    # Zeile 3 (Header) zentrieren – A..G; H3 bleibt für Hinweise mit Wrap
+    for row in ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=7):
+        for cell in row:
+            cell.alignment = Alignment(horizontal="center", vertical="center")
 
     # Spaltenbreiten
     ws.column_dimensions["A"].width = 15
@@ -214,24 +231,21 @@ def generate_excel(match, players, output_path):
     ws.column_dimensions["E"].width = 20
     ws.column_dimensions["F"].width = 8
     ws.column_dimensions["G"].width = 9
-    ws.column_dimensions["H"].width = 120
-
-
-
+    ws.column_dimensions["H"].width = 130
 
     # Hinweise
-    ws["H2"] = (
+    ws["H3"] = (
         "H1: Nicht gefahren → Score=0 und Points=0 eintragen.\n"
         "H2: Absent true, wenn ein Spieler entschuldigt ist (Urlaub etc.)\n"
         "H3: Checkin true, wenn Spieler sich ins Match eingeloghgt hat aber nicht gefahren ist\n"
         "H4: Falls ein Spieler das Team verlassen hat aber noch in der Liste steht, Zeile einfach löschen\n"
         "H5: Sollte ein Spieler fehlen, kann er einfach mit richtiger ID hinzugefügt werden\n"
-        "H6: Sollte ein Spieler fehlen, der noch nicht angelegt wurde, dann statt der der ID ein 'a' für add in Spalte B. Spieler wird dann beim Import  angelegt"
+        "H6: Sollte ein Spieler fehlen, der noch nicht angelegt wurde, dann statt der der ID ein 'a' für add in Spalte B. Spieler wird dann beim Import  angelegt\n"
+        "H7: Die Ergebnisse des Matchs in Zelle C2 (Ladys) und D2 (Gegener) eintragen"
     )
-    ws["H2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
 
-
-    # Datenzeilen
+    # Datenzeilen ab Zeile 4
     for pid, name, a_from, a_until in players:
         absent_flag = _is_absent_on(md, a_from, a_until)
         ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
@@ -359,8 +373,20 @@ def import_excel_to_matchscore(match_id):
                     return int(s)
                 errors.append(f"Row {row_idx}: {label} must be a number, got '{cell_val}'.")
                 return None
-            # other types
             errors.append(f"Row {row_idx}: {label} has invalid type {type(cell_val).__name__}.")
+            return None
+
+        def read_int_or_none(val):
+            if val is None:
+                return None
+            if isinstance(val, int):
+                return val
+            if isinstance(val, float) and val.is_integer():
+                return int(val)
+            if isinstance(val, str):
+                s = val.strip()
+                if s.isdigit():
+                    return int(s)
             return None
 
         def to_bool01(x):
@@ -373,9 +399,15 @@ def import_excel_to_matchscore(match_id):
                 return 0
             return 0
 
-        # Sammle alle Zeilen (ab Zeile 3 oder 4 – durch SKIP robust gegenüber Leerzeilen)
-        row_idx = 3
-        for row in ws.iter_rows(min_row=3, values_only=True):
+        # Ergebnis-Zeile C2/D2 lesen
+        ladyscore = read_int_or_none(ws["C2"].value)
+        oppscore  = read_int_or_none(ws["D2"].value)
+        if ladyscore is None or oppscore is None:
+            errors.append("Row 2: please fill team scores in C2 (Power-Ladys) and D2 (Opponent).")
+
+        # Sammle alle Zeilen ab Zeile 4
+        row_idx = 4
+        for row in ws.iter_rows(min_row=4, values_only=True):
             # Row: A..H → MatchID, PlayerID, Player, Score, Points, Absent, Checkin, Hinweise
             if not row or len(row) < 3:
                 row_idx += 1
@@ -468,6 +500,11 @@ def import_excel_to_matchscore(match_id):
                     f"Equal high points not allowed (>=20): rows {a['row']} & {b['row']} both {a['points']}"
                 )
 
+        # Summe Points vs. Team-Score (C2)
+        sum_points = sum(e["points"] for e in entries)
+        if ladyscore is not None and sum_points != ladyscore:
+            errors.append(f"Team points mismatch: sum(points)={sum_points} != C2={ladyscore}")
+
         # Falls Fehler → abbrechen
         if errors:
             print("❌ Import aborted due to validation errors:")
@@ -496,10 +533,22 @@ def import_excel_to_matchscore(match_id):
                 if result.returncode == 0:
                     imported += 1
                     out = (result.stdout or "").upper()
-                    if "UNCHANGED" in out:
-                        pass
-                    elif "CHANGED" in out:
+                    if "CHANGED" in out:
                         changed += 1
+
+        # Match-Score in match schreiben
+        upd_ok = False
+        try:
+            cmd_upd = [
+                "python", "hcr2.py", "match", "edit",
+                "--id", str(match_id),
+                "--score", str(ladyscore if ladyscore is not None else 0),
+                "--scoreopp", str(oppscore if oppscore is not None else 0),
+            ]
+            upd_res = subprocess.run(cmd_upd, capture_output=True, text=True)
+            upd_ok = (upd_res.returncode == 0)
+        except Exception:
+            upd_ok = False
 
         for path in (local_path, tsv_path):
             try:
@@ -509,7 +558,8 @@ def import_excel_to_matchscore(match_id):
 
         web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
-        print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed)")
+        score_status = "Score updated" if upd_ok else "Score update failed"
+        print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
 
 
 def print_help():

@@ -35,7 +35,7 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show", ".stats"
+    ".search", ".show", ".stats", ".gp"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -301,10 +301,11 @@ HELP_PH = help_block(
                                  "about, vehicles, playstyle, language, leader, emoji."),
         (".P <term>",            "Search for Player."),
         (".pl bday",             "List birthdays sorted by next upcoming."),
+        (".pl absent",           "List absent Ladys"),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".p+ <id>",             "Reactivate Player."),
-        (".p- <id>",             "Deactivate Player."),
+        (".p- <id>",             "Deactivate Player (verbose)."),
         ('.p++ "<Name>" <team> [alias] ', "Add Player team = PLTE | PL1..PL3. Alias is mandatory for PLTE Player. User only A-z and 0-9 letters for alias"),
     ],
     total_width=65,
@@ -354,6 +355,7 @@ HELP_XH = help_block(
         (".x  <matchid>",              "List scores for match <id>."),
         (".x  <matchid> <score> [p]",  "Set score  (points optional)."),
         (".x  <matchid> - <points>",   "Set points (score unchanged)."),
+        (".x- <matchscoreid>",         "Delete single matchscore."),
         (".xa <matchscoreid>",         "Toggle absent state for matchscore."),
     ],
     total_width=65,
@@ -404,10 +406,9 @@ async def on_message(message):
 
     # ================== NEUE ADMIN-KOMMANDOS ==================
 
-    # .pl bday [--active true|false] [--num N]  → player bday list ...
     if cmd == ".pl":
         if not args:
-            await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+            await message.channel.send("Usage: .pl bday [--active true|false] [--num N] | .pl absent")
             return
         sub = args[0].lower()
         rest = args[1:]
@@ -415,8 +416,30 @@ async def on_message(message):
             output = await run_hcr2(["player", "bday", "list"] + rest)
             await send_codeblock(message.channel, output)
             return
-        await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+        if sub == "absent":
+            output = await run_hcr2(["player", "list-absent"])
+            await send_codeblock(message.channel, output)
+            return
+        await message.channel.send("Usage: .pl bday [--active true|false] [--num N] | .pl absent")
         return
+
+
+    # --- Public: Update own Garage Power ---
+    if cmd == ".gp":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .gp <garagepower>")
+            return
+
+        discord_key = str(message.author)
+        pid = await get_self_player_id(discord_key)
+        if not pid:
+            await message.channel.send("❌ Could not resolve your player. Set your Discord in players table first.")
+            return
+
+        output = await run_hcr2(["player", "edit", pid, "--gp", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
 
     # .pa <id> [1w..4w]  → player away --id <id> [--dur ...]
     if cmd == ".pa":
@@ -450,13 +473,28 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
-    # .p- <id>  → player deactivate <id>
+    # .p- <id>  → player deactivate <id> (verbose: ID, Name, Alias, GP)
     if cmd == ".p-":
         if len(args) != 1 or not args[0].isdigit():
             await message.channel.send("Usage: .p- <id>")
             return
-        output = await run_hcr2(["player", "deactivate", args[0]])
-        await send_codeblock(message.channel, output)
+        pid = args[0]
+
+        # Vorher-Datensatz
+        show_out = await run_hcr2(["player", "show", pid])
+        id_m = ID_LINE_RE.search(show_out or "")
+        name_m = NAME_LINE_RE.search(show_out or "")
+        alias_m = re.search(r"^Alias\s*:?\s*(.+)$", show_out or "", re.MULTILINE)
+        gp_m = re.search(r"^Garage Power\s*:?\s*(\d+)", show_out or "", re.MULTILINE)
+
+        header = "ID | Name | Alias | GP"
+        values = f"{id_m.group(1) if id_m else pid} | {name_m.group(1) if name_m else '-'} | {alias_m.group(1) if alias_m else '-'} | {gp_m.group(1) if gp_m else '-'}"
+
+        await message.channel.send("**Player to deactivate:**\n```\n" + header + "\n" + values + "\n```")
+
+        # Aktion
+        result = await run_hcr2(["player", "deactivate", pid])
+        await send_codeblock(message.channel, result or "n/a")
         return
 
     # .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]
@@ -803,6 +841,19 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
+    # --- Matchscore Delete (.x- <id>) ---
+    if cmd == ".x-":
+        if not leader:
+            return
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .x- <matchscoreid>")
+            return
+        ms_id = args[0]
+        output = await run_hcr2(["matchscore", "delete", ms_id])
+        await send_codeblock(message.channel, output)
+        return
+
+
     # --- Matchscores ---
     if cmd == ".x":
         if not args:
@@ -959,6 +1010,7 @@ async def on_message(message):
                 (".playstyle <text>",  "Set your playstyle."),
                 (".birthday <DD.MM.>", "Set your birthday (no year)."),
                 (".emoji <emoji>",  "Set your personal emoji."),
+                (".gp <gp>",        "Set your Garage Power."),
                 (".leader",         "Show all leaders."),
                 (".acc",            "Show your account info."),
                 (".search <term>",  "Search players."),

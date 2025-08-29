@@ -1,6 +1,7 @@
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 HISTORY = [
+    ("0.4.1", "2025-08-23", "Add .gp user command, Add matchup result to sheet, some command improvments"),
     ("0.4.0", "2025-08-23", "User modifications by sheet import"),
     ("0.3.3", "2025-08-22", "Fix bday help"),
     ("0.3.2", "2025-08-22", "Add birthday list"),

@@ -52,6 +52,9 @@ def handle_command(cmd, args):
             return
         activate_player(int(args[0]))
 
+    elif cmd == "list-absent":
+        list_absent()
+
     elif cmd == "list-active":
         sort = "gp"
         team = get_arg_value(args, "--team")
@@ -371,6 +374,42 @@ def grep_players(term):
     for r in rows:
         print(f"{r['id']:<4} {r['name']:<20} {r['alias'] or '':<15} {r['discord_name'] or '':<22} {r['garage_power']:>5} {str(bool(r['active']))[:1]}")
     print("-" * 74)
+
+def list_absent():
+    now = datetime.now().date()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, team, away_until
+            FROM players
+            WHERE away_from IS NOT NULL
+              AND away_until IS NOT NULL
+              AND datetime(away_from) <= datetime('now')
+              AND datetime(away_until) >= datetime('now')
+        """)
+        rows = cur.fetchall()
+
+    items = []
+    for r in rows:
+        try:
+            until_dt = datetime.strptime(r["away_until"][:19], "%Y-%m-%d %H:%M:%S")
+            days = max(0, (until_dt.date() - now).days)
+        except Exception:
+            until_dt = None
+            days = 0
+        items.append((days, r["id"], r["name"] or "-", r["team"] or "-", r["away_until"][:19] if r["away_until"] else "-"))
+
+    # sortiert nach DAYS absteigend
+    items.sort(key=lambda x: x[0], reverse=True)
+
+    print("🛫 Absent Ladys")
+    print(f"{'ID':<4} {'NAME':<20} {'TEAM':<6} {'UNTIL':<19} {'DAYS':>4}")
+    print("-" * 58)
+    for days, pid, name, team, until_str in items:
+        print(f"{pid:<4} {name:<20} {team:<6} {until_str:<19} {days:>4}")
+    print("-" * 58)
+    print(f"Count: {len(items)}")
+
 
 # =====================[ Listen & Anzeigen ]================
 
@@ -894,6 +933,7 @@ def print_help():
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
     print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
     print("  list-leader                                 Show only leaders (id, name, discord)")
+    print("  list-absent                                 List Absent Players)")
     print("  bday today                                 Print 'BIRTHDAY_IDS: ...' for today's birthdays")
     print("  bday list [--active true|false] [--num N]  List birthdays (ID, Name, Birthday, Emoji), sorted by next upcoming")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
