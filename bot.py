@@ -304,7 +304,7 @@ HELP_PH = help_block(
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".p+ <id>",             "Reactivate Player."),
-        (".p- <id>",             "Deactivate Player."),
+        (".p- <id>",             "Deactivate Player (verbose)."),
         ('.p++ "<Name>" <team> [alias] ', "Add Player team = PLTE | PL1..PL3. Alias is mandatory for PLTE Player. User only A-z and 0-9 letters for alias"),
     ],
     total_width=65,
@@ -468,13 +468,28 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
-    # .p- <id>  → player deactivate <id>
+    # .p- <id>  → player deactivate <id> (verbose: ID, Name, Alias, GP)
     if cmd == ".p-":
         if len(args) != 1 or not args[0].isdigit():
             await message.channel.send("Usage: .p- <id>")
             return
-        output = await run_hcr2(["player", "deactivate", args[0]])
-        await send_codeblock(message.channel, output)
+        pid = args[0]
+
+        # Vorher-Datensatz
+        show_out = await run_hcr2(["player", "show", pid])
+        id_m = ID_LINE_RE.search(show_out or "")
+        name_m = NAME_LINE_RE.search(show_out or "")
+        alias_m = re.search(r"^Alias\s*:?\s*(.+)$", show_out or "", re.MULTILINE)
+        gp_m = re.search(r"^Garage Power\s*:?\s*(\d+)", show_out or "", re.MULTILINE)
+
+        header = "ID | Name | Alias | GP"
+        values = f"{id_m.group(1) if id_m else pid} | {name_m.group(1) if name_m else '-'} | {alias_m.group(1) if alias_m else '-'} | {gp_m.group(1) if gp_m else '-'}"
+
+        await message.channel.send("**Player to deactivate:**\n```\n" + header + "\n" + values + "\n```")
+
+        # Aktion
+        result = await run_hcr2(["player", "deactivate", pid])
+        await send_codeblock(message.channel, result or "n/a")
         return
 
     # .p++ "<Name>" <TEAM> [alias] [gp] [active] [birthday] [discord]
