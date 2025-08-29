@@ -354,6 +354,7 @@ HELP_XH = help_block(
         (".x  <matchid>",              "List scores for match <id>."),
         (".x  <matchid> <score> [p]",  "Set score  (points optional)."),
         (".x  <matchid> - <points>",   "Set points (score unchanged)."),
+        (".x- <matchscoreid>",         "Delete single matchscore."),
         (".xa <matchscoreid>",         "Toggle absent state for matchscore."),
     ],
     total_width=65,
@@ -819,6 +820,19 @@ async def on_message(message):
         output = await run_hcr2(["matchscore", "edit", score_id, "--absent", "toggle"])
         await send_codeblock(message.channel, output)
         return
+
+    # --- Matchscore Delete (.x- <id>) ---
+    if cmd == ".x-":
+        if not leader:
+            return
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .x- <matchscoreid>")
+            return
+        ms_id = args[0]
+        output = await run_hcr2(["matchscore", "delete", ms_id])
+        await send_codeblock(message.channel, output)
+        return
+
 
     # --- Matchscores ---
     if cmd == ".x":
