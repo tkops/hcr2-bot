@@ -301,6 +301,7 @@ HELP_PH = help_block(
                                  "about, vehicles, playstyle, language, leader, emoji."),
         (".P <term>",            "Search for Player."),
         (".pl bday",             "List birthdays sorted by next upcoming."),
+        (".pl absent",           "List absent Ladys"),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".p+ <id>",             "Reactivate Player."),
@@ -405,10 +406,9 @@ async def on_message(message):
 
     # ================== NEUE ADMIN-KOMMANDOS ==================
 
-    # .pl bday [--active true|false] [--num N]  → player bday list ...
     if cmd == ".pl":
         if not args:
-            await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+            await message.channel.send("Usage: .pl bday [--active true|false] [--num N] | .pl absent")
             return
         sub = args[0].lower()
         rest = args[1:]
@@ -416,8 +416,13 @@ async def on_message(message):
             output = await run_hcr2(["player", "bday", "list"] + rest)
             await send_codeblock(message.channel, output)
             return
-        await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
+        if sub == "absent":
+            output = await run_hcr2(["player", "list-absent"])
+            await send_codeblock(message.channel, output)
+            return
+        await message.channel.send("Usage: .pl bday [--active true|false] [--num N] | .pl absent")
         return
+
 
     # --- Public: Update own Garage Power ---
     if cmd == ".gp":
