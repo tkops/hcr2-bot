@@ -35,7 +35,7 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show", ".stats"
+    ".search", ".show", ".stats", ".gp"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -417,6 +417,23 @@ async def on_message(message):
             return
         await message.channel.send("Usage: .pl bday [--active true|false] [--num N]")
         return
+
+    # --- Public: Update own Garage Power ---
+    if cmd == ".gp":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .gp <garagepower>")
+            return
+
+        discord_key = str(message.author)
+        pid = await get_self_player_id(discord_key)
+        if not pid:
+            await message.channel.send("❌ Could not resolve your player. Set your Discord in players table first.")
+            return
+
+        output = await run_hcr2(["player", "edit", pid, "--gp", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
 
     # .pa <id> [1w..4w]  → player away --id <id> [--dur ...]
     if cmd == ".pa":
@@ -959,6 +976,7 @@ async def on_message(message):
                 (".playstyle <text>",  "Set your playstyle."),
                 (".birthday <DD.MM.>", "Set your birthday (no year)."),
                 (".emoji <emoji>",  "Set your personal emoji."),
+                (".gp <gp>",        "Set your Garage Power."),
                 (".leader",         "Show all leaders."),
                 (".acc",            "Show your account info."),
                 (".search <term>",  "Search players."),
