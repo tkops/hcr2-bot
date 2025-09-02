@@ -3,7 +3,7 @@ import sqlite3
 from typing import Optional, List, Tuple
 import re
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from pathlib import Path
 from secrets_config import NEXTCLOUD_AUTH
@@ -199,13 +199,11 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
     return with_scores_sorted + without_scores_sorted
 
 
-# -------------------- Excel-Generierung & Import --------------------
+# -------------------- Excel-Generierung & Import (Match-Sheet) --------------------
 
 def generate_excel(match, players, output_path):
     """
-    players: (id, name, away_from, away_until) – in Zielreihenfolge.
-    Spalten:
-      A: MatchID | B: PlayerID | C: Player | D: Score | E: Points | F: Absent | G: Checkin | H: Hinweise
+    Match-Sheet. Unverändert außer Standard-Formatierungen.
     """
     match_id, match_date_str, season, opponent, event = match
 
@@ -222,26 +220,21 @@ def generate_excel(match, players, output_path):
     ws = wb.active
     ws.title = "Match Info"
 
-    # Kopfzeile
     ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
 
-    # Ergebniszeile
     ws.insert_rows(2, amount=1)
     ws["A2"] = "Ergebnis"
     ws["B2"] = "Power-Ladys -->"
-    ws["C2"] = ""  # Score Power-Ladys
-    ws["D2"] = ""  # Score Gegner
+    ws["C2"] = ""
+    ws["D2"] = ""
     ws["E2"] = f"<-- {opponent}"
 
-    # Tabellen-Header
     ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Hinweise"])
 
-    # Header zentrieren
     for row in ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=7):
         for cell in row:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Spaltenbreiten
     ws.column_dimensions["A"].width = 15
     ws.column_dimensions["B"].width = 20
     ws.column_dimensions["C"].width = 26
@@ -251,7 +244,6 @@ def generate_excel(match, players, output_path):
     ws.column_dimensions["G"].width = 9
     ws.column_dimensions["H"].width = 130
 
-    # Hinweise
     ws["H3"] = (
         "H1: Nicht gefahren → Score=0 und Points=0 eintragen.\n"
         "H2: Absent true, wenn ein Spieler entschuldigt ist (Urlaub etc.)\n"
@@ -263,12 +255,10 @@ def generate_excel(match, players, output_path):
     )
     ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
 
-    # Datenzeilen
     for pid, name, a_from, a_until in players:
         absent_flag = _is_absent_on(md, a_from, a_until)
         ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
 
-    # A/B zentrieren
     align_center = Alignment(horizontal="center", vertical="center")
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
         for cell in row:
@@ -288,22 +278,15 @@ def generate_excel(match, players, output_path):
     return f"[{filename}]({web_url})", True
 
 
-# --- Helfer: Player-ID aus Spalte B interpretieren ---
+# --- Helfer für Match-Import (unverändert) ---
+
 def _parse_pid_marker(pid_cell):
-    """
-    ('SKIP', None)   -> leere PlayerID: ganze Zeile ignorieren
-    ('CREATE', None) -> 'a', 'add', 'new', '+', 'none', '-'
-    ('OK', pid:int)  -> gültige numerische ID
-    ('ERROR', msg)   -> harter Fehlertext
-    """
     if pid_cell is None:
         return ("SKIP", None)
-
     if isinstance(pid_cell, float) and float(pid_cell).is_integer():
         return ("OK", int(pid_cell))
     if isinstance(pid_cell, int):
         return ("OK", int(pid_cell))
-
     s = str(pid_cell).strip().lower()
     if s == "":
         return ("SKIP", None)
@@ -311,11 +294,9 @@ def _parse_pid_marker(pid_cell):
         return ("CREATE", None)
     if s.isdigit():
         return ("OK", int(s))
-
     return ("ERROR", f"invalid playerID '{pid_cell}' – use a number or 'a'")
 
 
-# --- Helfer: Spieler anlegen und vergebene ID zurückgeben ---
 def _add_player_plte_and_get_id(name: str) -> Optional[int]:
     name = (name or "").strip()
     if not name:
@@ -325,10 +306,8 @@ def _add_player_plte_and_get_id(name: str) -> Optional[int]:
         res = subprocess.run(cmd, capture_output=True, text=True)
     except Exception:
         return None
-
     if res.returncode != 0:
         return None
-
     out = (res.stdout or "") + "\n" + (res.stderr or "")
     m = ID_RE.search(out)
     if m:
@@ -336,7 +315,6 @@ def _add_player_plte_and_get_id(name: str) -> Optional[int]:
             return int(m.group(1))
         except Exception:
             pass
-
     fallback = re.findall(r"\b(\d{1,9})\b", out)
     if fallback:
         try:
@@ -366,9 +344,8 @@ def import_excel_to_matchscore(match_id):
         wb = load_workbook(filename=local_path, data_only=True)
         ws = wb.active
 
-        # ---------- Einlesen + Plausi-Checks ----------
         errors = []
-        entries = []  # dicts: {'row': r, 'pid': pid, 'score': s, 'points': p, 'absent': a, 'checkin': c}
+        entries = []
 
         def strict_int(cell_val, label, row_idx):
             if cell_val is None or (isinstance(cell_val, str) and cell_val.strip() == ""):
@@ -413,20 +390,17 @@ def import_excel_to_matchscore(match_id):
                 return 0
             return 0
 
-        # Ergebnis-Zeile C2/D2 lesen
         ladyscore = read_int_or_none(ws["C2"].value)
         oppscore  = read_int_or_none(ws["D2"].value)
         if ladyscore is None or oppscore is None:
             errors.append("Row 2: please fill team scores in C2 (Power-Ladys) and D2 (Opponent).")
 
-        # Sammle alle Zeilen ab Zeile 4
         row_idx = 4
         for row in ws.iter_rows(min_row=4, values_only=True):
             if not row or len(row) < 3:
                 row_idx += 1
                 continue
 
-            mid = row[0]
             pid_cell = row[1]
             player_name_cell = row[2]
 
@@ -481,7 +455,6 @@ def import_excel_to_matchscore(match_id):
 
             row_idx += 1
 
-        # High Points > 20: keine Duplikate
         seen_high = {}
         for e in entries:
             p = e["points"]
@@ -492,7 +465,6 @@ def import_excel_to_matchscore(match_id):
                 ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows_dup)
                 errors.append(f"High points duplicated (>20): {pval} appears in {ids}")
 
-        # Monotonie prüfen
         entries_sorted = sorted(entries, key=lambda x: (-x["score"], x["pid"]))
         for i in range(len(entries_sorted) - 1):
             a = entries_sorted[i]
@@ -507,7 +479,6 @@ def import_excel_to_matchscore(match_id):
                     f"Equal high points not allowed (>=20): rows {a['row']} & {b['row']} both {a['points']}"
                 )
 
-        # Summe Points vs. Team-Score (C2)
         sum_points = sum(e["points"] for e in entries)
         if ladyscore is not None and sum_points != ladyscore:
             errors.append(f"Team points mismatch: sum(points)={sum_points} != C2={ladyscore}")
@@ -518,8 +489,6 @@ def import_excel_to_matchscore(match_id):
                 print(" -", msg)
             return
 
-        # ---------- TSV + Übergabe ----------
-        tsv_path.parent.mkdir(parents=True, exist_ok=True)
         with open(tsv_path, "w", encoding="utf-8") as f:
             for e in entries:
                 f.write(f"{match_id}\t{e['pid']}\t{e['score']}\t{e['points']}\t{e['absent']}\t{e['checkin']}\n")
@@ -543,7 +512,6 @@ def import_excel_to_matchscore(match_id):
                     if "CHANGED" in out:
                         changed += 1
 
-        # Match-Score im Match aktualisieren
         upd_ok = False
         try:
             cmd_upd = [
@@ -569,7 +537,7 @@ def import_excel_to_matchscore(match_id):
         print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
 
 
-# ===================== Players: Export/Import (nur aktive PLTE, mit Excludes) =====================
+# ===================== Players: Export/Import (aktive PLTE, Excludes, Formatierung) =====================
 
 def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Path]:
     local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -610,20 +578,34 @@ def _to_bool01_if_needed(val):
     return None
 
 
+def _autofit_columns(ws, min_w=10, max_w=60):
+    # Header fett
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    # Auto-Breite anhand Inhalt
+    for col_idx, col in enumerate(ws.iter_cols(min_row=1, max_row=ws.max_row,
+                                               min_col=1, max_col=ws.max_column),
+                                  start=1):
+        max_len = 0
+        for cell in col:
+            v = "" if cell.value is None else str(cell.value)
+            if len(v) > max_len:
+                max_len = len(v)
+        width = max(min_w, min(max_w, max_len + 2))
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
 def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOCAL_TMP):
     with sqlite3.connect(db_path) as conn:
         cur = conn.cursor()
-        # Spalten dynamisch
         cur.execute("PRAGMA table_info(players)")
         cols_info = cur.fetchall()
         if not cols_info:
             print("[ERROR] players table not found")
             return
         all_columns = [c[1] for c in cols_info]
-        # Excluded entfernen, aber 'id' immer behalten
         export_columns = [c for c in all_columns if c not in EXCLUDED_PLAYER_COLS]
 
-        # Nur aktive PLTE
         cur.execute(f"""
             SELECT {', '.join(export_columns)}
             FROM players
@@ -637,19 +619,14 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
         ws = wb.active
         ws.title = "players"
 
-        # Header
         ws.append(export_columns)
-        # Daten
         for r in rows:
             ws.append(list(r))
 
-        # Spaltenbreiten
-        for idx, col in enumerate(export_columns, start=1):
-            ws.column_dimensions[get_column_letter(idx)].width = max(12, min(40, len(col) + 2))
+        _autofit_columns(ws, min_w=10, max_w=60)
 
         wb.save(out_path)
 
-    # Upload
     url, created = _upload_players_xlsx(out_path)
     try:
         out_path.unlink()
@@ -669,7 +646,6 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     wb = load_workbook(filename=local, data_only=True)
     ws = wb.active
 
-    # Header
     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
     header = [str(c) if c is not None else "" for c in (first_row or [])]
     header = [h.strip() for h in header]
@@ -681,18 +657,15 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # gültige DB-Spalten
         cur.execute("PRAGMA table_info(players)")
         db_cols_info = cur.fetchall()
         db_cols = [c[1] for c in db_cols_info]
         db_cols_set = set(db_cols)
 
-        # Erlaubte Spalten für Import = DB - EXCLUDED (id bleibt erlaubt)
         allowed_import_cols = (db_cols_set - EXCLUDED_PLAYER_COLS) | {"id"}
 
         bool_cols = _detect_boolean_columns(conn, "players", candidate_overrides={"active", "is_leader"})
 
-        # Cache existierende IDs
         cur.execute("SELECT id FROM players WHERE team='PLTE'")
         existing_ids = {r[0] for r in cur.fetchall()}
 
@@ -704,15 +677,12 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row:
                 continue
-            # nur erlaubte Spalten übernehmen
             row_map_full = dict(zip(header, row))
             row_map = {k: v for k, v in row_map_full.items() if k in allowed_import_cols}
 
-            # leere Zeilen skippen
             if all((v is None or str(v).strip() == "") for v in row_map.values()):
                 continue
 
-            # id extrahieren
             rid = row_map.get("id")
             rid_int = None
             if isinstance(rid, float) and rid.is_integer():
@@ -722,16 +692,13 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
             elif isinstance(rid, str) and rid.strip().isdigit():
                 rid_int = int(rid.strip())
 
-            # Bool-Felder normieren
             for b in (set(row_map.keys()) & bool_cols):
                 row_map[b] = _to_bool01_if_needed(row_map[b])
 
-            # last_modified setzen
             row_map["last_modified"] = datetime.now().isoformat(timespec="seconds")
 
             try:
                 if rid_int and rid_int in existing_ids:
-                    # UPDATE: team und alle excluded Felder nie anfassen
                     set_cols = [c for c in row_map.keys() if c not in ("id",)]
                     if not set_cols:
                         skipped += 1
@@ -742,11 +709,9 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
                     cur.execute(f"UPDATE players SET {placeholders} WHERE id = ?", values)
                     updated += 1
                 else:
-                    # INSERT: wir erzwingen PLTE + active=1
                     row_map["team"] = "PLTE"
                     if "active" not in row_map or row_map["active"] is None:
                         row_map["active"] = 1
-                    # Excluded Felder weiterhin nicht setzen
                     insert_cols = [c for c in row_map.keys() if c != "id" and c not in EXCLUDED_PLAYER_COLS]
                     if not insert_cols:
                         skipped += 1
@@ -777,8 +742,8 @@ def print_help():
     print("\nCommands:")
     print("  create <match_id>        Create Excel file and upload to Nextcloud")
     print("  import <match_id>        Import scores from Excel file on Nextcloud")
-    print("  player export            Export active PLTE players to Power-Ladys-Scores/Ladys.xlsx (excluded cols applied)")
-    print("  player import            Import active PLTE players from Power-Ladys-Scores/Ladys.xlsx (upsert by id, excluded cols ignored)")
+    print("  player export            Export active PLTE players to Power-Ladys-Scores/Ladys.xlsx (bold header, auto width)")
+    print("  player import            Import active PLTE players from Power-Ladys-Scores/Ladys.xlsx (upsert by id)")
 
 
 def handle_command(command, args):
