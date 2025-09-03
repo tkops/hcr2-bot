@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sqlite3
 import statistics
 import datetime
@@ -5,6 +6,8 @@ import re
 
 DB_PATH = "../hcr2-db/hcr2.db"
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # z. B. 08-18, 7/3, 07.03.
+
+# ---------------------------------------------------------------------------
 
 def handle_command(cmd, args):
     if cmd == "avg":
@@ -42,6 +45,8 @@ def print_help():
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
 
+# ---------------------------------------------------------------------------
+
 def format_k(value):
     if value is None:
         return "-"
@@ -71,11 +76,13 @@ def _get_season_meta(cur, season_number):
             name = row[0] or ""
             division = row[1] or ""
     except sqlite3.OperationalError:
-        # name/division-Spalten existieren evtl. nicht -> ignorieren
         pass
     return name, division
 
 def _fetch_season_rows(cur, season_number):
+    """
+    Holt alle relevanten Zeilen der Season inkl. points und absent.
+    """
     cur.execute("""
         SELECT
             ms.player_id,
@@ -84,16 +91,31 @@ def _fetch_season_rows(cur, season_number):
             p.team,
             p.active,
             ms.score,
+            ms.points,
+            ms.absent,
             m.id,
             t.tracks,
             t.max_score_per_track
         FROM matchscore ms
-        JOIN players p ON ms.player_id = p.id
-        JOIN match m ON ms.match_id = m.id
+        JOIN players   p ON ms.player_id = p.id
+        JOIN match     m ON ms.match_id = m.id
         JOIN teamevent t ON m.teamevent_id = t.id
         WHERE m.season_number = ?
     """, (season_number,))
     return cur.fetchall()
+
+
+def _is_absent(score, points, absent_flag):
+    # Hat jemand >0 Punkte/Score, zählt er als teilgenommen – auch wenn absent=1 gesetzt ist.
+    if score is not None and score > 0:
+        return False
+    # Fallback, falls absent nicht gepflegt ist: points==0 und score==0/None ⇒ absent
+    if absent_flag is not None:
+        return bool(absent_flag) and (score is None or score == 0)
+    return (points is not None and points == 0) and (score is None or score == 0)
+
+
+# ---------------------------------------------------------------------------
 
 def show_average(season_number=None):
     with sqlite3.connect(DB_PATH) as conn:
@@ -105,7 +127,7 @@ def show_average(season_number=None):
             print("⚠️ No matching season found.")
             return
 
-        # Header-Zeile ergänzen
+        # Header
         s_name, s_div = _get_season_meta(cur, season_number)
         header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
         print(header_line)
@@ -115,34 +137,40 @@ def show_average(season_number=None):
             print("⚠️ No match scores found.")
             return
 
+        # Matchweise Scores, Abwesende ignorieren
         scores_by_match = {}
-        for pid, name, alias, team, active, score, match_id, tracks, max_score in rows:
-            if score is None:
+        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+            if score is None or _is_absent(score, points, absent):
                 continue
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
+        if not scores_by_match:
+            print("⚠️ No match scores found.")
+            return
+
+        # Deltas vs. Median
         player_scores = {}
         player_names = {}
         player_counts = {}
 
         for match_id, entries in scores_by_match.items():
-            scores = [score for _, _, score in entries]
+            scores = [s for _, _, s in entries]
             if not scores:
                 continue
             try:
                 median = statistics.median(scores)
             except statistics.StatisticsError:
                 continue
-            for pid, name, score in entries:
-                delta = score - median
+            for pid, name, s in entries:
+                delta = s - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_names[pid] = name
                 player_counts[pid] = player_counts.get(pid, 0) + 1
 
-        cur.execute("SELECT COUNT(*) FROM match WHERE season_number = ?", (season_number,))
-        total_matches = cur.fetchone()[0]
-        min_matches = 1
+        # Mindestteilnahme auf Basis tatsächlich gewerteter Matches
+        total_matches = len(scores_by_match)
+        min_matches = 1  # ggf. auf max(1, round(total_matches*0.8)) ändern
 
         entries = []
         for pid, deltas in player_scores.items():
@@ -154,11 +182,12 @@ def show_average(season_number=None):
 
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
         print("-" * 31)
-
         for i, (name, delta, count) in enumerate(sorted(entries, key=lambda x: x[1], reverse=True), 1):
             if i > 50:
                 break
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
+# ---------------------------------------------------------------------------
 
 def show_plte_alias():
     with sqlite3.connect(DB_PATH) as conn:
@@ -173,8 +202,8 @@ def show_plte_alias():
             return
 
         scores_by_match = {}
-        for pid, name, alias, team, active, score, match_id, tracks, max_score in rows:
-            if score is None or team != "PLTE":
+        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+            if team != "PLTE" or score is None or _is_absent(score, points, absent):
                 continue
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, alias, scaled_score))
@@ -184,15 +213,15 @@ def show_plte_alias():
         player_counts = {}
 
         for match_id, entries in scores_by_match.items():
-            scores = [score for _, _, score in entries]
+            scores = [s for _, _, s in entries]
             if not scores:
                 continue
             try:
                 median = statistics.median(scores)
             except statistics.StatisticsError:
                 continue
-            for pid, alias, score in entries:
-                delta = score - median
+            for pid, alias, s in entries:
+                delta = s - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_alias[pid] = alias
                 player_counts[pid] = player_counts.get(pid, 0) + 1
@@ -210,24 +239,25 @@ def show_plte_alias():
         for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True):
             print(alias)
 
+# ---------------------------------------------------------------------------
+
 def rank_active_plte(season_number=None):
     """
     Rank ALL active PLTE players:
-    - Uses avg delta vs. median per match (scaled to 4 tracks) like `avg`
-    - No 80% participation filter
-    - Players without any score are listed at the bottom
+    - Avg delta vs. Median per Match (scaled to 4 tracks) wie `avg`
+    - Kein 80%-Filter
+    - Spieler ohne Score am Ende
     """
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
         if season_number is None:
             season_number = find_current_season(cur)
-
         if not season_number:
             print("⚠️ No matching season found.")
             return
 
-        # Base set: all active PLTE players (id -> name)
+        # Alle aktiven PLTE
         cur.execute("SELECT id, name FROM players WHERE active = 1 AND team = 'PLTE'")
         active_players = cur.fetchall()
         if not active_players:
@@ -235,37 +265,33 @@ def rank_active_plte(season_number=None):
             return
         id_to_name = {pid: name for pid, name in active_players}
 
-        # Pull all season rows
         rows = _fetch_season_rows(cur, season_number)
 
-        # Build per-match lists limited to PLTE active players
         scores_by_match = {}
-        for pid, name, alias, team, active, score, match_id, tracks, max_score in rows:
+        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
             if team != "PLTE" or not active:
                 continue
-            if score is None:
+            if score is None or _is_absent(score, points, absent):
                 continue
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
-        # Compute deltas vs. median for each match
         player_scores = {}
         player_counts = {}
 
         for match_id, entries in scores_by_match.items():
-            scores = [score for _, _, score in entries]
+            scores = [s for _, _, s in entries]
             if not scores:
                 continue
             try:
                 median = statistics.median(scores)
             except statistics.StatisticsError:
                 continue
-            for pid, name, score in entries:
-                delta = score - median
+            for pid, name, s in entries:
+                delta = s - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_counts[pid] = player_counts.get(pid, 0) + 1
 
-        # Build final list: include ALL active PLTE players
         with_scores = []
         without_scores = []
         for pid, name in id_to_name.items():
@@ -275,63 +301,49 @@ def rank_active_plte(season_number=None):
                 count = player_counts.get(pid, 0)
                 with_scores.append((name, avg_delta, count))
             else:
-                # No scores this season
                 without_scores.append((name, None, 0))
 
-        # Sort: with scores by avg_delta desc; without scores alphabetically
         with_scores_sorted = sorted(with_scores, key=lambda x: x[1], reverse=True)
         without_scores_sorted = sorted(without_scores, key=lambda x: x[0].lower())
-
         entries = with_scores_sorted + without_scores_sorted
 
-        # Print
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
         print("-" * 31)
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
+# ---------------------------------------------------------------------------
+
 def _fetch_avg_score_last_seasons(cur, last_n=20):
-    """
-    Liefert [(season_number, avg_score_scaled), ...] für die letzten N Seasons.
-    score wird auf 4 Tracks skaliert (wie üblich): score * 4 / tracks
-    Es werden nur aktive PLTE-Spieler berücksichtigt.
-    """
     cur.execute("""
         SELECT m.season_number,
                AVG( ms.score * 4.0 / NULLIF(t.tracks, 0) ) AS avg_scaled
         FROM matchscore ms
-        JOIN match m       ON m.id = ms.match_id
-        JOIN teamevent t   ON t.id = m.teamevent_id
-        JOIN players p     ON p.id = ms.player_id
+        JOIN match     m ON m.id = ms.match_id
+        JOIN teamevent t ON t.id = m.teamevent_id
+        JOIN players   p ON p.id = ms.player_id
         WHERE ms.score IS NOT NULL
+          AND NOT (IFNULL(ms.absent,0)=1 AND IFNULL(ms.score,0)=0)
           AND p.team = 'PLTE'
           AND p.active = 1
         GROUP BY m.season_number
         ORDER BY m.season_number DESC
         LIMIT ?
     """, (last_n,))
-    rows = cur.fetchall()  # [(season, avg)]
-    # Für Plot: älteste→neueste (links→rechts)
+    rows = cur.fetchall()
     rows.reverse()
     return rows
+
 
 def _format_k(v):
     return f"{int(round(v/1000.0))}k"
 
 def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
                    title="Avg score per season (scaled)"):
-    """
-    rows: [(season_number, avg_score), ...]  (aufsteigend nach Season!)
-    width:  Gesamtbreite inkl. Y-Achse/Labels
-    height: Plot-Höhe (Zeilen)
-    x_labels: Anzahl X-Achsenlabels (z.B. 6) – gleichmäßig verteilt
-    """
     if not rows:
         return "```No data.```"
-    #symbol = "●"
     symbol = "."
 
-    # --- Helpers ---
     def _format_k(v: float) -> str:
         return f"{int(round(v/1000.0))}k"
 
@@ -343,18 +355,15 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
     if vmax == vmin:
         vmax = vmin + 1.0
 
-    # Fester linker Rand (Y-Label + ' │ ') = 9 Zeichen
     gutter = 9
-    plot_cols = max(10, width - gutter)  # Plotbreite
-    # Spaltenindex 0..plot_cols-1 gleichmäßig über alle Seasons mappen
+    plot_cols = max(10, width - gutter)
     col_idx = [0] * n
     if n == 1:
-        col_idx[0] = plot_cols - 1  # rechts
+        col_idx[0] = plot_cols - 1
     else:
         for i in range(n):
             col_idx[i] = round(i * (plot_cols - 1) / (n - 1))
 
-    # Werte → Y-Level (0..height-1), unten=0
     def to_level(v: float) -> int:
         r = (v - vmin) / (vmax - vmin)
         return int(round(r * (height - 1)))
@@ -362,9 +371,7 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
 
     lines = [f"{title} (min={int(vmin)}, max={int(vmax)})"]
 
-    # Plotzeilen (top → bottom)
     for h in range(height - 1, -1, -1):
-        # Y-Labels: oben / Mitte / unten in k
         if h in {height - 1, (height - 1) // 2, 0}:
             y_val = vmin + (vmax - vmin) * (h / (height - 1))
             ylab = _format_k(y_val).rjust(6)
@@ -378,15 +385,11 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
                 row[ci] = symbol
         lines.append(left + "".join(row))
 
-    # X-Achse
     lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
 
-    # X-Labels: exakt x_labels Positionen gleichmäßig über Plotbreite
     if x_labels < 2:
         x_labels = 2
-    # Zielspalten (gleichmäßiger Abstand, inkl. links/rechts)
     label_positions = [round(j * (plot_cols - 1) / (x_labels - 1)) for j in range(x_labels)]
-    # Zu druckende Seasons (gleichmäßig über Index 0..n-1, inkl. erste/letzte)
     label_indices   = [round(j * (n - 1) / (x_labels - 1)) for j in range(x_labels)]
 
     lbl_buf = [" "] * plot_cols
@@ -404,27 +407,26 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
 def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-        rows = _fetch_avg_score_last_seasons(cur, last_n=last_n)  # wie zuvor
+        rows = _fetch_avg_score_last_seasons(cur, last_n=last_n)
         if not rows:
             print("⚠️ No data.")
             return
         print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
 
+# ---------------------------------------------------------------------------
+
 def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     """
     31 Zeilen (Tage 1..31, oben=31). 12 Monate, je 3 Zellen à 2 Spalten.
-    Gesamtbreite: 77 = 5 Gutter + 12*3*2.
-    Setzt EXAKT das Emoji aus players.emoji (keine Ersatzzeichen).
+    Setzt EXAKT das Emoji aus players.emoji.
     """
     assert height == 31, "height muss 31 sein"
     months = 12
     gutter = 5  # "DD │ "
 
-    # Raster: keine Gaps
-    plot_cols = months * cols_per_month * cell_w      # 72
-    cells_per_row = plot_cols // cell_w               # 36
+    plot_cols = months * cols_per_month * cell_w
+    cells_per_row = plot_cols // cell_w
 
-    # Grid in ZELLEN (jede Zelle = String mit Breite cell_w)
     grid = [[" " * cell_w for _ in range(cells_per_row)] for _ in range(height)]
     slots = {(m+1, d+1): 0 for m in range(months) for d in range(height)}
 
@@ -444,7 +446,6 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
                 skipped_format += 1
                 continue
             a, b = int(m.group(1)), int(m.group(2))
-            # Heuristik: a<=12 ⇒ a=Monat,b=Tag; sonst a=Tag,b=Monat
             if 1 <= a <= 12 and 1 <= b <= 31:
                 mm, dd = a, b
             elif 1 <= b <= 12 and 1 <= a <= 31:
@@ -461,14 +462,12 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
                 skipped_empty_emoji += 1
                 continue
 
-            # Position
-            row = dd - 1                  # 31 oben → Index 30
+            row = dd - 1
             month_cell0 = (mm - 1) * cols_per_month
             slot = slots[(mm, dd)]
             cell_idx = month_cell0 + (slot if slot < cols_per_month else cols_per_month - 1)
             if slot < cols_per_month:
                 slots[(mm, dd)] = slot + 1
-
             grid[row][cell_idx] = sym
             placed += 1
 
@@ -478,7 +477,6 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
 
     lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
 
-    # Monatslabels zentriert über 3 Zellen
     label_cells = [" "] * cells_per_row
     for mth in range(1, months + 1):
         center_cell = (mth - 1) * cols_per_month + (cols_per_month // 2)
@@ -488,27 +486,25 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
 
     print("```\n" + "\n".join(lines) + "\n```")
 
+# ---------------------------------------------------------------------------
+
 def show_battle(player1_id, player2_id, season_number=None, height=30, max_matches=15, col_width=3):
     """
     Battle-Plot zweier Spieler in einer Season.
-    - Höhe: 30 Zeilen (Y = Score in k, mit 5 Ticks)
-    - X: Matches (neueste 15) als Spalten, jede Spalte col_width Zeichen breit
-    - Marker: Spieler-Emojis (Fallback: 🅰️ / 🅱️)
+    Abwesende werden nicht geplottet.
     """
     import math
-    CW = max(2, int(col_width))  # Spaltenbreite je Match
+    CW = max(2, int(col_width))
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Season bestimmen
         if season_number is None:
             season_number = find_current_season(cur)
         if not season_number:
             print("⚠️ No season.")
             return
 
-        # Matches dieser Season (chronologisch)
         cur.execute("""
             SELECT m.id, m.start
             FROM match m
@@ -520,12 +516,10 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
             print("⚠️ No matches found.")
             return
 
-        # Beschränken auf letzte max_matches
         matches = matches[-max_matches:]
         match_ids = [mid for mid, _ in matches]
         n = len(match_ids)
 
-        # Spieler-Namen + Emojis (mit Fallback)
         cur.execute("SELECT id, name, COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
                     (player1_id, player2_id))
         meta = {pid: (name, emoji or "") for pid, name, emoji in cur.fetchall()}
@@ -538,23 +532,26 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
         if not emo2.strip():
             emo2 = "🅱️"
 
-        # Scores der beiden Spieler in den gewählten Matches
         q = """
-            SELECT ms.match_id, ms.player_id, ms.score
+            SELECT ms.match_id, ms.player_id, ms.score, ms.points, ms.absent
             FROM matchscore ms
             WHERE ms.match_id IN ({})
               AND ms.player_id IN (?,?)
         """.format(",".join("?" * len(match_ids)))
         cur.execute(q, match_ids + [player1_id, player2_id])
         rows = cur.fetchall()
-        scores = {(mid, pid): sc for mid, pid, sc in rows if sc is not None}
+
+        scores = {}
+        for mid, pid, score, points, absent in rows:
+            if score is None or _is_absent(score, points, absent):
+                continue
+            scores[(mid, pid)] = score
 
         vals = list(scores.values())
         if not vals:
             print("⚠️ No scores for these players in this season.")
             return
 
-        # Y-Bereich mit etwas Luft, auf 1k runden
         vmin, vmax = min(vals), max(vals)
         if vmin == vmax:
             vmin = max(0, vmin - 1000)
@@ -565,16 +562,13 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
 
         def y_to_row(v: int) -> int:
             r = (v - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-            return int(round(r * (height - 1)))  # 0..height-1
+            return int(round(r * (height - 1)))
 
-        # Plot-Grid
         plot_w = n * CW
         grid = [[" "] * plot_w for _ in range(height)]
 
-        # Helper: Zelle (CW breit) an Position x in Zeile r setzen
         def place_cell(row_idx: int, col_x: int, text: str):
             s = (text or "")[:CW]
-            # zentriert in CW
             leftpad = (CW - len(s)) // 2
             cell = (" " * leftpad) + s
             cell = cell.ljust(CW, " ")
@@ -583,10 +577,9 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
                 if 0 <= pos < plot_w:
                     grid[row_idx][pos] = ch
 
-        # Punkte setzen
         for x, mid in enumerate(match_ids):
             col = x * CW
-            here = []  # (row_idx, emoji)
+            here = []
             sc1 = scores.get((mid, player1_id))
             if sc1 is not None:
                 r = height - 1 - y_to_row(sc1)
@@ -596,7 +589,6 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
                 r = height - 1 - y_to_row(sc2)
                 here.append((r, emo2))
 
-            # Falls beide gleiches y → beide in dieselbe Spalte nebeneinander
             if len(here) == 2 and here[0][0] == here[1][0]:
                 row_idx = here[0][0]
                 combo = (here[0][1] + here[1][1])[:CW]
@@ -605,26 +597,18 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
                 for row_idx, mark in here:
                     place_cell(row_idx, col, mark)
 
-        # Y-Achsen-Ticks (Top, 75%, 50%, 25%, Bottom)
         tick_rows = {0, height // 4, height // 2, (3 * height) // 4, height - 1}
 
-        # Header
         print(f"Battle {name1} {emo1} vs {name2} {emo2} (Season {season_number})")
-
-        # Plot mit Y-Labels in k, sauber bündig
         for r in range(height):
             if r in tick_rows:
                 val = vmax - (vmax - vmin) * (r / (height - 1))
-                label = f"{int(round(val/1000))}k".rjust(4)  # exakt 4 inkl. 'k'
+                label = f"{int(round(val/1000))}k".rjust(4)
             else:
                 label = " " * 4
-            # '│' direkt hinter die 4 Zeichen
             print(f"{label}│{''.join(grid[r])}")
 
-        # X-Achse unter die │-Spalte (1 Zeichen rechts von Label)
         print(" " * 4 + "└" + "─" * plot_w)
-
-        # X-Labels (1..n), unter Plotstart = 1 weiter rechts
         labels = "".join(f"{i+1:>{CW}}" for i in range(n))
         print(" " * 5 + labels)
 
