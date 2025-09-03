@@ -142,7 +142,7 @@ def show_average(season_number=None):
 
         cur.execute("SELECT COUNT(*) FROM match WHERE season_number = ?", (season_number,))
         total_matches = cur.fetchone()[0]
-        min_matches = round(total_matches * 0.8)
+        min_matches = 1
 
         entries = []
         for pid, deltas in player_scores.items():
