@@ -305,7 +305,7 @@ HELP_PH = help_block(
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
         (".pe ",                 "Export player table."),
-        (".pi ",                 "Import player table."),
+        (".pi ",                 "Import player table and deletes sheet."),
         (".p+ id>",              "Reactivate Player."),
         (".p- <id>",             "Deactivate Player (verbose)."),
         ('.p++ "<Name>" <team> [alias] ', "Add Player team = PLTE | PL1..PL3. Alias is mandatory for PLTE Player. User only A-z and 0-9 letters for alias"),

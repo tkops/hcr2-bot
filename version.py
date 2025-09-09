@@ -1,7 +1,8 @@
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 
 HISTORY = [
-    ("0.4.3", "2025-09-03", "Export Player Table"),
+    ("0.4.4", "2025-09-09", "Delete player sheet afer import"),
+    ("0.4.3", "2025-09-09", "Export Player Table"),
     ("0.4.2", "2025-09-03", "Some Stats fixes"),
     ("0.4.1", "2025-08-23", "Add .gp user command, Add matchup result to sheet, some command improvements"),
     ("0.4.0", "2025-08-23", "User modifications by sheet import"),
@@ -17,7 +18,7 @@ HISTORY = [
 def get_version():
     return VERSION
 
-def get_history(limit=10):
+def get_history(limit=5):
     """Return version history as list of tuples (version, date, change)."""
     return HISTORY[:limit]
 
