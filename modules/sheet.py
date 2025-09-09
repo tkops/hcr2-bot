@@ -132,6 +132,20 @@ def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
     return None, False
 
 
+def delete_from_nextcloud(remote_path) -> bool:
+    """
+    Löscht eine Datei in Nextcloud per WebDAV DELETE. Gibt True bei Erfolg zurück.
+    """
+    import requests
+    user, password = NEXTCLOUD_AUTH
+    url = NEXTCLOUD_URL.format(user=user, path=str(remote_path).lstrip("/"))
+    try:
+        r = requests.delete(url, auth=(user, password))
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
+
+
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
     remote_path = f"Power-Ladys-Scores/S{season}/{filename}"
@@ -777,12 +791,17 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
 
         conn.commit()
 
+    # lokale Kopie löschen (Best Effort)
     try:
         local.unlink()
     except Exception:
         pass
 
-    print(f"[OK] players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors")
+    # NUR die Players-Excel in Nextcloud löschen (Match-Sheets bleiben unberührt)
+    deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
+    status = "deleted" if deleted else "delete failed"
+
+    print(f"[OK] players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors ({status} in Nextcloud)")
 
 
 # ===================== CLI =====================
@@ -844,4 +863,12 @@ def handle_command(command, args):
     else:
         print("[ERROR] Unknown command:", command)
         print_help()
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2 or sys.argv[1] != "sheet":
+        print_help()
+    else:
+        handle_command(sys.argv[2] if len(sys.argv) > 2 else "", sys.argv[3:])
 
