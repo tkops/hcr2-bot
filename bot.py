@@ -304,7 +304,9 @@ HELP_PH = help_block(
         (".pl absent",           "List absent Ladys"),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
         (".pb <id>",             "Set Player to back. (absent=false)"),
-        (".p+ <id>",             "Reactivate Player."),
+        (".pe ",                 "Export player table."),
+        (".pi ",                 "Import player table."),
+        (".p+ id>",              "Reactivate Player."),
         (".p- <id>",             "Deactivate Player (verbose)."),
         ('.p++ "<Name>" <team> [alias] ', "Add Player team = PLTE | PL1..PL3. Alias is mandatory for PLTE Player. User only A-z and 0-9 letters for alias"),
     ],
@@ -695,6 +697,33 @@ async def on_message(message):
         else:
             await message.channel.send("❌ Error during sheet import.")
         return
+
+    # --- Sheet player export ---
+    if cmd == ".pe":
+        output = await run_hcr2(["sheet", "player", "export"])
+        if output:
+            lines = output.strip().splitlines()
+            link = next((l for l in lines if l.startswith("http")), None)
+            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            embed = discord.Embed(title="📤 Player export", description=desc, color=0xf1c40f)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during player export.")
+        return
+
+    # --- Sheet player import ---
+    if cmd == ".pi":
+        output = await run_hcr2(["sheet", "player", "import"])
+        if output:
+            lines = output.strip().splitlines()
+            link = next((l for l in lines if l.startswith("http")), None)
+            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            embed = discord.Embed(title="📥 Player import", description=desc, color=0x9b59b6)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("❌ Error during player import.")
+        return
+
 
     # --- Stats ---
     if cmd == ".stats":
