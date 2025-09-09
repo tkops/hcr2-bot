@@ -25,6 +25,8 @@ EXCLUDED_PLAYER_COLS = {
     "preferred_vehicles",
     "playstyle",
     "language",
+    "country_code",
+    "last_modified",
 }
 
 # --- Regex zum Parsen der neuen Player-ID aus der player add-Ausgabe ---
@@ -90,18 +92,30 @@ def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> 
     return False
 
 
-def upload_to_nextcloud(local_path, remote_path):
+def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
+    """
+    Upload nach Nextcloud.
+    - overwrite=False (Default): nur anlegen, nicht überschreiben.
+    - overwrite=True: vorhandene Datei wird überschrieben (PUT).
+    Rückgabe: (url, created_flag) – created_flag=True nur wenn neu angelegt.
+    """
     import requests
     user, password = NEXTCLOUD_AUTH
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
-    # existiert Datei schon?
-    res = requests.head(url, auth=(user, password))
-    if res.status_code == 200:
+    # Existenz prüfen (für created/updated-Flag)
+    try:
+        head = requests.head(url, auth=(user, password))
+        exists = (head.status_code == 200)
+    except Exception:
+        exists = False
+
+    if exists and not overwrite:
+        # nichts tun, nicht überschreiben
         return url, False
 
-    # Ordnerkette anlegen (MKCOL)
+    # Ordnerkette anlegen (idempotent)
     parts = remote_path.split("/")[:-1]
     current_path = ""
     for part in parts:
@@ -109,12 +123,13 @@ def upload_to_nextcloud(local_path, remote_path):
         dir_url = NEXTCLOUD_URL.format(user=user, path=current_path.lstrip("/"))
         requests.request("MKCOL", dir_url, auth=(user, password))
 
+    # Upload (PUT überschreibt falls vorhanden)
     with open(local_path, "rb") as f:
         res = requests.put(url, auth=(user, password), data=f)
-    if res.status_code in (200, 201, 204):
-        return url, True
-    return None, False
 
+    if res.status_code in (200, 201, 204):
+        return url, (not exists)  # True wenn neu, False wenn überschrieben
+    return None, False
 
 def download_from_nextcloud(season, filename, local_path):
     user, password = NEXTCLOUD_AUTH
@@ -549,7 +564,7 @@ def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Pat
 
 
 def _upload_players_xlsx(local_path: Path):
-    return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH)
+    return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
 
 
 def _detect_boolean_columns(conn: sqlite3.Connection, table: str, candidate_overrides=None):
@@ -610,7 +625,7 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
             SELECT {', '.join(export_columns)}
             FROM players
             WHERE team = 'PLTE' AND active = 1
-            ORDER BY name COLLATE NOCASE
+            ORDER BY garage_power DESC, name COLLATE NOCASE
         """)
         rows = cur.fetchall()
 
