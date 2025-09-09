@@ -25,6 +25,8 @@ EXCLUDED_PLAYER_COLS = {
     "preferred_vehicles",
     "playstyle",
     "language",
+    "country_code",
+    "last_modified",
 }
 
 # --- Regex zum Parsen der neuen Player-ID aus der player add-Ausgabe ---
@@ -90,18 +92,30 @@ def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> 
     return False
 
 
-def upload_to_nextcloud(local_path, remote_path):
+def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
+    """
+    Upload nach Nextcloud.
+    - overwrite=False (Default): nur anlegen, nicht überschreiben.
+    - overwrite=True: vorhandene Datei wird überschrieben (PUT).
+    Rückgabe: (url, created_flag) – created_flag=True nur wenn neu angelegt.
+    """
     import requests
     user, password = NEXTCLOUD_AUTH
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
-    # existiert Datei schon?
-    res = requests.head(url, auth=(user, password))
-    if res.status_code == 200:
+    # Existenz prüfen (für created/updated-Flag)
+    try:
+        head = requests.head(url, auth=(user, password))
+        exists = (head.status_code == 200)
+    except Exception:
+        exists = False
+
+    if exists and not overwrite:
+        # nichts tun, nicht überschreiben
         return url, False
 
-    # Ordnerkette anlegen (MKCOL)
+    # Ordnerkette anlegen (idempotent)
     parts = remote_path.split("/")[:-1]
     current_path = ""
     for part in parts:
@@ -109,10 +123,12 @@ def upload_to_nextcloud(local_path, remote_path):
         dir_url = NEXTCLOUD_URL.format(user=user, path=current_path.lstrip("/"))
         requests.request("MKCOL", dir_url, auth=(user, password))
 
+    # Upload (PUT überschreibt falls vorhanden)
     with open(local_path, "rb") as f:
         res = requests.put(url, auth=(user, password), data=f)
+
     if res.status_code in (200, 201, 204):
-        return url, True
+        return url, (not exists)  # True wenn neu, False wenn überschrieben
     return None, False
 
 
@@ -267,7 +283,7 @@ def generate_excel(match, players, output_path):
     wb.save(filepath)
 
     remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
-    upload_to_nextcloud(filepath, remote_path)
+    upload_to_nextcloud(filepath, remote_path)  # kein overwrite für Match-Sheets
 
     try:
         filepath.unlink()
@@ -278,7 +294,7 @@ def generate_excel(match, players, output_path):
     return f"[{filename}]({web_url})", True
 
 
-# --- Helfer für Match-Import (unverändert) ---
+# --- Helfer für Match-Import ---
 
 def _parse_pid_marker(pid_cell):
     if pid_cell is None:
@@ -322,6 +338,18 @@ def _add_player_plte_and_get_id(name: str) -> Optional[int]:
         except Exception:
             return None
     return None
+
+
+# --- Normalisierung für Vergleich beim Import ---
+def _norm(v):
+    if v is None:
+        return None
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    if isinstance(v, str):
+        s = v.strip()
+        return s if s != "" else None
+    return v
 
 
 def import_excel_to_matchscore(match_id):
@@ -549,7 +577,8 @@ def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Pat
 
 
 def _upload_players_xlsx(local_path: Path):
-    return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH)
+    # Nur Ladys.xlsx darf überschrieben werden
+    return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
 
 
 def _detect_boolean_columns(conn: sqlite3.Connection, table: str, candidate_overrides=None):
@@ -610,7 +639,7 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
             SELECT {', '.join(export_columns)}
             FROM players
             WHERE team = 'PLTE' AND active = 1
-            ORDER BY name COLLATE NOCASE
+            ORDER BY garage_power DESC, name COLLATE NOCASE
         """)
         rows = cur.fetchall()
 
@@ -695,31 +724,52 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
             for b in (set(row_map.keys()) & bool_cols):
                 row_map[b] = _to_bool01_if_needed(row_map[b])
 
-            row_map["last_modified"] = datetime.now().isoformat(timespec="seconds")
-
             try:
                 if rid_int and rid_int in existing_ids:
-                    set_cols = [c for c in row_map.keys() if c not in ("id",)]
+                    # Kandidaten-Spalten (ohne id)
+                    set_cols = [c for c in row_map.keys() if c != "id"]
                     if not set_cols:
                         skipped += 1
                         continue
-                    placeholders = ", ".join([f"{c}=?" for c in set_cols])
-                    values = [row_map[c] for c in set_cols]
-                    values.append(rid_int)
+
+                    # aktuelle DB-Werte laden
+                    cur.execute(f"SELECT {', '.join(set_cols)} FROM players WHERE id = ?", (rid_int,))
+                    db_row = cur.fetchone()
+                    if not db_row:
+                        skipped += 1
+                        continue
+                    db_map = {col: db_row[idx] for idx, col in enumerate(set_cols)}
+
+                    # Unterschiede ermitteln
+                    changed_cols = [c for c in set_cols if _norm(row_map[c]) != _norm(db_map.get(c))]
+                    if not changed_cols:
+                        skipped += 1
+                        continue
+
+                    # last_modified nur bei Änderungen setzen
+                    now = datetime.now().isoformat(timespec="seconds")
+                    placeholders = ", ".join([f"{c}=?" for c in changed_cols] + ["last_modified=?"])
+                    values = [row_map[c] for c in changed_cols] + [now, rid_int]
                     cur.execute(f"UPDATE players SET {placeholders} WHERE id = ?", values)
                     updated += 1
                 else:
+                    # Insert
                     row_map["team"] = "PLTE"
                     if "active" not in row_map or row_map["active"] is None:
                         row_map["active"] = 1
+
                     insert_cols = [c for c in row_map.keys() if c != "id" and c not in EXCLUDED_PLAYER_COLS]
                     if not insert_cols:
                         skipped += 1
                         continue
+
+                    now = datetime.now().isoformat(timespec="seconds")
+                    insert_cols.append("last_modified")
                     placeholders = ", ".join(["?"] * len(insert_cols))
+                    values = [row_map[c] for c in insert_cols if c != "last_modified"] + [now]
                     cur.execute(
                         f"INSERT INTO players ({', '.join(insert_cols)}) VALUES ({placeholders})",
-                        [row_map[c] for c in insert_cols],
+                        values,
                     )
                     inserted += 1
             except Exception:
