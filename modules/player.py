@@ -432,36 +432,45 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
         if cond:
             q += " WHERE " + " AND ".join(cond)
 
-        # Spezialfall: list-active --team <X> → nach active_modified aufsteigend (neueste unten)
-        if active_only and team_filter:
-            q += " ORDER BY datetime(active_modified) ASC"
-        else:
-            q += " ORDER BY " + ("name COLLATE NOCASE" if sort_by == "name" else "garage_power DESC")
-
-        cur.execute(q, params)
-        rows = cur.fetchall()
-
-        # Schlanke Ausgabe für list-active --team <X>
+        # Spezialfall: list-active --team <X> → nach GP sortieren und GP anzeigen (ohne Absent-Spalte)
         if team_filter and active_only:
-            print(f"{'#':<3} {'ID':<4} {'Name':<20} {'✈️':<3}")
-            print("-" * 32)
+            q += " ORDER BY garage_power DESC"
+            cur.execute(q, params)
+            rows = cur.fetchall()
+
+            print(f"{'#':<3} {'ID':<4} {'Name':<14} {'GP':>6}")
             for i, r in enumerate(rows, start=1):
-                abs_mark = "x" if r["away_until"] and r["away_until"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else ""
-                print(f"{i:<3} {r['id']:<4} {r['name']:<20} {abs_mark:<3}")
-            print("-" * 32)
+                print(f"{i:<3} {r['id']:<4} {r['name']:<14} {int(r['garage_power']):>6}")
             return
 
         # Bisherige Team-Ansicht (nur --team, ohne list-active)
         if team_filter:
+            # Sortierung für Teamliste (ohne active_only): nach GP oder Name, je nach sort_by
+            if sort_by == "name":
+                q += " ORDER BY name COLLATE NOCASE"
+            else:
+                q += " ORDER BY garage_power DESC"
+            cur.execute(q, params)
+            rows = cur.fetchall()
+
             print(f"{'#':<3} {'ID':<4} {'Name':<20} {'Alias':<15} {'Leader':<6} {'ABS':<3}")
             print("-" * 80)
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             for i, r in enumerate(rows, start=1):
-                abs_mark = "x" if r["away_until"] and r["away_until"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else ""
+                abs_mark = "x" if r["away_until"] and r["away_until"] > now_str else ""
                 print(f"{i:<3} {r['id']:<4} {r['name']:<20} {r['alias'] or '-':<15} {bool(r['is_leader']):<6} {abs_mark:<3}")
             print("-" * 80)
             return
 
         # Standard-Gesamtansicht
+        if sort_by == "name":
+            q += " ORDER BY name COLLATE NOCASE"
+        else:
+            q += " ORDER BY garage_power DESC"
+
+        cur.execute(q, params)
+        rows = cur.fetchall()
+
         cur.execute("SELECT COUNT(*) AS cnt FROM players WHERE active = 1")
         active_count = cur.fetchone()["cnt"]
 
@@ -949,5 +958,4 @@ def print_help():
     print("  activate <id>                 Set player active")
     print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
     print("  back <term> | (--id ID | --name NAME | --discord NAME)")
-
 
