@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 import sqlite3
 from datetime import datetime
+import re
 
 DB_PATH = "../hcr2-db/hcr2.db"
 
@@ -75,6 +76,25 @@ def _fetch_ms_by_unique(cur, match_id, player_id):
                 (match_id, player_id))
     return cur.fetchone()
 
+def _season_clause(season_filter):
+    """
+    Returns (sql_snippet, params_list) for WHERE on season.
+    season_filter can be:
+      - None: no clause
+      - "__CURRENT__": s.number = (select max(number) from season)
+      - digits or 'S<digits>': s.number = <n>
+      - pattern (with * or %): s.name LIKE <pattern>
+    """
+    if not season_filter:
+        return "", []
+    if season_filter == "__CURRENT__":
+        return "s.number = (SELECT MAX(number) FROM season)", []
+    m = re.fullmatch(r"\s*[sS]?\s*(\d+)\s*", str(season_filter))
+    if m:
+        return "s.number = ?", [int(m.group(1))]
+    pat = str(season_filter).replace("*", "%")
+    return "s.name LIKE ?", [pat]
+
 # ===================== CLI =====================
 
 def handle_command(cmd, args):
@@ -97,7 +117,7 @@ def print_help():
     print("Usage: python hcr2.py matchscore <command> [args]")
     print("\nCommands:")
     print("  add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>]")
-    print("  list [--all] [--match <id>] [--season [<name_or_pattern>]]")
+    print("  list [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
     print("  delete <id>")
     print("  edit <id> [--score <0..75000>] [--points <0..300>] "
           "[--absent true|false|toggle] [--checkin true|false|toggle]")
@@ -105,31 +125,21 @@ def print_help():
 # ===================== Commands =====================
 
 def add_score(args):
-    """
-    add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>]
-    - absent/checkin: 0/1/true/false/yes/no/ja/nein
-    - If row exists, update; prints CHANGED/UNCHANGED.
-    """
     if len(args) not in (4, 5, 6):
         print("Usage: matchscore add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>]")
         return
-
     match_id  = _parse_int(args[0])
     player_in = args[1]
     score     = _parse_int(args[2])
     points    = _parse_int(args[3])
-
     if not (0 <= score <= 75000 and 0 <= points <= 300):
         print("❌ Score or points out of valid range.")
         return
-
     absent_override  = _to_bool01(args[4]) if len(args) >= 5 else None
     checkin_override = _to_bool01(args[5]) if len(args) == 6 else None
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
-
-        # resolve player
         try:
             player_id = int(player_in)
         except ValueError:
@@ -148,9 +158,8 @@ def add_score(args):
                 return
             player_id = matches[0][0]
 
-        # absent/checkin determine
         absent  = absent_override  if absent_override  is not None else _compute_absent(conn, match_id, player_id)
-        checkin = checkin_override if checkin_override is not None else 0  # default: not checked-in
+        checkin = checkin_override if checkin_override is not None else 0
 
         existing = _fetch_ms_by_unique(cur, match_id, player_id)
         if existing:
@@ -167,7 +176,7 @@ def add_score(args):
                            VALUES (?, ?, ?, ?, ?, ?)""",
                         (match_id, player_id, score, points, absent, checkin))
             conn.commit()
-            print("CHANGED")  # new row created
+            print("CHANGED")
 
 def delete_score(score_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -199,7 +208,7 @@ def list_scores(*args):
                 season_filter = args[i + 1]
                 i += 2
             else:
-                season_filter = "%"
+                season_filter = "__CURRENT__"
                 i += 1
         else:
             i += 1
@@ -215,13 +224,17 @@ def list_scores(*args):
     where = []
     vals = []
 
-    # NEW: if --all without explicit --season/--match -> restrict to current season (max season.number)
+    # --all ohne explizite Filter: aktuelle Season
     if show_all and not season_filter and not match_filter:
         where.append("s.number = (SELECT MAX(number) FROM season)")
 
+    # Season-Filter anwenden (unterstützt Zahl, S<Zahl>, Pattern)
     if season_filter:
-        where.append("s.name LIKE ?")
-        vals.append(season_filter)
+        clause, p = _season_clause(season_filter)
+        if clause:
+            where.append(clause)
+            vals.extend(p)
+
     if match_filter:
         where.append("m.id = ?")
         vals.append(match_filter)
@@ -237,7 +250,7 @@ def list_scores(*args):
         print("⚠️ No scores found.")
         return
 
-    # default: only last match (within filters)
+    # default: nur letztes Match (wenn nicht --all/--match)
     if not show_all and not match_filter:
         last_mid = rows[0][1]
         rows = [r for r in rows if r[1] == last_mid]
@@ -247,8 +260,6 @@ def list_scores(*args):
         match_date = block[0][2]
         opponent = block[0][3]
         season_name = block[0][4]
-
-        # optional result header (if set on match table)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
             cur.execute("SELECT score_ladys, score_opponent FROM match WHERE id = ?", (match_id,))
@@ -265,7 +276,6 @@ def list_scores(*args):
             print(f"{r[0]:<6} {r[7]:<6} {r[6]:<16.16} {r[8]:>5} {r[9]:>3}")
         print()
 
-    # group by match
     if show_all or match_filter:
         group = []
         current = None
@@ -357,7 +367,6 @@ def edit_score(args):
         if new_checkin is not None:
             sets.append("checkin=?"); vals.append(new_checkin)
 
-        # If score/points changed but absent not explicitly set, recompute absent
         if (new_score is not None or new_points is not None) and new_absent is None:
             computed = _compute_absent(conn, match_id, player_id)
             sets.append("absent=?"); vals.append(computed)
