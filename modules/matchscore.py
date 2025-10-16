@@ -158,7 +158,7 @@ def print_help():
     print("  list-short [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
     print("  delete <id>")
     print("  edit <id> [--score <0..75000>] [--points <0..300>] "
-          "[--absent true|false|toggle] [--checkin true|false|toggle]")
+          "[--pid <player_id>] [--absent true|false|toggle] [--checkin true|false|toggle]")
 
 # ===================== Commands =====================
 
@@ -301,7 +301,7 @@ def list_scores_short(*args):
 def edit_score(args):
     if not args or not str(args[0]).isdigit():
         print("Usage: matchscore edit <id> [--score <0..75000>] [--points <0..300>] "
-              "[--absent true|false|toggle] [--checkin true|false|toggle]")
+              "[--pid <player_id>] [--absent true|false|toggle] [--checkin true|false|toggle]")
         return
 
     score_id = _parse_int(args[0])
@@ -309,6 +309,7 @@ def edit_score(args):
     new_points = None
     new_absent = None
     new_checkin = None
+    new_player_id = None
     toggle_absent = False
     toggle_checkin = False
 
@@ -319,6 +320,12 @@ def edit_score(args):
             new_score = _parse_int(args[i + 1], None); i += 2
         elif tok == "--points" and i + 1 < len(args):
             new_points = _parse_int(args[i + 1], None); i += 2
+        elif tok == "--pid" and i + 1 < len(args):
+            pid_raw = args[i + 1]; i += 2
+            try:
+                new_player_id = int(pid_raw)
+            except Exception:
+                print("❌ --pid requires a numeric player_id."); return
         elif tok == "--absent" and i + 1 < len(args):
             val = args[i + 1].strip().lower()
             if val == "toggle": toggle_absent = True
@@ -332,7 +339,7 @@ def edit_score(args):
         else:
             i += 1
 
-    if new_score is None and new_points is None and new_absent is None and new_checkin is None and not (toggle_absent or toggle_checkin):
+    if new_score is None and new_points is None and new_absent is None and new_checkin is None and new_player_id is None and not (toggle_absent or toggle_checkin):
         print("⚠️ Nothing to update.")
         return
 
@@ -350,6 +357,20 @@ def edit_score(args):
         if toggle_checkin:
             new_checkin = 0 if (cur_checkin or 0) else 1
 
+        # Playerwechsel NUR via --pid (ohne Nebenwirkungen)
+        if new_player_id is not None and new_player_id != player_id:
+            # existiert PID?
+            cur.execute("SELECT 1 FROM players WHERE id = ?", (new_player_id,))
+            if not cur.fetchone():
+                print(f"❌ Player id {new_player_id} does not exist."); return
+            # Kollision vermeiden
+            cur.execute("SELECT id FROM matchscore WHERE match_id=? AND player_id=?", (match_id, new_player_id))
+            clash = cur.fetchone()
+            if clash and clash[0] != score_id:
+                print(f"❌ Cannot change player: entry already exists for match {match_id} and player {new_player_id} (matchscore.id={clash[0]}).")
+                print("   Tip: delete or edit the existing entry first.")
+                return
+
         sets, vals = [], []
         if new_score is not None:
             if not (0 <= new_score <= 75000):
@@ -363,9 +384,13 @@ def edit_score(args):
             sets.append("absent=?"); vals.append(new_absent)
         if new_checkin is not None:
             sets.append("checkin=?"); vals.append(new_checkin)
+        if new_player_id is not None and new_player_id != player_id:
+            sets.append("player_id=?"); vals.append(new_player_id)
+            # KEINE automatische Änderung weiterer Felder bei PID-Wechsel
 
+        # Bei Score/Pts-Änderung: optional weiterhin Auto-Absenz? -> BEIBEHALTEN wie zuvor
         if (new_score is not None or new_points is not None) and new_absent is None:
-            computed = _compute_absent(conn, match_id, player_id)
+            computed = _compute_absent(conn, match_id, new_player_id if (new_player_id is not None) else player_id)
             sets.append("absent=?"); vals.append(computed)
 
         if not sets:
