@@ -886,7 +886,7 @@ async def on_message(message):
     # --- Matchscores ---
     if cmd == ".x":
         if not args:
-            output = await run_hcr2(["matchscore", "list"])
+            output = await run_hcr2(["matchscore", "list-short"])
             await send_codeblock(message.channel, output)
             return
 

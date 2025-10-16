@@ -1,6 +1,7 @@
 VERSION = "0.4.4"
 
 HISTORY = [
+    ("0.4.5", "2025-10-25", "Modify matchscore listings"),
     ("0.4.4", "2025-09-09", "Delete player sheet afer import"),
     ("0.4.3", "2025-09-09", "Export Player Table"),
     ("0.4.2", "2025-09-03", "Some Stats fixes"),
