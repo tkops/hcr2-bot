@@ -77,14 +77,6 @@ def _fetch_ms_by_unique(cur, match_id, player_id):
     return cur.fetchone()
 
 def _season_clause(season_filter):
-    """
-    Returns (sql_snippet, params_list) for WHERE on season.
-    season_filter can be:
-      - None: no clause
-      - "__CURRENT__": s.number = (select max(number) from season)
-      - digits or 'S<digits>': s.number = <n>
-      - pattern (with * or %): s.name LIKE <pattern>
-    """
     if not season_filter:
         return "", []
     if season_filter == "__CURRENT__":
@@ -95,6 +87,49 @@ def _season_clause(season_filter):
     pat = str(season_filter).replace("*", "%")
     return "s.name LIKE ?", [pat]
 
+def _parse_list_args(args):
+    show_all = False
+    season_filter = None
+    match_filter = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--all":
+            show_all = True; i += 1
+        elif args[i] == "--match" and i + 1 < len(args):
+            match_filter = _parse_int(args[i + 1]); i += 2
+        elif args[i] == "--season":
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                season_filter = args[i + 1]; i += 2
+            else:
+                season_filter = "__CURRENT__"; i += 1
+        else:
+            i += 1
+    return show_all, season_filter, match_filter
+
+def _query_rows(season_filter, match_filter, force_current_when_all=False):
+    base = """
+        SELECT ms.id, m.id, m.start, m.opponent,
+               s.name, s.division, p.name, p.id, ms.score, ms.points, ms.absent, ms.checkin
+        FROM matchscore ms
+        JOIN match m ON ms.match_id = m.id
+        JOIN season s ON m.season_number = s.number
+        JOIN players p ON ms.player_id = p.id
+    """
+    where, vals = [], []
+    if force_current_when_all and not season_filter and not match_filter:
+        where.append("s.number = (SELECT MAX(number) FROM season)")
+    if season_filter:
+        clause, p = _season_clause(season_filter)
+        if clause:
+            where.append(clause); vals.extend(p)
+    if match_filter:
+        where.append("m.id = ?"); vals.append(match_filter)
+    query = base + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY m.id DESC, ms.score DESC"
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute(query, vals)
+        return cur.fetchall()
+
 # ===================== CLI =====================
 
 def handle_command(cmd, args):
@@ -102,6 +137,8 @@ def handle_command(cmd, args):
         add_score(args)
     elif cmd == "list":
         list_scores(*args)
+    elif cmd == "list-short":
+        list_scores_short(*args)
     elif cmd == "delete":
         if len(args) != 1:
             print("Usage: matchscore delete <id>")
@@ -118,6 +155,7 @@ def print_help():
     print("\nCommands:")
     print("  add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>]")
     print("  list [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
+    print("  list-short [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
     print("  delete <id>")
     print("  edit <id> [--score <0..75000>] [--points <0..300>] "
           "[--absent true|false|toggle] [--checkin true|false|toggle]")
@@ -191,80 +229,21 @@ def delete_score(score_id):
               f"player={row[6]} score={row[7]} points={row[8]} absent={int(row[9] or 0)} checkin={int(row[10] or 0)}")
 
 def list_scores(*args):
-    show_all = False
-    season_filter = None
-    match_filter = None
-
-    i = 0
-    while i < len(args):
-        if args[i] == "--all":
-            show_all = True
-            i += 1
-        elif args[i] == "--match" and i + 1 < len(args):
-            match_filter = _parse_int(args[i + 1])
-            i += 2
-        elif args[i] == "--season":
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                season_filter = args[i + 1]
-                i += 2
-            else:
-                season_filter = "__CURRENT__"
-                i += 1
-        else:
-            i += 1
-
-    base = """
-        SELECT ms.id, m.id, m.start, m.opponent,
-               s.name, s.division, p.name, p.id, ms.score, ms.points, ms.absent, ms.checkin
-        FROM matchscore ms
-        JOIN match m ON ms.match_id = m.id
-        JOIN season s ON m.season_number = s.number
-        JOIN players p ON ms.player_id = p.id
-    """
-    where = []
-    vals = []
-
-    # --all ohne explizite Filter: aktuelle Season
-    if show_all and not season_filter and not match_filter:
-        where.append("s.number = (SELECT MAX(number) FROM season)")
-
-    # Season-Filter anwenden (unterstützt Zahl, S<Zahl>, Pattern)
-    if season_filter:
-        clause, p = _season_clause(season_filter)
-        if clause:
-            where.append(clause)
-            vals.extend(p)
-
-    if match_filter:
-        where.append("m.id = ?")
-        vals.append(match_filter)
-
-    query = base + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY m.id DESC, ms.score DESC"
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute(query, vals)
-        rows = cur.fetchall()
-
+    show_all, season_filter, match_filter = _parse_list_args(args)
+    rows = _query_rows(season_filter, match_filter, force_current_when_all=show_all)
     if not rows:
         print("⚠️ No scores found.")
         return
-
-    # default: nur letztes Match (wenn nicht --all/--match)
     if not show_all and not match_filter:
         last_mid = rows[0][1]
         rows = [r for r in rows if r[1] == last_mid]
 
     def print_block(block):
-        match_id = block[0][1]
-        match_date = block[0][2]
-        opponent = block[0][3]
-        season_name = block[0][4]
+        match_id = block[0][1]; match_date = block[0][2]; opponent = block[0][3]; season_name = block[0][4]
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.cursor()
             cur.execute("SELECT score_ladys, score_opponent FROM match WHERE id = ?", (match_id,))
-            res = cur.fetchone() or (0, 0)
-        sl, so = res
+            sl, so = cur.fetchone() or (0, 0)
         print(f"📊 Match {match_id} – {opponent} | {match_date} | Season {season_name}")
         if sl or so:
             emoji = "🏆" if sl > so else ("😢" if sl < so else "🤝")
@@ -277,18 +256,45 @@ def list_scores(*args):
         print()
 
     if show_all or match_filter:
-        group = []
-        current = None
+        group, current = [], None
         for r in rows:
             if current is None:
                 current = r[1]
             if r[1] != current:
-                print_block(group)
-                group = []
-                current = r[1]
+                print_block(group); group = []; current = r[1]
             group.append(r)
-        if group:
-            print_block(group)
+        if group: print_block(group)
+    else:
+        print_block(rows)
+
+def list_scores_short(*args):
+    show_all, season_filter, match_filter = _parse_list_args(args)
+    rows = _query_rows(season_filter, match_filter, force_current_when_all=show_all)
+    if not rows:
+        print("⚠️ No scores found.")
+        return
+    if not show_all and not match_filter:
+        last_mid = rows[0][1]
+        rows = [r for r in rows if r[1] == last_mid]
+
+    def print_block(block):
+        match_id = block[0][1]; match_date = block[0][2]; opponent = block[0][3]
+        print(f"Match {match_id} – {opponent} | {match_date}")
+        print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3}")
+        print("-" * 34)
+        for r in block:
+            print(f"{r[0]:<6} {r[6]:<16.16} {r[8]:>5} {r[9]:>3}")
+        print()
+
+    if show_all or match_filter:
+        group, current = [], None
+        for r in rows:
+            if current is None:
+                current = r[1]
+            if r[1] != current:
+                print_block(group); group = []; current = r[1]
+            group.append(r)
+        if group: print_block(group)
     else:
         print_block(rows)
 
@@ -310,24 +316,18 @@ def edit_score(args):
     while i < len(args):
         tok = args[i]
         if tok == "--score" and i + 1 < len(args):
-            new_score = _parse_int(args[i + 1], None)
-            i += 2
+            new_score = _parse_int(args[i + 1], None); i += 2
         elif tok == "--points" and i + 1 < len(args):
-            new_points = _parse_int(args[i + 1], None)
-            i += 2
+            new_points = _parse_int(args[i + 1], None); i += 2
         elif tok == "--absent" and i + 1 < len(args):
             val = args[i + 1].strip().lower()
-            if val == "toggle":
-                toggle_absent = True
-            else:
-                new_absent = _to_bool01(val)
+            if val == "toggle": toggle_absent = True
+            else: new_absent = _to_bool01(val)
             i += 2
         elif tok == "--checkin" and i + 1 < len(args):
             val = args[i + 1].strip().lower()
-            if val == "toggle":
-                toggle_checkin = True
-            else:
-                new_checkin = _to_bool01(val)
+            if val == "toggle": toggle_checkin = True
+            else: new_checkin = _to_bool01(val)
             i += 2
         else:
             i += 1
@@ -350,17 +350,14 @@ def edit_score(args):
         if toggle_checkin:
             new_checkin = 0 if (cur_checkin or 0) else 1
 
-        sets = []
-        vals = []
+        sets, vals = [], []
         if new_score is not None:
             if not (0 <= new_score <= 75000):
-                print("❌ Score out of range.")
-                return
+                print("❌ Score out of range."); return
             sets.append("score=?"); vals.append(new_score)
         if new_points is not None:
             if not (0 <= new_points <= 300):
-                print("❌ Points out of range.")
-                return
+                print("❌ Points out of range."); return
             sets.append("points=?"); vals.append(new_points)
         if new_absent is not None:
             sets.append("absent=?"); vals.append(new_absent)
@@ -372,8 +369,7 @@ def edit_score(args):
             sets.append("absent=?"); vals.append(computed)
 
         if not sets:
-            print("⚠️ Nothing to update.")
-            return
+            print("⚠️ Nothing to update."); return
 
         vals.append(score_id)
         cur.execute(f"UPDATE matchscore SET {', '.join(sets)} WHERE id = ?", vals)
@@ -381,8 +377,7 @@ def edit_score(args):
 
         row = _fetch_score_by_id(cur, score_id)
         if not row:
-            print("OK UPDATED")
-            return
+            print("OK UPDATED"); return
         print("\nOK UPDATED:")
         print(f"Match {row[1]} – {row[3]} | {row[2]}")
         print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3} {'Abs':>3} {'Cin':>3}")
