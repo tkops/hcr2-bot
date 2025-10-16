@@ -206,7 +206,7 @@ def list_scores(*args):
 
     base = """
         SELECT ms.id, m.id, m.start, m.opponent,
-               s.name, s.division, p.name, ms.score, ms.points, ms.absent, ms.checkin
+               s.name, s.division, p.name, p.id, ms.score, ms.points, ms.absent, ms.checkin
         FROM matchscore ms
         JOIN match m ON ms.match_id = m.id
         JOIN season s ON m.season_number = s.number
@@ -214,6 +214,11 @@ def list_scores(*args):
     """
     where = []
     vals = []
+
+    # NEW: if --all without explicit --season/--match -> restrict to current season (max season.number)
+    if show_all and not season_filter and not match_filter:
+        where.append("s.number = (SELECT MAX(number) FROM season)")
+
     if season_filter:
         where.append("s.name LIKE ?")
         vals.append(season_filter)
@@ -254,10 +259,10 @@ def list_scores(*args):
             emoji = "🏆" if sl > so else ("😢" if sl < so else "🤝")
             print(f"Result: {sl} : {so} {emoji}")
         print()
-        print(f"{'ID':<6} {'Player':<16} {'Score':>5} {'Pts':>3} {'A'} {'C'}")
-        print("-" * 43)
+        print(f"{'ID':<6} {'PID':<6} {'Player':<16} {'Score':>5} {'Pts':>3}")
+        print("-" * 41)
         for r in block:
-            print(f"{r[0]:<6} {r[6]:<16.16} {r[7]:>5} {r[8]:>3} {int(r[9] or 0):>1} {int(r[10] or 0):>1}")
+            print(f"{r[0]:<6} {r[7]:<6} {r[6]:<16.16} {r[8]:>5} {r[9]:>3}")
         print()
 
     # group by match
