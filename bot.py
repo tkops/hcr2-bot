@@ -892,7 +892,7 @@ async def on_message(message):
 
         match_id = args[0]
         if len(args) == 1:
-            output = await run_hcr2(["matchscore", "list", "--match", match_id])
+            output = await run_hcr2(["matchscore", "list-short", "--match", match_id])
             await send_codeblock(message.channel, output)
             return
 
