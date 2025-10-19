@@ -1,7 +1,7 @@
-VERSION = "0.4.4"
+VERSION = "0.4.7"
 
 HISTORY = [
-    ("0.4.6", "2025-10-25", "modify player list-active --team plte"),
+    ("0.4.7", "2025-10-25", "modify player list-active --team plte"),
     ("0.4.6", "2025-10-25", "Add player id edit to matchscore"),
     ("0.4.5", "2025-10-25", "Modify matchscore listings"),
     ("0.4.4", "2025-09-09", "Delete player sheet afer import"),
