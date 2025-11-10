@@ -739,6 +739,9 @@ async def on_message(message):
                 await message.channel.send("Usage: .stats battle <id1> <id2>")
                 return
             call = ["stats", "battle", rest[0], rest[1]]
+        elif sub == "absent":
+            # neu: ruft die neue Statistik in hcr2.py auf
+            call = ["stats", "absent"] + rest
         else:
             call = ["stats", sub] + rest
 
@@ -1046,7 +1049,7 @@ async def on_message(message):
                 (".show <id>",      "Show player by ID."),
                 (".stats",          "Show Performance Stats for current season"),
                 (".stats [type]",   "Show stats for misc types:\n"
-                                    "perf [seasonid], battle <playerid1> <playerid2>, bday"),
+                                    "perf [seasonid], absent [seasonid], battle <playerid1> <playerid2>, bday"),
                 (".help",           "Show this help message."),
             ],
             total_width=68,
