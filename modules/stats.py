@@ -31,6 +31,9 @@ def handle_command(cmd, args):
         id2 = int(args[1])
         season = int(args[2]) if len(args) > 2 else None
         show_battle(id1, id2, season)
+    elif cmd == "absent":
+        season_arg = int(args[0]) if args else None
+        show_absent(season_arg)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -44,6 +47,7 @@ def print_help():
     print("  scatter [N]               Avergage Score Plot for last N seasons")
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
+    print("  absent [season]           Absent stats")
 
 # ---------------------------------------------------------------------------
 
@@ -618,4 +622,43 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
         print(" " * 4 + "└" + "─" * plot_w)
         labels = "".join(f"{i+1:>{CW}}" for i in range(n))
         print(" " * 5 + labels)
+
+def show_absent(season_number=None):
+    """
+    Zeigt unentschuldigte Fehlzeiten aktiver PLTE-Spieler:
+    (absent IS NULL oder 0) UND points = 0
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        if season_number is None:
+            season_number = find_current_season(cur)
+        if not season_number:
+            print("⚠️ No matching season found.")
+            return
+
+        cur.execute("""
+            SELECT p.id, p.name, COUNT(ms.id) AS unexcused
+            FROM matchscore ms
+            JOIN match m   ON ms.match_id = m.id
+            JOIN players p ON ms.player_id = p.id
+            WHERE m.season_number = ?
+              AND p.active = 1
+              AND UPPER(p.team) = 'PLTE'
+              AND (ms.absent IS NULL OR ms.absent = 0)
+              AND ms.points = 0
+            GROUP BY p.id, p.name
+            ORDER BY unexcused DESC, p.name ASC
+        """, (season_number,))
+        rows = cur.fetchall()
+
+        print(f"🚫 Unexcused absences (points=0, absent=0/NULL) – Season {season_number}")
+        if not rows:
+            print("✅ No unexcused absences.")
+            return
+
+        print(f"{'Player':<16} {'Missed':>6}")
+        print("-" * 26)
+        for pid, name, cnt in rows:
+            print(f"{name:<16} {cnt:>6}")
 
