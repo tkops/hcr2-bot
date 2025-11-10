@@ -140,8 +140,15 @@ def show_average(season_number=None):
         # Matchweise Scores, Abwesende ignorieren
         scores_by_match = {}
         for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+            # nur aktive PLTE
+            if not active:
+                continue
+            if not team or team.upper() != "PLTE":
+                continue
+        
             if score is None or _is_absent(score, points, absent):
                 continue
+        
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
