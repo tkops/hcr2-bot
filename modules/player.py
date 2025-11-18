@@ -589,11 +589,13 @@ def show_player(pid: int):
         """, (pid,))
         r = cur.fetchone()
 
-        # First/Last Match über matchscore + match.start
+        # First/Last Match + Match Count über matchscore + match.start
+        match_count = 0
         first_match = last_match = None
         if r:
             cur.execute("""
                 SELECT
+                    COUNT(*) AS match_count,
                     MIN(substr(m.start, 1, 10)) AS first_match,
                     MAX(substr(m.start, 1, 10)) AS last_match
                 FROM matchscore ms
@@ -602,6 +604,7 @@ def show_player(pid: int):
             """, (pid,))
             ms_row = cur.fetchone()
             if ms_row:
+                match_count = ms_row["match_count"] or 0
                 first_match = ms_row["first_match"]
                 last_match = ms_row["last_match"]
 
@@ -625,6 +628,7 @@ def show_player(pid: int):
     print(f"{'Away until':<15}: {r['away_until'] or '-'}")
     print(f"{'First Match':<15}: {first_match or '-'}")
     print(f"{'Last Match':<15}: {last_match or '-'}")
+    print(f"{'Match Count':<15}: {match_count}")
     _print_wrapped("About", r['about'])
     _print_wrapped("Vehicles", r['preferred_vehicles'])
     _print_wrapped("Playstyle", r['playstyle'])
