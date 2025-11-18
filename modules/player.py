@@ -589,6 +589,22 @@ def show_player(pid: int):
         """, (pid,))
         r = cur.fetchone()
 
+        # First/Last Match über matchscore + match.start
+        first_match = last_match = None
+        if r:
+            cur.execute("""
+                SELECT
+                    MIN(substr(m.start, 1, 10)) AS first_match,
+                    MAX(substr(m.start, 1, 10)) AS last_match
+                FROM matchscore ms
+                JOIN match m ON ms.match_id = m.id
+                WHERE ms.player_id = ?
+            """, (pid,))
+            ms_row = cur.fetchone()
+            if ms_row:
+                first_match = ms_row["first_match"]
+                last_match = ms_row["last_match"]
+
     if not r:
         print(f"❌ Player ID {pid} not found.")
         return
@@ -607,6 +623,8 @@ def show_player(pid: int):
     print(f"{'Active modified':<15}: {r['active_modified'] or '-'}")
     print(f"{'Away from':<15}: {r['away_from'] or '-'}")
     print(f"{'Away until':<15}: {r['away_until'] or '-'}")
+    print(f"{'First Match':<15}: {first_match or '-'}")
+    print(f"{'Last Match':<15}: {last_match or '-'}")
     _print_wrapped("About", r['about'])
     _print_wrapped("Vehicles", r['preferred_vehicles'])
     _print_wrapped("Playstyle", r['playstyle'])
