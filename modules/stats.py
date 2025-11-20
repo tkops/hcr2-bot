@@ -34,6 +34,12 @@ def handle_command(cmd, args):
     elif cmd == "absent":
         season_arg = int(args[0]) if args else None
         show_absent(season_arg)
+    elif cmd == "te":
+        if not args:
+            print("Usage: stats te <teamevent_id>")
+            return
+        te_id = int(args[0])
+        show_teamevent_stats(te_id)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -44,6 +50,7 @@ def print_help():
     print("  avg [season]              Show player averages for current or given season")
     print("  alias                     Show alias of active players in plte team sorted by rank")
     print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
+    print("  te <te-id>                Rank stats for given team event")
     print("  scatter [N]               Avergage Score Plot for last N seasons")
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
@@ -661,4 +668,110 @@ def show_absent(season_number=None):
         print("-" * 26)
         for pid, name, cnt in rows:
             print(f"{name:<16} {cnt:>6}")
+
+def show_teamevent_stats(te_id):
+    """
+    Rank stats for a single team event:
+    - Uses avg delta vs. median per match (scaled to 4 tracks), same logic as avg/rank
+    - Only active PLTE players who have at least one score in that event
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Teamevent-Metadaten holen
+        cur.execute("""
+            SELECT name, iso_year, iso_week, tracks, max_score_per_track
+            FROM teamevent
+            WHERE id = ?
+        """, (te_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"⚠️ No teamevent with id {te_id} found.")
+            return
+
+        te_name, iso_year, iso_week, te_tracks, te_max = row
+
+        # Alle Matches dieses Teamevents inkl. Scores
+        cur.execute("""
+            SELECT
+                ms.player_id,
+                p.name,
+                p.team,
+                p.active,
+                ms.score,
+                ms.points,
+                ms.absent,
+                m.id AS match_id,
+                t.tracks,
+                t.max_score_per_track
+            FROM matchscore ms
+            JOIN players   p ON ms.player_id = p.id
+            JOIN match     m ON ms.match_id = m.id
+            JOIN teamevent t ON m.teamevent_id = t.id
+            WHERE m.teamevent_id = ?
+        """, (te_id,))
+        rows = cur.fetchall()
+
+        if not rows:
+            print(f"⚠️ No match scores for teamevent {te_id}.")
+            return
+
+        # Scores je Match (nur aktive PLTE, nicht abwesend)
+        scores_by_match = {}
+        for pid, name, team, active, score, points, absent, match_id, tracks, max_score in rows:
+            if not active:
+                continue
+            if not team or team.upper() != "PLTE":
+                continue
+            if score is None or _is_absent(score, points, absent):
+                continue
+
+            scaled_score = score * 4 / tracks if tracks else score
+            scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
+
+        if not scores_by_match:
+            print(f"⚠️ No valid scores for active PLTE players in teamevent {te_id}.")
+            return
+
+        # Deltas vs. Median pro Match
+        player_scores = {}
+        player_names = {}
+        player_counts = {}
+
+        import statistics
+        for match_id, entries in scores_by_match.items():
+            scores = [s for _, _, s in entries]
+            if not scores:
+                continue
+            try:
+                median = statistics.median(scores)
+            except statistics.StatisticsError:
+                continue
+
+            for pid, name, s in entries:
+                delta = s - median
+                player_scores.setdefault(pid, []).append(delta)
+                player_names[pid] = name
+                player_counts[pid] = player_counts.get(pid, 0) + 1
+
+        if not player_scores:
+            print(f"⚠️ No data to rank for teamevent {te_id}.")
+            return
+
+        # Ergebnisliste bauen
+        entries = []
+        for pid, deltas in player_scores.items():
+            avg_delta = round(sum(deltas) / len(deltas))
+            count = player_counts.get(pid, 0)
+            entries.append((player_names[pid], avg_delta, count))
+
+        # Sortierung wie bei rank: beste Perf zuerst
+        entries.sort(key=lambda x: x[1], reverse=True)
+
+        # Header
+        print(f"📊 Performance Team Event {te_id}: {te_name} ({iso_year}-W{iso_week})")
+        print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
+        print("-" * 31)
+        for i, (name, delta, count) in enumerate(entries, 1):
+            print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
