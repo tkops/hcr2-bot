@@ -1,5 +1,5 @@
 import sys
-from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet
+from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet, donations
 import version
 
 def show_main_help():
@@ -13,6 +13,7 @@ def show_main_help():
     print("  matchscore  Manage matchscores")
     print("  stats       Show statistics")
     print("  sheet       Manage Excel files for matches")
+    print("  donations   Manage Research Lab donations")
     print("  version     Print version")
 
 def show_entity_help(entity):
@@ -32,6 +33,8 @@ def show_entity_help(entity):
         stats.print_help()
     elif entity == "sheet":
         sheet.print_help()
+    elif entity == "donations":
+        donations.print_help()
     elif entity == "version":
         print(version.get_version())
     else:
@@ -71,6 +74,8 @@ def main():
         stats.handle_command(command, args)
     elif entity == "sheet":
         sheet.handle_command(command, args)
+    elif entity == "donations":
+        donations.handle_command(command, args)
     else:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
