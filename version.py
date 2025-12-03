@@ -1,6 +1,7 @@
-VERSION = "0.4.9"
+VERSION = "0.5.0"
 
 HISTORY = [
+    ("0.5.0", "2025-12-03", "Add donations"),
     ("0.4.9", "2025-11-18", "Add stats per teamevent"),
     ("0.4.8", "2025-11-18", "Add match details to players profile"),
     ("0.4.7", "2025-10-25", "modify player list-active --team plte"),

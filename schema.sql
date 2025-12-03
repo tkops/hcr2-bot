@@ -5,6 +5,15 @@ PRAGMA foreign_keys=OFF;
 BEGIN;
 
 -- Tables
+CREATE TABLE IF NOT EXISTS donation(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    total INTEGER NOT NULL CHECK(total >= 0),
+    UNIQUE (player_id, date),
+    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS flags(
     alpha2 TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -28,8 +37,8 @@ CREATE TABLE IF NOT EXISTS matchscore(
     player_id INTEGER NOT NULL,
     score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 75000),
     points INTEGER NOT NULL DEFAULT 0 CHECK(points BETWEEN 0 AND 300),
-    absent BOOL,
-    checkin INTEGER CHECK (checkin IN (0,1)),
+    absent INTEGER CHECK(absent IN (0,1)),
+    checkin INTEGER CHECK(checkin IN (0,1)),
     UNIQUE (match_id, player_id),
     FOREIGN KEY (match_id) REFERENCES match(id) ON DELETE CASCADE,
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE

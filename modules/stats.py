@@ -40,6 +40,12 @@ def handle_command(cmd, args):
             return
         te_id = int(args[0])
         show_teamevent_stats(te_id)
+    elif cmd == "te-user":
+        # te-user       -> aktuelles/letztes Teamevent (Offset 0)
+        # te-user 1     -> davor
+        # te-user 2     -> vorletztes, usw.
+        offset = int(args[0]) if args else 0
+        show_teamevent_stats_user(offset)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -51,6 +57,7 @@ def print_help():
     print("  alias                     Show alias of active players in plte team sorted by rank")
     print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
     print("  te <te-id>                Rank stats for given team event")
+    print("  te-user [n]               Like 'te' but with relative index: 0=current, 1=last, 2=prev, ...")
     print("  scatter [N]               Avergage Score Plot for last N seasons")
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
@@ -156,10 +163,10 @@ def show_average(season_number=None):
                 continue
             if not team or team.upper() != "PLTE":
                 continue
-        
+
             if score is None or _is_absent(score, points, absent):
                 continue
-        
+
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
@@ -669,11 +676,48 @@ def show_absent(season_number=None):
         for pid, name, cnt in rows:
             print(f"{name:<16} {cnt:>6}")
 
+# ---------------------------------------------------------------------------
+
+def _resolve_teamevent_by_offset(cur, offset: int):
+    """
+    offset 0 = aktuellstes/letztes Teamevent mit Matches,
+    1 = davor, 2 = vorletztes, usw.
+    Sortiert nach iso_year/iso_week absteigend, Fallback id.
+    """
+    cur.execute("""
+        SELECT DISTINCT t.id, t.name, t.iso_year, t.iso_week
+        FROM teamevent t
+        JOIN match m ON m.teamevent_id = t.id
+        ORDER BY t.iso_year DESC, t.iso_week DESC, t.id DESC
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return None
+    if offset < 0 or offset >= len(rows):
+        return None
+    return rows[offset][0]
+
+def show_teamevent_stats_user(offset: int = 0):
+    """
+    Wrapper für show_teamevent_stats mit relativem Index:
+    offset 0 = aktuellstes Teamevent, 1 = davor, ...
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        te_id = _resolve_teamevent_by_offset(cur, offset)
+
+    if te_id is None:
+        print(f"⚠️ No team event found for offset {offset}.")
+        return
+
+    show_teamevent_stats(te_id)
+
+# ---------------------------------------------------------------------------
 def show_teamevent_stats(te_id):
     """
     Rank stats for a single team event:
     - Uses avg delta vs. median per match (scaled to 4 tracks), same logic as avg/rank
-    - Only active PLTE players who have at least one score in that event
+    - All PLTE players who have at least one score in that event (regardless of current 'active' flag)
     """
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
@@ -716,11 +760,9 @@ def show_teamevent_stats(te_id):
             print(f"⚠️ No match scores for teamevent {te_id}.")
             return
 
-        # Scores je Match (nur aktive PLTE, nicht abwesend)
+        # Scores je Match (alle PLTE, nicht abwesend – active wird NICHT mehr gefiltert)
         scores_by_match = {}
         for pid, name, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            if not active:
-                continue
             if not team or team.upper() != "PLTE":
                 continue
             if score is None or _is_absent(score, points, absent):
@@ -730,7 +772,7 @@ def show_teamevent_stats(te_id):
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
 
         if not scores_by_match:
-            print(f"⚠️ No valid scores for active PLTE players in teamevent {te_id}.")
+            print(f"⚠️ No valid scores for PLTE players in teamevent {te_id}.")
             return
 
         # Deltas vs. Median pro Match
