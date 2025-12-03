@@ -37,6 +37,11 @@ PLAYERS_XLSX_NAME = "Ladys.xlsx"
 PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
 PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
 
+# --- Donations-Export/Import-Ziele ---
+DONATIONS_XLSX_NAME = "Donations.xlsx"
+DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
+DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
+
 
 def sanitize_filename(s):
     return re.sub(r'[^A-Za-z0-9_]', '', s.replace(' ', '_'))
@@ -804,6 +809,184 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     print(f"[OK] players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors ({status} in Nextcloud)")
 
 
+# ===================== Donations: Export/Import =====================
+
+def _download_donations_xlsx(local_path: Path = DONATIONS_LOCAL_TMP) -> Optional[Path]:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    user, password = NEXTCLOUD_AUTH
+    url = NEXTCLOUD_URL.format(user=user, path=str(DONATIONS_REMOTE_PATH).lstrip("/"))
+    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
+    subprocess.run(curl_cmd, capture_output=True)
+    return local_path if local_path.exists() and local_path.stat().st_size > 0 else None
+
+
+def _upload_donations_xlsx(local_path: Path):
+    # Donations.xlsx darf überschrieben werden
+    return upload_to_nextcloud(local_path, DONATIONS_REMOTE_PATH, overwrite=True)
+
+
+def _get_latest_donations(conn: sqlite3.Connection) -> dict:
+    """
+    Liefert für jeden player_id ein (date, total) des letzten Donation-Eintrags.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT d.player_id, d.date, d.total
+        FROM donation d
+        JOIN (
+            SELECT player_id, MAX(date) AS max_date
+            FROM donation
+            GROUP BY player_id
+        ) latest
+        ON d.player_id = latest.player_id AND d.date = latest.max_date
+    """)
+    out = {}
+    for pid, ddate, total in cur.fetchall():
+        out[pid] = (ddate, total)
+    return out
+
+
+def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS_LOCAL_TMP):
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name
+            FROM players
+            WHERE active = 1 AND team = 'PLTE'
+            ORDER BY name COLLATE NOCASE
+        """)
+        players = cur.fetchall()
+
+        latest = _get_latest_donations(conn)
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "donations"
+
+        today_str = date.today().isoformat()
+
+        # Kopf
+        ws["A1"] = "Datum:"
+        ws["A2"] = today_str
+
+        # Header (ab Zeile 3)
+        ws["A3"] = "id"
+        ws["B3"] = "name"
+        ws["C3"] = "donation"
+
+        for cell in ("A3", "B3", "C3"):
+            ws[cell].font = Font(bold=True)
+
+        # Datenzeilen
+        row = 4
+        for pid, name in players:
+            _, total = latest.get(pid, (None, 0))
+            ws.cell(row=row, column=1, value=pid)
+            ws.cell(row=row, column=2, value=name)
+            ws.cell(row=row, column=3, value=int(total or 0))
+            row += 1
+
+        # etwas Format
+        ws.column_dimensions["A"].width = 8
+        ws.column_dimensions["B"].width = 26
+        ws.column_dimensions["C"].width = 12
+
+        wb.save(out_path)
+
+    url, created = _upload_donations_xlsx(out_path)
+    try:
+        out_path.unlink()
+    except Exception:
+        pass
+
+    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
+    print(f"[OK] [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+
+
+def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
+    local = local_xlsx or _download_donations_xlsx()
+    if not local or not local.exists():
+        print("[ERROR] donations Excel not found on Nextcloud")
+        return
+
+    wb = load_workbook(filename=local, data_only=True)
+    ws = wb.active
+
+    # Datum aus A2
+    raw_date = ws["A2"].value
+    if isinstance(raw_date, datetime):
+        date_str = raw_date.date().isoformat()
+    elif isinstance(raw_date, date):
+        date_str = raw_date.isoformat()
+    elif isinstance(raw_date, str):
+        date_str = raw_date.strip()
+    else:
+        print("[ERROR] No valid date in cell A2")
+        return
+
+    added = 0
+    errors = 0
+
+    # Zeilen ab 4: id, name, donation
+    for row in ws.iter_rows(min_row=4, values_only=True):
+        if not row:
+            continue
+        pid_val = row[0]
+        donation_val = row[2] if len(row) >= 3 else None
+
+        if pid_val is None:
+            continue
+        # ID als int
+        pid_int = None
+        if isinstance(pid_val, float) and pid_val.is_integer():
+            pid_int = int(pid_val)
+        elif isinstance(pid_val, int):
+            pid_int = pid_val
+        elif isinstance(pid_val, str) and pid_val.strip().isdigit():
+            pid_int = int(pid_val.strip())
+        if pid_int is None:
+            errors += 1
+            continue
+
+        # donation als int
+        if donation_val is None or (isinstance(donation_val, str) and donation_val.strip() == ""):
+            # leere Donation ignorieren
+            continue
+        don_int = None
+        if isinstance(donation_val, float) and donation_val.is_integer():
+            don_int = int(donation_val)
+        elif isinstance(donation_val, int):
+            don_int = donation_val
+        elif isinstance(donation_val, str) and donation_val.strip().isdigit():
+            don_int = int(donation_val.strip())
+        if don_int is None:
+            errors += 1
+            continue
+
+        cmd = [
+            "python", "hcr2.py", "donations", "add",
+            str(pid_int), date_str, str(don_int)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            added += 1
+        else:
+            errors += 1
+
+    # lokale Kopie löschen
+    try:
+        local.unlink()
+    except Exception:
+        pass
+
+    # Donations-Excel auf Nextcloud löschen (wie bei players)
+    deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
+    status = "deleted" if deleted else "delete failed"
+
+    print(f"[OK] donations import: {added} added, {errors} errors ({status} in Nextcloud)")
+
+
 # ===================== CLI =====================
 
 def print_help():
@@ -813,6 +996,8 @@ def print_help():
     print("  import <match_id>        Import scores from Excel file on Nextcloud")
     print("  player export            Export active PLTE players to Power-Ladys-Scores/Ladys.xlsx (bold header, auto width)")
     print("  player import            Import active PLTE players from Power-Ladys-Scores/Ladys.xlsx (upsert by id)")
+    print("  donations export         Export donations sheet for all active PLTE players")
+    print("  donations import         Import donations from Donations.xlsx and call 'donation add'")
 
 
 def handle_command(command, args):
@@ -860,6 +1045,19 @@ def handle_command(command, args):
             import_players_from_excel()
         else:
             print("Usage: python hcr2.py sheet player <export|import>")
+
+    elif command == "donations":
+        if not args:
+            print("Usage: python hcr2.py sheet donations <export|import>")
+            return
+        sub = args[0]
+        if sub == "export":
+            export_donations_to_excel()
+        elif sub == "import":
+            import_donations_from_excel()
+        else:
+            print("Usage: python hcr2.py sheet donations <export|import>")
+
     else:
         print("[ERROR] Unknown command:", command)
         print_help()
