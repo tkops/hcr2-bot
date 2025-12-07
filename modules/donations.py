@@ -16,6 +16,7 @@ def print_help():
     print("                                    Without player_id: show donation stats for all active players")
     print("  stats                             Show match count, donation total and index per active player")
     print("  under                             Show only players with donation index below 100 (for Discord bot)")
+    print("  list [<date>]                     List donation dates or all entries for a specific date")
 
 
 def handle_command(command, args):
@@ -45,6 +46,13 @@ def handle_command(command, args):
     elif command == "under":
         show_donation_index_under()
 
+    elif command == "list":
+        if len(args) == 0:
+            list_donation_dates()
+        elif len(args) == 1:
+            list_donations_for_date(args[0])
+        else:
+            print("❌ Usage: donations list [<date>]")
     else:
         print(f"❌ Unknown command: {command}")
         print_help()
@@ -342,6 +350,93 @@ def show_donation_index_under():
             f"{idx:3d} {pid:4} {name[:12]:12} {matches:4d} "
             f"{format_k(total):>8} {index:5.1f}"
         )
+
+
+# ---------------- List dates / entries ---------------- #
+
+
+def list_donation_dates():
+    """
+    Show unique donation dates with count of entries, like a sort -u on dates.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT date, COUNT(*) AS cnt
+            FROM donation
+            GROUP BY date
+            ORDER BY date ASC
+            """
+        )
+        rows = cur.fetchall()
+
+        if not rows:
+            print("ℹ️ No donations found.")
+            return
+
+        print("\n📅 Donation dates:")
+        print(f"{'Date':12} {'Count':>5}")
+        print("-" * 20)
+        for ds, cnt in rows:
+            print(f"{ds:12} {cnt:5d}")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def list_donations_for_date(date_str: str):
+    """
+    Show all donation entries for a given date.
+    """
+    # Validierung des Datumsformats (aber Original-String für Query verwenden)
+    try:
+        _ = _parse_date(date_str)
+    except Exception:
+        print("❌ Invalid date format. Use YYYY-MM-DD or ISO 8601.")
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT d.id, d.player_id, p.name, IFNULL(p.team, ''), d.total
+            FROM donation d
+            LEFT JOIN players p ON p.id = d.player_id
+            WHERE d.date = ?
+            ORDER BY p.team, p.name, d.player_id
+            """,
+            (date_str,),
+        )
+        rows = cur.fetchall()
+
+        if not rows:
+            print(f"ℹ️ No donations found for date {date_str}.")
+            return
+
+        print(f"\n📋 Donations for {date_str}:")
+        print(f"{'ID':4} {'PID':4} {'Name':12} {'Team':4} {'Total':>8}")
+        print("-" * 40)
+
+        for did, pid, name, team, total in rows:
+            short_name = (name or "")[:12]
+            team_str = (team or "")[:4]
+            print(
+                f"{did:4d} {pid:4d} {short_name:12} {team_str:4} {format_k(total):>8}"
+            )
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 # ---------------- Helper ---------------- #
