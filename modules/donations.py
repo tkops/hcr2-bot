@@ -12,6 +12,7 @@ def print_help():
     print("\nCommands:")
     print("  add <player_id> <date> <total>    Add a donation snapshot (cumulative total)")
     print("  delete <donation_id>              Delete a donation by ID")
+    print("  edit <donation_id> <total>        Edit total amount of a donation entry")
     print("  show [<player_id>]                Show last 10 entries + stats for one player")
     print("                                    Without player_id: show donation stats for all active players")
     print("  stats                             Show match count, donation total and index per active player")
@@ -31,6 +32,12 @@ def handle_command(command, args):
             print("❌ Usage: donations delete <donation_id>")
             return
         delete_donation(args[0])
+
+    elif command == "edit":
+        if len(args) != 2:
+            print("❌ Usage: donations edit <donation_id> <total>")
+            return
+        edit_donation(args[0], args[1])
 
     elif command == "show":
         if len(args) == 0:
@@ -65,6 +72,9 @@ def add_donation(player_id, date, total):
     conn = None
     try:
         total_int = int(total)
+        if total_int < 0:
+            print("❌ total must be >= 0")
+            return
         _ = _parse_date(date)
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -98,6 +108,57 @@ def delete_donation(donation_id):
             print(f"ℹ️ No donation with id {donation_id} found.")
         else:
             print(f"✅ Donation {donation_id} deleted")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def edit_donation(donation_id, new_total):
+    """
+    Edit only the 'total' field of a single donation entry.
+    """
+    conn = None
+    try:
+        total_int = int(new_total)
+        if total_int < 0:
+            print("❌ total must be >= 0")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+
+        # alten Eintrag holen
+        cur.execute(
+            """
+            SELECT player_id, date, total
+            FROM donation
+            WHERE id = ?
+            """,
+            (donation_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            print(f"ℹ️ No donation with id {donation_id} found.")
+            return
+
+        player_id, date, old_total = row
+
+        # updaten
+        cur.execute(
+            "UPDATE donation SET total = ? WHERE id = ?",
+            (total_int, donation_id),
+        )
+        conn.commit()
+
+        print(
+            f"✅ Donation {donation_id} updated for player {player_id} on {date}: "
+            f"{old_total} -> {total_int}"
+        )
+
+    except ValueError:
+        print("❌ total must be an integer")
     except Exception as e:
         print(f"❌ Error: {e}")
     finally:
