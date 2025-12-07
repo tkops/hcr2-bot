@@ -195,14 +195,15 @@ def show_all_stats():
 
 # ---------------- New Stats / Index ---------------- #
 
-
 def show_donation_index():
     """
-    List all active players with:
+    List all active PLTE players with:
+      - running number
       - ID
-      - number of matches since STATS_START_DATE up to cutoff_date
-      - current donation total (latest snapshot up to cutoff_date)
+      - matches since STATS_START_DATE
+      - donation total
       - index = (donation_total / (matches * 600)) * 100
+    Sorted by index DESCENDING (lowest at bottom)
     """
     conn = None
     try:
@@ -217,19 +218,21 @@ def show_donation_index():
             return
         cutoff_date = row[0]
 
-        # Aktive Spieler
-        cur.execute("SELECT id, name FROM players WHERE active = 1 ORDER BY id")
+        # Aktive Spieler NUR Team PLTE
+        cur.execute(
+            "SELECT id, name FROM players "
+            "WHERE active = 1 AND team = 'PLTE' "
+            "ORDER BY id"
+        )
         players = cur.fetchall()
         if not players:
-            print("ℹ️ No active players.")
+            print("ℹ️ No active players in team PLTE.")
             return
 
-        print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
-        print(f"{'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
-        print("-" * 44)
+        results = []
 
         for pid, name in players:
-            # Matches zählen (match.start laut Schema)
+            # Matches zählen
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT m.id)
@@ -242,31 +245,37 @@ def show_donation_index():
                 (pid, STATS_START_DATE, cutoff_date),
             )
             mrow = cur.fetchone()
-            matches = mrow[0] if mrow and mrow[0] is not None else 0
+            matches = mrow[0] if mrow else 0
 
-            # Aktueller Spendenstand (letzter Snapshot bis Stichtag)
+            # Aktueller Spendenstand
             cur.execute(
                 """
                 SELECT total FROM donation
                 WHERE player_id = ?
                   AND date <= ?
-                ORDER BY date DESC
-                LIMIT 1
+                ORDER BY date DESC LIMIT 1
                 """,
                 (pid, cutoff_date),
             )
             drow = cur.fetchone()
-            total = int(drow[0]) if drow and drow[0] is not None else 0
+            total = int(drow[0]) if drow else 0
 
             expected = matches * 600
-            if expected > 0:
-                index = (total / expected) * 100
-            else:
-                index = 0.0
+            index = (total / expected) * 100 if expected > 0 else 0.0
 
-            short_name = name[:12]
+            results.append((pid, name, matches, total, index))
+
+        # Sortierung: Index absteigend → niedrige Werte unten
+        results.sort(key=lambda x: x[4], reverse=True)
+
+        print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
+        print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
+        print("-" * 50)
+
+        for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
             print(
-                f"{pid:4} {short_name:12} {matches:4d} {format_k(total):>8} {index:5.1f}"
+                f"{idx:3d} {pid:4} {name[:12]:12} {matches:4d} "
+                f"{format_k(total):>8} {index:5.1f}"
             )
 
     except Exception as e:
@@ -274,7 +283,6 @@ def show_donation_index():
     finally:
         if conn is not None:
             conn.close()
-
 
 # ---------------- Helper ---------------- #
 
