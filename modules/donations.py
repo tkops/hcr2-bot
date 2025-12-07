@@ -161,8 +161,9 @@ def show_all_stats():
             return
 
         print("\n📊 Donations (K):")
-        print(f"{'Name':12} {'Tot':>6} {'Inc':>6} {'Avg':>6}")
-        print("-" * 32)
+        # Player-ID in der ersten Spalte
+        print(f"{'ID':4} {'Name':12} {'Tot':>6} {'Inc':>6} {'Avg':>6}")
+        print("-" * 40)
 
         for pid, name in players:
             cur.execute(
@@ -179,7 +180,7 @@ def show_all_stats():
             last_inc = stats["entries"][-1][3] if stats["entries"] else 0
             short_name = name[:12]
             print(
-                f"{short_name:12} {format_k(stats['last_total']):>6} "
+                f"{pid:4} {short_name:12} {format_k(stats['last_total']):>6} "
                 f"{format_k(last_inc):>6} {format_k(stats['avg_monthly_increment']):>6}"
             )
 
