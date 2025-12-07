@@ -15,6 +15,7 @@ def print_help():
     print("  show [<player_id>]                Show last 10 entries + stats for one player")
     print("                                    Without player_id: show donation stats for all active players")
     print("  stats                             Show match count, donation total and index per active player")
+    print("  under                             Show only players with donation index below 100 (for Discord bot)")
 
 
 def handle_command(command, args):
@@ -40,6 +41,9 @@ def handle_command(command, args):
 
     elif command == "stats":
         show_donation_index()
+
+    elif command == "under":
+        show_donation_index_under()
 
     else:
         print(f"❌ Unknown command: {command}")
@@ -193,29 +197,27 @@ def show_all_stats():
             conn.close()
 
 
-# ---------------- New Stats / Index ---------------- #
+# -------- Shared calculation for donation index -------- #
 
-def show_donation_index():
+
+def _compute_donation_index_results():
     """
-    List all active PLTE players with:
-      - running number
-      - ID
-      - matches since STATS_START_DATE
-      - donation total
-      - index = (donation_total / (matches * 600)) * 100
-    Sorted by index DESCENDING (lowest at bottom)
+    Returns (cutoff_date, results)
+
+    results is a list of tuples:
+      (player_id, name, matches, total, index)
+    for all active PLTE players.
     """
-    conn = None
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-
         # Stichtag: letzte notierte Spende
         cur.execute("SELECT MAX(date) FROM donation")
         row = cur.fetchone()
         if not row or row[0] is None:
-            print("ℹ️ No donations found in database.")
-            return
+            return None, []
+
         cutoff_date = row[0]
 
         # Aktive Spieler NUR Team PLTE
@@ -226,8 +228,7 @@ def show_donation_index():
         )
         players = cur.fetchall()
         if not players:
-            print("ℹ️ No active players in team PLTE.")
-            return
+            return cutoff_date, []
 
         results = []
 
@@ -245,7 +246,7 @@ def show_donation_index():
                 (pid, STATS_START_DATE, cutoff_date),
             )
             mrow = cur.fetchone()
-            matches = mrow[0] if mrow else 0
+            matches = mrow[0] if mrow and mrow[0] is not None else 0
 
             # Aktueller Spendenstand
             cur.execute(
@@ -258,31 +259,90 @@ def show_donation_index():
                 (pid, cutoff_date),
             )
             drow = cur.fetchone()
-            total = int(drow[0]) if drow else 0
+            total = int(drow[0]) if drow and drow[0] is not None else 0
 
             expected = matches * 600
             index = (total / expected) * 100 if expected > 0 else 0.0
 
             results.append((pid, name, matches, total, index))
 
-        # Sortierung: Index absteigend → niedrige Werte unten
-        results.sort(key=lambda x: x[4], reverse=True)
+        return cutoff_date, results
 
-        print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
-        print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
-        print("-" * 50)
-
-        for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
-            print(
-                f"{idx:3d} {pid:4} {name[:12]:12} {matches:4d} "
-                f"{format_k(total):>8} {index:5.1f}"
-            )
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
     finally:
-        if conn is not None:
-            conn.close()
+        conn.close()
+
+
+# ---------------- New Stats / Index (all) ---------------- #
+
+
+def show_donation_index():
+    """
+    List all active PLTE players with:
+      - running number
+      - ID
+      - matches since STATS_START_DATE
+      - donation total
+      - index = (donation_total / (matches * 600)) * 100
+    Sorted by index DESCENDING (lowest at bottom)
+    """
+    cutoff_date, results = _compute_donation_index_results()
+
+    if cutoff_date is None:
+        print("ℹ️ No donations found in database.")
+        return
+
+    if not results:
+        print("ℹ️ No active players in team PLTE.")
+        return
+
+    # Sortierung: Index absteigend → niedrige Werte unten
+    results.sort(key=lambda x: x[4], reverse=True)
+
+    print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
+    print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
+    print("-" * 50)
+
+    for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
+        print(
+            f"{idx:3d} {pid:4} {name[:12]:12} {matches:4d} "
+            f"{format_k(total):>8} {index:5.1f}"
+        )
+
+
+# ---------------- New Stats / Index (under 100) ---------------- #
+
+
+def show_donation_index_under():
+    """
+    Same as show_donation_index(), but only players with index < 100.
+    Intended for Discord bot usage.
+    """
+    cutoff_date, results = _compute_donation_index_results()
+
+    if cutoff_date is None:
+        print("ℹ️ No donations found in database.")
+        return
+
+    # Filter: nur Index < 100
+    results = [r for r in results if r[4] < 100.0]
+
+    if not results:
+        print("ℹ️ No players with donation index below 100 in team PLTE.")
+        return
+
+    # Sortierung: Index aufsteigend (schlechtester zuerst)
+    results.sort(key=lambda x: x[4])
+
+    print(f"\n📊 Donation index < 100 from {STATS_START_DATE} to {cutoff_date}:")
+    print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
+    print("-" * 50)
+
+    for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
+        print(
+            f"{idx:3d} {pid:4} {name[:12]:12} {matches:4d} "
+            f"{format_k(total):>8} {index:5.1f}"
+        )
+
 
 # ---------------- Helper ---------------- #
 
@@ -356,14 +416,14 @@ def calculate_stats(snapshots):
     month_deltas = []
     for i in range(1, len(month_points)):
         month_deltas.append(month_points[i][1][1] - month_points[i - 1][1][1])
-    avg_monthly = sum(month_deltas) / len(month_points) if month_deltas else 0.0
+    avg_monthly = sum(month_deltas) / len(month_deltas) if month_deltas else 0.0
 
     return {
         "entries": entries,
-            "last_total": last_total,
-            "total_donated": total_donated,
-            "avg_monthly_increment": avg_monthly,
-        }
+        "last_total": last_total,
+        "total_donated": total_donated,
+        "avg_monthly_increment": avg_monthly,
+    }
 
 
 def _parse_date(ds: str) -> datetime:
