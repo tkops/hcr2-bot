@@ -1,8 +1,10 @@
 import sqlite3
-import os
 from datetime import datetime
 
 DB_PATH = "../hcr2-db/hcr2.db"
+
+# Fester Startzeitpunkt für die Match-Zählung
+STATS_START_DATE = "2025-11-01"
 
 
 def print_help():
@@ -11,8 +13,8 @@ def print_help():
     print("  add <player_id> <date> <total>    Add a donation snapshot (cumulative total)")
     print("  delete <donation_id>              Delete a donation by ID")
     print("  show [<player_id>]                Show last 10 entries + stats for one player")
-    print("                                    Without player_id: show stats for all active players")
-    print("  stats                             Alias: show stats for all active players")
+    print("                                    Without player_id: show donation stats for all active players")
+    print("  stats                             Show match count, donation total and index per active player")
 
 
 def handle_command(command, args):
@@ -37,7 +39,7 @@ def handle_command(command, args):
             print("❌ Usage: donations show [<player_id>]")
 
     elif command == "stats":
-        show_all_stats()
+        show_donation_index()
 
     else:
         print(f"❌ Unknown command: {command}")
@@ -59,7 +61,7 @@ def add_donation(player_id, date, total):
             INSERT INTO donation (player_id, date, total)
             VALUES (?, ?, ?)
             ON CONFLICT(player_id, date) DO UPDATE SET total = excluded.total
-        """,
+            """,
             (player_id, date, total_int),
         )
         conn.commit()
@@ -114,7 +116,7 @@ def show_player_donations(player_id):
             SELECT id, date, total FROM donation
             WHERE player_id = ?
             ORDER BY date ASC
-        """,
+            """,
             (player_id,),
         )
         all_snapshots = cur.fetchall()
@@ -145,7 +147,7 @@ def show_player_donations(player_id):
             conn.close()
 
 
-# ---------------- Show All Players ---------------- #
+# ---------------- Show All Players (Donation-Only-Stats) ---------------- #
 
 
 def show_all_stats():
@@ -171,7 +173,7 @@ def show_all_stats():
                 SELECT date, total FROM donation
                 WHERE player_id = ?
                 ORDER BY date ASC
-            """,
+                """,
                 (pid,),
             )
             snapshots = cur.fetchall()
@@ -182,6 +184,89 @@ def show_all_stats():
             print(
                 f"{pid:4} {short_name:12} {format_k(stats['last_total']):>6} "
                 f"{format_k(last_inc):>6} {format_k(stats['avg_monthly_increment']):>6}"
+            )
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+# ---------------- New Stats / Index ---------------- #
+
+
+def show_donation_index():
+    """
+    List all active players with:
+      - ID
+      - number of matches since STATS_START_DATE up to cutoff_date
+      - current donation total (latest snapshot up to cutoff_date)
+      - index = (donation_total / (matches * 600)) * 100
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+
+        # Stichtag: letzte notierte Spende
+        cur.execute("SELECT MAX(date) FROM donation")
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            print("ℹ️ No donations found in database.")
+            return
+        cutoff_date = row[0]
+
+        # Aktive Spieler
+        cur.execute("SELECT id, name FROM players WHERE active = 1 ORDER BY id")
+        players = cur.fetchall()
+        if not players:
+            print("ℹ️ No active players.")
+            return
+
+        print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
+        print(f"{'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
+        print("-" * 44)
+
+        for pid, name in players:
+            # Matches zählen (match.start laut Schema)
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT m.id)
+                FROM match m
+                JOIN matchscore ms ON ms.match_id = m.id
+                WHERE ms.player_id = ?
+                  AND DATE(m.start) >= DATE(?)
+                  AND DATE(m.start) <= DATE(?)
+                """,
+                (pid, STATS_START_DATE, cutoff_date),
+            )
+            mrow = cur.fetchone()
+            matches = mrow[0] if mrow and mrow[0] is not None else 0
+
+            # Aktueller Spendenstand (letzter Snapshot bis Stichtag)
+            cur.execute(
+                """
+                SELECT total FROM donation
+                WHERE player_id = ?
+                  AND date <= ?
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                (pid, cutoff_date),
+            )
+            drow = cur.fetchone()
+            total = int(drow[0]) if drow and drow[0] is not None else 0
+
+            expected = matches * 600
+            if expected > 0:
+                index = (total / expected) * 100
+            else:
+                index = 0.0
+
+            short_name = name[:12]
+            print(
+                f"{pid:4} {short_name:12} {matches:4d} {format_k(total):>8} {index:5.1f}"
             )
 
     except Exception as e:
@@ -263,14 +348,14 @@ def calculate_stats(snapshots):
     month_deltas = []
     for i in range(1, len(month_points)):
         month_deltas.append(month_points[i][1][1] - month_points[i - 1][1][1])
-    avg_monthly = sum(month_deltas) / len(month_deltas) if month_deltas else 0.0
+    avg_monthly = sum(month_deltas) / len(month_points) if month_deltas else 0.0
 
     return {
         "entries": entries,
-        "last_total": last_total,
-        "total_donated": total_donated,
-        "avg_monthly_increment": avg_monthly,
-    }
+            "last_total": last_total,
+            "total_donated": total_donated,
+            "avg_monthly_increment": avg_monthly,
+        }
 
 
 def _parse_date(ds: str) -> datetime:
