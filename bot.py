@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import asyncio
 import discord
@@ -35,7 +36,7 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show", ".stats", ".gp"
+    ".search", ".show", ".stats", ".d", ".gp"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -344,7 +345,7 @@ HELP_MH = help_block(
         (".m <id>",              "Show match details."),
         (".m <id> key:value",    "Edit match.\nkeys: teamevent, season, start, opponent, score, scoreopp"),
         (".m+ <season> <event> <YYYY-MM-DD> <opponent>", "Add match."),
-        (".m- <match>" ,         "Delete match."),
+        (".m- <match>",          "Delete match."),
         (".M <match>",           "Show match details."),
     ],
     total_width=65,
@@ -678,7 +679,7 @@ async def on_message(message):
         if output:
             lines = output.strip().splitlines()
             link = lines[-1] if lines and lines[-1].startswith("http") else None
-            desc = f"[Open file]({link})" if link else output
+            desc = f"Open file" if link else output
             embed = discord.Embed(title="📄 Sheet created", description=desc, color=0x2ecc71)
             await message.channel.send(embed=embed)
         else:
@@ -691,7 +692,7 @@ async def on_message(message):
         if output:
             lines = output.strip().splitlines()
             link = next((l for l in lines if l.startswith("http")), None)
-            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            desc = f"Open file\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
             embed = discord.Embed(title="📥 Sheet import", description=desc, color=0x3498db)
             await message.channel.send(embed=embed)
         else:
@@ -704,12 +705,12 @@ async def on_message(message):
         if output:
             lines = output.strip().splitlines()
             link = next((l for l in lines if l.startswith("http")), None)
-            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            desc = f"Open file\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
             embed = discord.Embed(title="📤 Player export", description=desc, color=0xf1c40f)
             await message.channel.send(embed=embed)
         else:
             await message.channel.send("❌ Error during player export.")
-        return
+            return
 
     # --- Sheet player import ---
     if cmd == ".pi":
@@ -717,7 +718,7 @@ async def on_message(message):
         if output:
             lines = output.strip().splitlines()
             link = next((l for l in lines if l.startswith("http")), None)
-            desc = f"[Open file]({link})\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
+            desc = f"Open file\n\n" + "\n".join(l for l in lines if not l.startswith("http")) if link else output
             embed = discord.Embed(title="📥 Player import", description=desc, color=0x9b59b6)
             await message.channel.send(embed=embed)
         else:
@@ -727,13 +728,63 @@ async def on_message(message):
 
     # --- Stats ---
     if cmd == ".stats":
-        sub = args[0].lower() if args else "avg"
+        # Default: perf
+        sub = args[0].lower() if args else "perf"
         rest = args[1:] if args else []
 
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
+
         elif sub == "perf":
-            call = ["stats", "avg"] + (rest[:1] if rest else [])
+            # .stats perf [season] [noskip]
+            season = None
+            noskip = False
+            for a in rest:
+                if a.lower() == "noskip":
+                    noskip = True
+                elif season is None and a.isdigit():
+                    season = a
+
+            call = ["stats", "perf"]
+            if season:
+                call.append(season)
+            if noskip:
+                call.append("--no-skip")
+
+        elif sub == "score":
+            # .stats score [season] [noskip]
+            # Default: aktuelle Season, --skip (kein Flag nötig)
+            season = None
+            noskip = False
+            for a in rest:
+                if a.lower() == "noskip":
+                    noskip = True
+                elif season is None and a.isdigit():
+                    season = a
+
+            call = ["stats", "score"]
+            if season:
+                call.append(season)
+            if noskip:
+                call.append("--no-skip")
+
+        elif sub == "points":
+            # .stats points [season] [noskip]
+            # Default: aktuelle Season, --skip (kein Flag nötig)
+            season = None
+            noskip = False
+            for a in rest:
+                if a.lower() == "noskip":
+                    noskip = True
+                elif season is None and a.isdigit():
+                    season = a
+
+            call = ["stats", "points"]
+            if season:
+                call.append(season)
+            if noskip:
+                call.append("--no-skip")
+
         elif sub == "te":
             call = ["stats", "te"] + (rest[:1] if rest else [])
         elif sub == "battle":
@@ -747,6 +798,12 @@ async def on_message(message):
             call = ["stats", sub] + rest
 
         output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
+        return
+
+    # --- Donations under index 100 (PLTE) ---
+    if cmd == ".d":
+        output = await run_hcr2(["donations", "under"])
         await send_codeblock(message.channel, output)
         return
 
@@ -1015,6 +1072,7 @@ async def on_message(message):
                 (".p[h]",        "Manage Players or show help."),
                 (".P <t>",       "Search Player by name/alias/discordname."),
                 (".s[h]",        "Manage seasons or show help."),
+                (".d",           "Show donations index under 100."),
                 (".t[h]",        "Manage teamevents or show help."),
                 (".m[h]",        "Manage matches or show help."),
                 (".x[h]",        "Manages scores or show help."),
@@ -1041,7 +1099,7 @@ async def on_message(message):
                 (".about <text>",      "Set your about/bio text."),
                 (".language <text>",   "Set your language (e.g., german, english)."),
                 (".playstyle <text>",  "Set your playstyle."),
-                (".birthday <DD.MM.>", "Set your birthday (no year)."),
+                (".birthday <DD.MM.>","Set your birthday (no year)."),
                 (".emoji <emoji>",  "Set your personal emoji."),
                 (".gp <gp>",        "Set your Garage Power."),
                 (".leader",         "Show all leaders."),
@@ -1050,7 +1108,9 @@ async def on_message(message):
                 (".show <id>",      "Show player by ID."),
                 (".stats",          "Show Performance Stats for current season"),
                 (".stats [type]",   "Show stats for misc types:\n"
-                                    "perf [seasonid], absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
+                                    "perf [seasonid] [noskip], score [seasonid] [noskip], points [seasonid] [noskip],\n"
+                                    "absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
+                (".d",              "Show donation index for PLTE (only players below 100)."),
                 (".help",           "Show this help message."),
             ],
             total_width=68,

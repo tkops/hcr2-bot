@@ -1,6 +1,8 @@
-VERSION = "0.5.0"
+VERSION = "0.5.2"
 
 HISTORY = [
+    ("0.5.2", "2025-12-09", "Add score and points stats"),
+    ("0.5.1", "2025-12-09", "Optimize perf stats"),
     ("0.5.0", "2025-12-03", "Add donations"),
     ("0.4.9", "2025-11-18", "Add stats per teamevent"),
     ("0.4.8", "2025-11-18", "Add match details to players profile"),
