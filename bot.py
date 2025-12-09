@@ -709,7 +709,7 @@ async def on_message(message):
             await message.channel.send(embed=embed)
         else:
             await message.channel.send("❌ Error during player export.")
-        return
+            return
 
     # --- Sheet player import ---
     if cmd == ".pi":
@@ -727,13 +727,29 @@ async def on_message(message):
 
     # --- Stats ---
     if cmd == ".stats":
-        sub = args[0].lower() if args else "avg"
+        # Default: perf
+        sub = args[0].lower() if args else "perf"
         rest = args[1:] if args else []
 
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
+
         elif sub == "perf":
-            call = ["stats", "avg"] + (rest[:1] if rest else [])
+            # .stats perf [season] [noskip]
+            season = None
+            noskip = False
+            for a in rest:
+                if a.lower() == "noskip":
+                    noskip = True
+                elif season is None and a.isdigit():
+                    season = a
+
+            call = ["stats", "perf"]
+            if season:
+                call.append(season)
+            if noskip:
+                call.append("--no-skip")
+
         elif sub == "te":
             call = ["stats", "te"] + (rest[:1] if rest else [])
         elif sub == "battle":
@@ -1057,7 +1073,7 @@ async def on_message(message):
                 (".show <id>",      "Show player by ID."),
                 (".stats",          "Show Performance Stats for current season"),
                 (".stats [type]",   "Show stats for misc types:\n"
-                                    "perf [seasonid], absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
+                                    "perf [seasonid] [noskip], absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
                 (".d",              "Show donation index for PLTE (only players below 100)."),
                 (".help",           "Show this help message."),
             ],

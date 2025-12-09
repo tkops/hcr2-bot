@@ -18,6 +18,8 @@ def handle_command(cmd, args):
     elif cmd == "rank":
         season_arg = int(args[0]) if args else None
         rank_active_plte(season_arg)
+    elif cmd == "perf":
+        show_perf(args)
     elif cmd == "scatter":
         n = int(args[0]) if args else 20
         show_season_score_scatter(last_n=n, height=12, symbol="🔵")
@@ -53,9 +55,13 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py stats <command> [args]")
     print("\nAvailable commands:")
-    print("  avg [season]              Show player averages for current or given season")
+    print("  perf [season] [--skip|--no-skip]")
+    print("                           Performance ranking:")
+    print("                           default / --skip    → like avg (nur gewertete Spieler)")
+    print("                           --no-skip           → like rank (alle aktiven PLTE)")
+    print("  avg [season]              (legacy) Show player averages for current or given season")
     print("  alias                     Show alias of active players in plte team sorted by rank")
-    print("  rank [season]             Rank ALL active PLTE players (no one skipped; no-score at bottom)")
+    print("  rank [season]             (legacy) Rank ALL active PLTE players (no one skipped; no-score at bottom)")
     print("  te <te-id>                Rank stats for given team event")
     print("  te-user [n]               Like 'te' but with relative index: 0=current, 1=last, 2=prev, ...")
     print("  scatter [N]               Avergage Score Plot for last N seasons")
@@ -336,6 +342,37 @@ def rank_active_plte(season_number=None):
         print("-" * 31)
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
+# ---------------------------------------------------------------------------
+# Neuer Wrapper: stats perf
+# ---------------------------------------------------------------------------
+
+def show_perf(args):
+    """
+    stats perf [season] [--skip|--no-skip]
+      --skip / default   → show_average (aktuelle Logik)
+      --no-skip          → rank_active_plte (alle aktiven PLTE, No-Score unten)
+    """
+    season_number = None
+    skip = True  # default
+
+    for a in args:
+        if a == "--no-skip":
+            skip = False
+        elif a == "--skip":
+            skip = True
+        else:
+            # Versuch, Season zu parsen
+            try:
+                season_number = int(a)
+            except ValueError:
+                print("Usage: stats perf [season] [--skip|--no-skip]")
+                return
+
+    if skip:
+        show_average(season_number)
+    else:
+        rank_active_plte(season_number)
 
 # ---------------------------------------------------------------------------
 
