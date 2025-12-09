@@ -35,7 +35,7 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".acc",
-    ".search", ".show", ".stats", ".gp"
+    ".search", ".show", ".stats", ".d", ".gp"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -750,6 +750,12 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
+    # --- Donations under index 100 (PLTE) ---
+    if cmd == ".d":
+        output = await run_hcr2(["donations", "under"])
+        await send_codeblock(message.channel, output)
+        return
+
     # --- Seasons ---
     if cmd == ".s":
         output = await run_hcr2(["season", "list"] if not args else ["season", "add"] + args)
@@ -1015,6 +1021,7 @@ async def on_message(message):
                 (".p[h]",        "Manage Players or show help."),
                 (".P <t>",       "Search Player by name/alias/discordname."),
                 (".s[h]",        "Manage seasons or show help."),
+                (".d",           "Show donations index under 100."),
                 (".t[h]",        "Manage teamevents or show help."),
                 (".m[h]",        "Manage matches or show help."),
                 (".x[h]",        "Manages scores or show help."),
@@ -1051,6 +1058,7 @@ async def on_message(message):
                 (".stats",          "Show Performance Stats for current season"),
                 (".stats [type]",   "Show stats for misc types:\n"
                                     "perf [seasonid], absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
+                (".d",              "Show donation index for PLTE (only players below 100)."),
                 (".help",           "Show this help message."),
             ],
             total_width=68,
