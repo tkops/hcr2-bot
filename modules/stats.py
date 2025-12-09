@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import sqlite3
 import statistics
@@ -48,6 +49,10 @@ def handle_command(cmd, args):
         # te-user 2     -> vorletztes, usw.
         offset = int(args[0]) if args else 0
         show_teamevent_stats_user(offset)
+    elif cmd == "score":
+        show_score(args)
+    elif cmd == "points":
+        show_points(args)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -68,6 +73,10 @@ def print_help():
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
     print("  absent [season]           Absent stats")
+    print("  score [season] [--skip|--no-skip]")
+    print("                           Summe der Scores je Spieler in Season (default nur gewertete aktive PLTE)")
+    print("  points [season] [--skip|--no-skip]")
+    print("                           Summe der Points je Spieler in Season (default nur gewertete aktive PLTE)")
 
 # ---------------------------------------------------------------------------
 
@@ -373,6 +382,158 @@ def show_perf(args):
         show_average(season_number)
     else:
         rank_active_plte(season_number)
+
+# ---------------------------------------------------------------------------
+# Neuer Wrapper: stats score / stats points
+# ---------------------------------------------------------------------------
+
+def show_score(args):
+    """
+    stats score [season] [--skip|--no-skip]
+      --skip / default   → nur aktive PLTE mit gewerteter Teilnahme (nicht abwesend), Summe der Scores
+      --no-skip          → alle aktiven PLTE, No-Score unten
+    """
+    season_number = None
+    skip = True  # default
+
+    for a in args:
+        if a == "--no-skip":
+            skip = False
+        elif a == "--skip":
+            skip = True
+        else:
+            try:
+                season_number = int(a)
+            except ValueError:
+                print("Usage: stats score [season] [--skip|--no-skip]")
+                return
+
+    _rank_sum_metric(season_number, metric="score", skip=skip)
+
+
+def show_points(args):
+    """
+    stats points [season] [--skip|--no-skip]
+      --skip / default   → nur aktive PLTE mit gewerteter Teilnahme (nicht abwesend), Summe der Points
+      --no-skip          → alle aktiven PLTE, No-Points unten
+    """
+    season_number = None
+    skip = True  # default
+
+    for a in args:
+        if a == "--no-skip":
+            skip = False
+        elif a == "--skip":
+            skip = True
+        else:
+            try:
+                season_number = int(a)
+            except ValueError:
+                print("Usage: stats points [season] [--skip|--no-skip]")
+                return
+
+    _rank_sum_metric(season_number, metric="points", skip=skip)
+
+
+def _rank_sum_metric(season_number=None, metric="score", skip=True):
+    """
+    Aggregiert und rankt Summen pro Spieler für eine Season.
+    metric: "score" oder "points"
+    skip=True  : nur aktive PLTE mit gewerteter Teilnahme (nicht abwesend)
+    skip=False : alle aktiven PLTE; Spieler ohne Teilnahme/Metrik unten
+    """
+    assert metric in {"score", "points"}, "metric muss 'score' oder 'points' sein"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        if season_number is None:
+            season_number = find_current_season(cur)
+        if not season_number:
+            print("⚠️ No matching season found.")
+            return
+
+        # Header-Infos
+        s_name, s_div = _get_season_meta(cur, season_number)
+        title_metric = "Score" if metric == "score" else "Points"
+        header_line = f"📊{title_metric} Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
+        print(header_line)
+
+        # Aktive PLTE (für Namensauflösung und no-skip Liste)
+        cur.execute("SELECT id, name FROM players WHERE active = 1 AND UPPER(team) = 'PLTE'")
+        active_players = cur.fetchall()
+        if not active_players:
+            print("⚠️ No active PLTE players.")
+            return
+        id_to_name = {pid: name for pid, name in active_players}
+
+        rows = _fetch_season_rows(cur, season_number)
+        if not rows:
+            print("⚠️ No match scores found.")
+            return
+
+        totals = {}   # pid -> Summe (score/points)
+        counts = {}   # pid -> Anzahl Matches mit gewerteter Teilnahme
+        name_by_id = {}  # pid -> Name (Fallback)
+
+        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+            # Nur PLTE und aktive Spieler berücksichtigen (für beide Modi)
+            if not active or not team or team.upper() != "PLTE":
+                continue
+
+            # Teilnahme nur zählen, wenn nicht abwesend
+            if _is_absent(score, points, absent):
+                continue
+
+            # Wert extrahieren
+            if metric == "score":
+                if score is None:
+                    continue  # ohne Score hier nichts aufsummieren
+                value = int(score)
+            else:  # metric == "points"
+                value = int(points or 0)
+
+            totals[pid] = totals.get(pid, 0) + value
+            counts[pid] = counts.get(pid, 0) + 1
+            name_by_id[pid] = name
+
+        if skip:
+            # Nur Spieler mit Teilnahme/Metrik ausgeben, nach Summe sortiert
+            entries = []
+            for pid, total in totals.items():
+                pname = id_to_name.get(pid, name_by_id.get(pid, f"ID {pid}"))
+                cnt = counts.get(pid, 0)
+                entries.append((pname, total, cnt))
+
+            entries.sort(key=lambda x: x[1], reverse=True)
+
+            # Ausgabe
+            col_label = "Score" if metric == "score" else "Pts"
+            print(f"{'#':>2}   {'Lady':<14} {col_label:>6} {'Mat.':>2}")
+            print("-" * 31)
+            for i, (pname, total, cnt) in enumerate(entries, 1):
+                print(f"{i:>2}.  {pname:<14} {total:>6} {cnt:>2}")
+
+        else:
+            # Alle aktiven PLTE, ohne Werte unten alphabetisch
+            with_vals = []
+            without_vals = []
+            for pid, pname in id_to_name.items():
+                if pid in totals:
+                    with_vals.append((pname, totals[pid], counts.get(pid, 0)))
+                else:
+                    without_vals.append((pname, None, 0))
+
+            with_vals.sort(key=lambda x: x[1], reverse=True)
+            without_vals.sort(key=lambda x: x[0].lower())
+            entries = with_vals + without_vals
+
+            col_label = "Score" if metric == "score" else "Pts"
+            print(f"{'#':>2}   {'Lady':<14} {col_label:>6} {'Mat.':>2}")
+            print("-" * 31)
+            for i, (pname, total, cnt) in enumerate(entries, 1):
+                val_str = f"{total:>6}" if total is not None else f"{'-':>6}"
+                print(f"{i:>2}.  {pname:<14} {val_str} {cnt:>2}")
 
 # ---------------------------------------------------------------------------
 
