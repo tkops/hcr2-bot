@@ -1023,13 +1023,18 @@ def show_teamevent_stats(te_id):
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
+
 def show_player_last_matches(player_id: int, last_n: int = 15):
     """
     Shows last N matches of a player:
     - Score, Points
-    - Perf delta vs match median (scaled_score = score*4/tracks)
-    - Summary: 2 columns (last N | overall), aligned rows incl. trend (-3..+3)
-    - Donations: ONE line with header (matches since 2025-11-01 / expected / total / index)
+    - Perf delta vs match median (scaled_score = score*4/tracks) like avg
+    - Summary: 2 columns (last N | overall) aligned rows incl. trend (-3..+3)
+    - Donations: single line with header (matches since 2025-11-01, expected, total, index)
+
+    IMPORTANT:
+    - "Unexcused absence" is counted ONLY if score AND points are both 0/NULL and absent is not set.
+      (Because DB can contain score>0 with points=0.)
     """
 
     DONATION_START_DATE = "2025-11-01"
@@ -1082,6 +1087,14 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             print(f"{label:<{label_w}} | {lv:<{left_w}} | {rv:<{right_w}}")
         print("-" * sep)
 
+    def _is_unexcused_absence(score, points, absent):
+        # Unexcused only if BOTH score and points are 0/NULL AND absent is not set.
+        return (
+            (score is None or score == 0)
+            and (points is None or points == 0)
+            and (absent is None or absent == 0)
+        )
+
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
@@ -1101,19 +1114,21 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         cur.execute("SELECT COUNT(*) FROM matchscore WHERE player_id = ?", (player_id,))
         total_matches_overall = int(cur.fetchone()[0] or 0)
 
+        # Overall unexcused absences (FIXED definition)
         cur.execute(
             """
             SELECT COUNT(*)
             FROM matchscore
             WHERE player_id = ?
-              AND IFNULL(points,0) = 0
+              AND (score IS NULL OR score = 0)
+              AND (points IS NULL OR points = 0)
               AND (absent IS NULL OR absent = 0)
             """,
             (player_id,),
         )
         total_unexcused_overall = int(cur.fetchone()[0] or 0)
 
-        # Last N matches (desc)
+        # Last N matches (desc) for display
         cur.execute(
             """
             SELECT
@@ -1139,7 +1154,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             print(f"⚠️ No matches found for player {player_id}.")
             return
 
-        # Overall matches (chronological for trend)
+        # Overall matches (chronological) for trend/overall averages
         cur.execute(
             """
             SELECT
@@ -1160,7 +1175,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         overall_matches = cur.fetchall()
         overall_match_ids = [m[0] for m in overall_matches]
 
-        # Medians per match (PLTE, not absent, score != NULL)
+        # Medians per match (PLTE, not absent, score != NULL) to compute perf deltas
         med_by_match = {}
         if overall_match_ids:
             for chunk in _chunks(overall_match_ids):
@@ -1204,20 +1219,19 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         print(f"{'#':>2}  {'Start':<10} {'S':>3} {'Match':>5}  {'TeamEvent':<18} {'Score':>6} {'Pts':>4} {'Perf':>6}")
         print("-" * 70)
 
-        # Last-N aggregation
+        # Last-N aggregates (FIXED unexcused)
         last_counted = 0
         last_unexcused = 0
         last_score_sum = 0
         last_points_sum = 0
-        last_deltas_avg = []   # ints for avg
-        last_deltas_desc = []  # floats for trend, collected in desc order
+        last_deltas_avg = []   # ints for avg perf
+        last_deltas_desc = []  # floats for trend (desc order -> reversed later)
 
         for i, (mid, start, season, te_name, tracks, score, points, absent) in enumerate(last_matches, 1):
             start_s = (start or "")[:10]
             te_short = (te_name or "")[:18]
 
-            # Unexcused absence definition (points=0 and absent not set)
-            if (points or 0) == 0 and (absent is None or absent == 0):
+            if _is_unexcused_absence(score, points, absent):
                 last_unexcused += 1
 
             perf_str = "-"
@@ -1244,15 +1258,16 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         # Last N trend needs chronological order
         last_deltas_trend = list(reversed(last_deltas_desc))
 
-        # Overall aggregation (for avg score/points + avg perf + trend)
+        # Overall aggregates (avg score/points, avg perf, trend)
         overall_counted = 0
         overall_score_sum = 0
         overall_points_sum = 0
-        overall_deltas = []  # floats, chronological
+        overall_deltas = []  # floats in chronological order
 
         for mid, _, tracks, score, points, absent in overall_matches:
             if score is None or _is_absent(score, points, absent):
                 continue
+
             overall_counted += 1
             overall_score_sum += int(score)
             overall_points_sum += int(points or 0)
@@ -1272,7 +1287,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         avg_points_overall = (overall_points_sum / overall_counted) if overall_counted else None
         avg_perf_overall = (sum(overall_deltas) / len(overall_deltas)) if overall_deltas else None
 
-        # Trends
+        # Trends (-3..+3)
         trend_last = _trend_to_score(_linreg_slope(last_deltas_trend) if last_deltas_trend else 0.0)
         trend_overall = _trend_to_score(_linreg_slope(overall_deltas) if overall_deltas else 0.0)
 
@@ -1292,13 +1307,9 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         _print_summary_2col(f"last {last_n}", "overall", rows)
 
         # -------------------------------------------------
-        # Donations: ONE line with header (like donations module)
+        # Donations line (exactly like donations module logic)
         # -------------------------------------------------
-        cur.execute(
-            """
-            SELECT MAX(date) FROM donation
-            """
-        )
+        cur.execute("SELECT MAX(date) FROM donation")
         row = cur.fetchone()
         cutoff_date = row[0] if row and row[0] is not None else None
 
@@ -1308,7 +1319,6 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         donation_index = 0.0
 
         if cutoff_date is not None:
-            # Matches since DONATION_START_DATE until last donation date
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT m.id)
@@ -1322,7 +1332,6 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             )
             donation_matches = int(cur.fetchone()[0] or 0)
 
-            # Donation total at cutoff_date (last <= cutoff)
             cur.execute(
                 """
                 SELECT total FROM donation
