@@ -1028,8 +1028,11 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
     Shows last N matches of a player:
     - Score, Points
     - Perf delta vs match median (scaled_score = score*4/tracks)
-    - Summary: 2 columns (last N | overall), incl. trend (-3 .. +3) aligned in rows
+    - Summary: 2 columns (last N | overall), aligned rows incl. trend (-3..+3)
+    - Donations: ONE line with header (matches since 2025-11-01 / expected / total / index)
     """
+
+    DONATION_START_DATE = "2025-11-01"
 
     def _chunks(lst, size=900):
         for i in range(0, len(lst), size):
@@ -1136,7 +1139,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             print(f"⚠️ No matches found for player {player_id}.")
             return
 
-        # Overall matches (chronological)
+        # Overall matches (chronological for trend)
         cur.execute(
             """
             SELECT
@@ -1201,16 +1204,19 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         print(f"{'#':>2}  {'Start':<10} {'S':>3} {'Match':>5}  {'TeamEvent':<18} {'Score':>6} {'Pts':>4} {'Perf':>6}")
         print("-" * 70)
 
-        # Last N aggregation
-        last_counted = last_unexcused = 0
-        last_score_sum = last_points_sum = 0
-        last_deltas_avg = []
-        last_deltas_desc = []
+        # Last-N aggregation
+        last_counted = 0
+        last_unexcused = 0
+        last_score_sum = 0
+        last_points_sum = 0
+        last_deltas_avg = []   # ints for avg
+        last_deltas_desc = []  # floats for trend, collected in desc order
 
         for i, (mid, start, season, te_name, tracks, score, points, absent) in enumerate(last_matches, 1):
             start_s = (start or "")[:10]
             te_short = (te_name or "")[:18]
 
+            # Unexcused absence definition (points=0 and absent not set)
             if (points or 0) == 0 and (absent is None or absent == 0):
                 last_unexcused += 1
 
@@ -1238,11 +1244,11 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         # Last N trend needs chronological order
         last_deltas_trend = list(reversed(last_deltas_desc))
 
-        # Overall aggregation
+        # Overall aggregation (for avg score/points + avg perf + trend)
         overall_counted = 0
         overall_score_sum = 0
         overall_points_sum = 0
-        overall_deltas = []
+        overall_deltas = []  # floats, chronological
 
         for mid, _, tracks, score, points, absent in overall_matches:
             if score is None or _is_absent(score, points, absent):
@@ -1270,7 +1276,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         trend_last = _trend_to_score(_linreg_slope(last_deltas_trend) if last_deltas_trend else 0.0)
         trend_overall = _trend_to_score(_linreg_slope(overall_deltas) if overall_deltas else 0.0)
 
-        # Summary table (with trend row)
+        # Summary (2 columns)
         rows = [
             ("Match count", _fmt_int(last_counted), _fmt_int(total_matches_overall)),
             ("Unexcused absences", _fmt_int(last_unexcused), _fmt_int(total_unexcused_overall)),
@@ -1283,6 +1289,62 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             ("Avg performance", _fmt_k(avg_perf_last), _fmt_k(avg_perf_overall)),
             ("Trend", f"{trend_last:+d}", f"{trend_overall:+d}"),
         ]
-
         _print_summary_2col(f"last {last_n}", "overall", rows)
+
+        # -------------------------------------------------
+        # Donations: ONE line with header (like donations module)
+        # -------------------------------------------------
+        cur.execute(
+            """
+            SELECT MAX(date) FROM donation
+            """
+        )
+        row = cur.fetchone()
+        cutoff_date = row[0] if row and row[0] is not None else None
+
+        donation_matches = 0
+        donation_total = 0
+        donation_expected = 0
+        donation_index = 0.0
+
+        if cutoff_date is not None:
+            # Matches since DONATION_START_DATE until last donation date
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT m.id)
+                FROM match m
+                JOIN matchscore ms ON ms.match_id = m.id
+                WHERE ms.player_id = ?
+                  AND DATE(m.start) >= DATE(?)
+                  AND DATE(m.start) <= DATE(?)
+                """,
+                (player_id, DONATION_START_DATE, cutoff_date),
+            )
+            donation_matches = int(cur.fetchone()[0] or 0)
+
+            # Donation total at cutoff_date (last <= cutoff)
+            cur.execute(
+                """
+                SELECT total FROM donation
+                WHERE player_id = ?
+                  AND date <= ?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (player_id, cutoff_date),
+            )
+            drow = cur.fetchone()
+            donation_total = int(drow[0]) if drow and drow[0] is not None else 0
+
+            donation_expected = donation_matches * 600
+            donation_index = (donation_total / donation_expected * 100.0) if donation_expected > 0 else 0.0
+
+        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" (cutoff {cutoff_date})" if cutoff_date else ""))
+        print(f"{'Matches':>7} {'Expected':>9} {'Total':>9} {'Index':>6}")
+        print("-" * 36)
+        print(
+            f"{donation_matches:7d} "
+            f"{format_k(donation_expected):>9} "
+            f"{format_k(donation_total):>9} "
+            f"{donation_index:6.1f}"
+        )
 
