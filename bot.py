@@ -532,6 +532,15 @@ async def on_message(message):
         return
 
     # ================== ENDE NEUE ADMIN-KOMMANDOS ==================
+    # --- Admin: Player stats (.S <id>) ---
+    if cmd == ".S":
+        if len(args) != 1 or not args[0].isdigit():
+            await message.channel.send("Usage: .S <id>")
+            return
+        output = await run_hcr2(["stats", "player", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
 
     # --- Public: Leader-Liste ---
     if cmd == ".leader":
@@ -1071,6 +1080,7 @@ async def on_message(message):
             rows=[
                 (".p[h]",        "Manage Players or show help."),
                 (".P <t>",       "Search Player by name/alias/discordname."),
+                (".S <id>",      "Show player stats."),
                 (".s[h]",        "Manage seasons or show help."),
                 (".d",           "Show donations index under 100."),
                 (".t[h]",        "Manage teamevents or show help."),
