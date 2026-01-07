@@ -53,6 +53,13 @@ def handle_command(cmd, args):
         show_score(args)
     elif cmd == "points":
         show_points(args)
+    elif cmd == "player":
+        if not args:
+            print("Usage: stats player <player_id> [N]")
+            return
+        player_id = int(args[0])
+        n = int(args[1]) if len(args) > 1 else 15
+        show_player_last_matches(player_id, last_n=n)
     else:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
@@ -73,6 +80,7 @@ def print_help():
     print("  bdayplot                  Birthday Plot")
     print("  battle <id> <id> [s]      Seasonstat Compair")
     print("  absent [season]           Absent stats")
+    print("  player <id>               Show player stats")
     print("  score [season] [--skip|--no-skip]")
     print("                           Summe der Scores je Spieler in Season (default nur gewertete aktive PLTE)")
     print("  points [season] [--skip|--no-skip]")
@@ -1014,4 +1022,137 @@ def show_teamevent_stats(te_id):
         print("-" * 31)
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
+def show_player_last_matches(player_id: int, last_n: int = 15):
+    """
+    Zeigt die letzten N Matches eines Spielers:
+    - Score, Points
+    - Perf-Delta vs Median (scaled_score = score*4/tracks) wie bei avg
+    - Abwesende / score=None werden nicht als gewertet geplottet (zeigen wir aber trotzdem an)
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Spielername
+        cur.execute("SELECT name, COALESCE(emoji,''), COALESCE(team,''), active FROM players WHERE id = ?", (player_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"⚠️ No player with id {player_id}.")
+            return
+        pname, pemoji, pteam, pactive = row
+        pemoji = (pemoji or "").strip()
+
+        # Letzte N Matches, wo der Spieler einen matchscore-Eintrag hat
+        cur.execute("""
+            SELECT
+                m.id,
+                m.start,
+                m.season_number,
+                t.id,
+                t.name,
+                t.tracks,
+                ms.score,
+                ms.points,
+                ms.absent
+            FROM matchscore ms
+            JOIN match     m ON m.id = ms.match_id
+            JOIN teamevent t ON t.id = m.teamevent_id
+            WHERE ms.player_id = ?
+            ORDER BY m.start DESC, m.id DESC
+            LIMIT ?
+        """, (player_id, last_n))
+        matches = cur.fetchall()
+
+        if not matches:
+            print(f"⚠️ No matches found for player {player_id}.")
+            return
+
+        match_ids = [m[0] for m in matches]
+
+        # Alle Scores der PLTE-Spieler pro Match holen, um Median zu berechnen (wie avg-Logik)
+        q = f"""
+            SELECT
+                ms.match_id,
+                ms.player_id,
+                ms.score,
+                ms.points,
+                ms.absent,
+                p.team,
+                p.active,
+                t.tracks
+            FROM matchscore ms
+            JOIN players   p ON p.id = ms.player_id
+            JOIN match     m ON m.id = ms.match_id
+            JOIN teamevent t ON t.id = m.teamevent_id
+            WHERE ms.match_id IN ({",".join("?" * len(match_ids))})
+        """
+        cur.execute(q, match_ids)
+        all_rows = cur.fetchall()
+
+        # Median je Match (nur gewertete aktive PLTE mit score != None, nicht abwesend)
+        scores_by_match = {}
+        for mid, pid, score, points, absent, team, active, tracks in all_rows:
+            if not active:
+                continue
+            if not team or team.upper() != "PLTE":
+                continue
+            if score is None or _is_absent(score, points, absent):
+                continue
+            scaled = score * 4 / tracks if tracks else score
+            scores_by_match.setdefault(mid, []).append(float(scaled))
+
+        med_by_match = {}
+        for mid, vals in scores_by_match.items():
+            if vals:
+                med_by_match[mid] = statistics.median(vals)
+
+        # Ausgabe
+        head = f"👤 Player {player_id}: {pname}"
+        if pemoji:
+            head += f" {pemoji}"
+        head += f"  (team={pteam or '-'}, active={int(bool(pactive))})"
+        print(head)
+
+        print(f"{'#':>2}  {'Start':<10} {'S':>3} {'Match':>5}  {'TeamEvent':<18} {'Score':>6} {'Pts':>4} {'Perf':>6}")
+        print("-" * 70)
+
+        # kleine Summaries
+        deltas = []
+        sum_score = 0
+        sum_points = 0
+        counted = 0  # gewertete Matches (für avg delta)
+
+        for i, (mid, start, season, te_id, te_name, tracks, score, points, absent) in enumerate(matches, 1):
+            start_s = (start or "")[:10]
+            te_short = (te_name or "")[:18]
+
+            # Player scaled + delta (nur wenn score gewertet)
+            perf_str = "-"
+            if score is not None and not _is_absent(score, points, absent):
+                scaled = score * 4 / tracks if tracks else score
+                med = med_by_match.get(mid)
+                if med is not None:
+                    delta = round(scaled - med)
+                    perf_str = format_k(delta)
+                    deltas.append(delta)
+                    counted += 1
+                else:
+                    # kein Median verfügbar (z.B. keine anderen gewerteten PLTE-Scores)
+                    perf_str = "n/a"
+
+                sum_score += int(score)
+                sum_points += int(points or 0)
+
+            score_s = "-" if score is None else str(int(score))
+            pts_s = "-" if points is None else str(int(points))
+
+            print(f"{i:>2}. {start_s:<10} {season:>3} {mid:>5}  {te_short:<18} {score_s:>6} {pts_s:>4} {perf_str:>6}")
+
+        if counted > 0:
+            avg_delta = round(sum(deltas) / len(deltas))
+            print("-" * 70)
+            print(f"Matches counted: {counted}/{len(matches)} | Avg Perf: {format_k(avg_delta)} | Sum Score: {sum_score} | Sum Points: {sum_points}")
+        else:
+            print("-" * 70)
+            print("No counted matches (all absent / no score).")
 
