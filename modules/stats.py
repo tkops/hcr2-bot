@@ -1235,7 +1235,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         print(head)
 
         # Tighter table header + narrower event
-        print(f"{'#':>2} {'Date':<10} {'S':>3} {'M':>5} {'Event':<14} {'Sc':>5} {'Pt':>3} {'Pf':>4}")
+        print(f"{'#':>2} {'Date':<10} {'S':>3} {'M':>5} {'Event':<14} {'Sc':>5} {'Pt':>3} {'Pf':>6}")
         print("-" * 56)
 
         # Last-N aggregates
@@ -1272,7 +1272,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             score_s = "-" if score is None else str(int(score))
             pts_s = "-" if points is None else str(int(points))
             # Pf = shortened perf column; keep aligned
-            print(f"{i:>2} {start_s:<10} {season:>3} {mid:>5} {te_short:<14} {score_s:>5} {pts_s:>3} {perf_str:>4}")
+            print(f"{i:>2} {start_s:<10} {season:>3} {mid:>5} {te_short:<14} {score_s:>5} {pts_s:>3} {perf_str:>6}")
 
         last_deltas_trend = list(reversed(last_deltas_desc))
 
@@ -1359,6 +1359,6 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             donation_expected = donation_matches * 600
             donation_index = (donation_total / donation_expected * 100.0) if donation_expected > 0 else 0.0
 
-        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" (→{cutoff_date})" if cutoff_date else ""))
+        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" → {cutoff_date}" if cutoff_date else ""))
         print(f"{'Mch':>3} {'Exp':>7} {'Tot':>7} {'Idx':>5}")
         print(f"{donation_matches:3d} {format_k(donation_expected):>7} {format_k(donation_total):>7} {donation_index:5.1f}")
