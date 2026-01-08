@@ -1023,7 +1023,6 @@ def show_teamevent_stats(te_id):
         for i, (name, delta, count) in enumerate(entries, 1):
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
-
 def show_player_last_matches(player_id: int, last_n: int = 15):
     """
     Shows last N matches of a player:
@@ -1072,6 +1071,22 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             return 2
         return 3
 
+    def _trend_label(trend: int) -> str:
+        # -3..+3 with arrows
+        if trend <= -3:
+            return "↓ -3"
+        if trend == -2:
+            return "↓ -2"
+        if trend == -1:
+            return "↘ -1"
+        if trend == 0:
+            return "→  0"
+        if trend == 1:
+            return "↗ +1"
+        if trend == 2:
+            return "↑ +2"
+        return "↑ +3"
+
     def _fmt_int(v):
         return "-" if v is None else str(int(v))
 
@@ -1098,17 +1113,25 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Player meta
+        # Player meta (+ garage_power)
         cur.execute(
-            "SELECT name, COALESCE(emoji,''), COALESCE(team,''), active FROM players WHERE id = ?",
+            """
+            SELECT name, COALESCE(emoji,''), COALESCE(team,''), active, COALESCE(garage_power, 0)
+            FROM players
+            WHERE id = ?
+            """,
             (player_id,),
         )
         row = cur.fetchone()
         if not row:
             print(f"⚠️ No player with id {player_id}.")
             return
-        pname, pemoji, pteam, pactive = row
+        pname, pemoji, pteam, pactive, garage_power = row
         pemoji = (pemoji or "").strip()
+        try:
+            garage_power = int(garage_power or 0)
+        except Exception:
+            garage_power = 0
 
         # Overall totals
         cur.execute("SELECT COUNT(*) FROM matchscore WHERE player_id = ?", (player_id,))
@@ -1209,11 +1232,11 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
                     if vals:
                         med_by_match[mid] = statistics.median(vals)
 
-        # Header
+        # Header (with garage_power)
         head = f"👤 Player {player_id}: {pname}"
         if pemoji:
             head += f" {pemoji}"
-        head += f"  (team={pteam or '-'}, active={int(bool(pactive))})"
+        head += f"  (GP: {garage_power}, team={pteam or '-'}, active={int(bool(pactive))})"
         print(head)
 
         print(f"{'#':>2}  {'Start':<10} {'S':>3} {'Match':>5}  {'TeamEvent':<18} {'Score':>6} {'Pts':>4} {'Perf':>6}")
@@ -1302,9 +1325,12 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
              _fmt_int(round(avg_points_last)) if avg_points_last is not None else "-",
              _fmt_int(round(avg_points_overall)) if avg_points_overall is not None else "-"),
             ("Avg performance", _fmt_k(avg_perf_last), _fmt_k(avg_perf_overall)),
-            ("Trend", f"{trend_last:+d}", f"{trend_overall:+d}"),
+            ("Trend (↓ -3 .. +3 ↑)", _trend_label(trend_last), _trend_label(trend_overall)),
         ]
         _print_summary_2col(f"last {last_n}", "overall", rows)
+
+        # Trend explanation (single short line)
+        print("Trend scale: ↓ = worse, → = stable, ↑ = better (range: -3 .. +3)")
 
         # -------------------------------------------------
         # Donations line (exactly like donations module logic)
