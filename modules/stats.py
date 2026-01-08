@@ -1025,15 +1025,10 @@ def show_teamevent_stats(te_id):
 
 def show_player_last_matches(player_id: int, last_n: int = 15):
     """
-    Shows last N matches of a player:
-    - Score, Points
-    - Perf delta vs match median (scaled_score = score*4/tracks) like avg
-    - Summary: 2 columns (last N | overall) aligned rows incl. trend (-3..+3)
-    - Donations: single line with header (matches since 2025-11-01, expected, total, index)
-
-    IMPORTANT:
-    - "Unexcused absence" is counted ONLY if score AND points are both 0/NULL and absent is not set.
-      (Because DB can contain score>0 with points=0.)
+    Compact output (Discord-friendly):
+    - Last N matches: date/season/match/event/score/pts/perf
+    - Summary: 2 columns (last N | overall) incl. Trend (-3..+3) with arrows
+    - Donations: 1 header + 1 data line
     """
 
     DONATION_START_DATE = "2025-11-01"
@@ -1072,20 +1067,20 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         return 3
 
     def _trend_label(trend: int) -> str:
-        # -3..+3 with arrows
+        # compact arrow + number
         if trend <= -3:
-            return "↓ -3"
+            return "↓-3"
         if trend == -2:
-            return "↓ -2"
+            return "↓-2"
         if trend == -1:
-            return "↘ -1"
+            return "↘-1"
         if trend == 0:
-            return "→  0"
+            return "→0"
         if trend == 1:
-            return "↗ +1"
+            return "↗+1"
         if trend == 2:
-            return "↑ +2"
-        return "↑ +3"
+            return "↑+2"
+        return "↑+3"
 
     def _fmt_int(v):
         return "-" if v is None else str(int(v))
@@ -1093,7 +1088,8 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
     def _fmt_k(v):
         return "-" if v is None else format_k(int(round(v)))
 
-    def _print_summary_2col(title_left, title_right, rows, label_w=22, left_w=18, right_w=18):
+    def _print_summary_2col(title_left, title_right, rows, label_w=14, left_w=14, right_w=14):
+        # tighter columns
         sep = label_w + left_w + right_w + 6
         print("-" * sep)
         print(f"{'':<{label_w}} | {title_left:<{left_w}} | {title_right:<{right_w}}")
@@ -1103,7 +1099,6 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         print("-" * sep)
 
     def _is_unexcused_absence(score, points, absent):
-        # Unexcused only if BOTH score and points are 0/NULL AND absent is not set.
         return (
             (score is None or score == 0)
             and (points is None or points == 0)
@@ -1137,7 +1132,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         cur.execute("SELECT COUNT(*) FROM matchscore WHERE player_id = ?", (player_id,))
         total_matches_overall = int(cur.fetchone()[0] or 0)
 
-        # Overall unexcused absences (FIXED definition)
+        # Overall unexcused absences
         cur.execute(
             """
             SELECT COUNT(*)
@@ -1177,7 +1172,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             print(f"⚠️ No matches found for player {player_id}.")
             return
 
-        # Overall matches (chronological) for trend/overall averages
+        # Overall matches (chronological)
         cur.execute(
             """
             SELECT
@@ -1198,7 +1193,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         overall_matches = cur.fetchall()
         overall_match_ids = [m[0] for m in overall_matches]
 
-        # Medians per match (PLTE, not absent, score != NULL) to compute perf deltas
+        # Medians per match (PLTE, not absent, score != NULL)
         med_by_match = {}
         if overall_match_ids:
             for chunk in _chunks(overall_match_ids):
@@ -1232,27 +1227,28 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
                     if vals:
                         med_by_match[mid] = statistics.median(vals)
 
-        # Header (with garage_power)
-        head = f"👤 Player {player_id}: {pname}"
+        # Header (short)
+        head = f"👤 {player_id}: {pname}"
         if pemoji:
             head += f" {pemoji}"
-        head += f"  (GP: {garage_power}, team={pteam or '-'}, active={int(bool(pactive))})"
+        head += f" (GP {garage_power}, {pteam or '-'}, act {int(bool(pactive))})"
         print(head)
 
-        print(f"{'#':>2}  {'Start':<10} {'S':>3} {'Match':>5}  {'TeamEvent':<18} {'Score':>6} {'Pts':>4} {'Perf':>6}")
-        print("-" * 70)
+        # Tighter table header + narrower event
+        print(f"{'#':>2} {'Date':<10} {'S':>3} {'M':>5} {'Event':<14} {'Sc':>5} {'Pt':>3} {'Pf':>4}")
+        print("-" * 56)
 
-        # Last-N aggregates (FIXED unexcused)
+        # Last-N aggregates
         last_counted = 0
         last_unexcused = 0
         last_score_sum = 0
         last_points_sum = 0
-        last_deltas_avg = []   # ints for avg perf
-        last_deltas_desc = []  # floats for trend (desc order -> reversed later)
+        last_deltas_avg = []
+        last_deltas_desc = []
 
         for i, (mid, start, season, te_name, tracks, score, points, absent) in enumerate(last_matches, 1):
             start_s = (start or "")[:10]
-            te_short = (te_name or "")[:18]
+            te_short = (te_name or "")[:14]
 
             if _is_unexcused_absence(score, points, absent):
                 last_unexcused += 1
@@ -1263,7 +1259,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
                 med = med_by_match.get(mid)
                 if med is not None:
                     delta = round(scaled - med)
-                    perf_str = format_k(delta)
+                    perf_str = _fmt_k(delta)
                     last_deltas_avg.append(delta)
                     last_deltas_desc.append(float(scaled - med))
                 else:
@@ -1275,17 +1271,16 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
 
             score_s = "-" if score is None else str(int(score))
             pts_s = "-" if points is None else str(int(points))
+            # Pf = shortened perf column; keep aligned
+            print(f"{i:>2} {start_s:<10} {season:>3} {mid:>5} {te_short:<14} {score_s:>5} {pts_s:>3} {perf_str:>4}")
 
-            print(f"{i:>2}. {start_s:<10} {season:>3} {mid:>5}  {te_short:<18} {score_s:>6} {pts_s:>4} {perf_str:>6}")
-
-        # Last N trend needs chronological order
         last_deltas_trend = list(reversed(last_deltas_desc))
 
-        # Overall aggregates (avg score/points, avg perf, trend)
+        # Overall aggregates
         overall_counted = 0
         overall_score_sum = 0
         overall_points_sum = 0
-        overall_deltas = []  # floats in chronological order
+        overall_deltas = []
 
         for mid, _, tracks, score, points, absent in overall_matches:
             if score is None or _is_absent(score, points, absent):
@@ -1310,31 +1305,22 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
         avg_points_overall = (overall_points_sum / overall_counted) if overall_counted else None
         avg_perf_overall = (sum(overall_deltas) / len(overall_deltas)) if overall_deltas else None
 
-        # Trends (-3..+3)
+        # Trends
         trend_last = _trend_to_score(_linreg_slope(last_deltas_trend) if last_deltas_trend else 0.0)
         trend_overall = _trend_to_score(_linreg_slope(overall_deltas) if overall_deltas else 0.0)
 
-        # Summary (2 columns)
+        # Summary (compact labels; trend label includes meaning)
         rows = [
-            ("Match count", _fmt_int(last_counted), _fmt_int(total_matches_overall)),
-            ("Unexcused absences", _fmt_int(last_unexcused), _fmt_int(total_unexcused_overall)),
-            ("Avg score",
-             _fmt_int(round(avg_score_last)) if avg_score_last is not None else "-",
-             _fmt_int(round(avg_score_overall)) if avg_score_overall is not None else "-"),
-            ("Avg points",
-             _fmt_int(round(avg_points_last)) if avg_points_last is not None else "-",
-             _fmt_int(round(avg_points_overall)) if avg_points_overall is not None else "-"),
-            ("Avg performance", _fmt_k(avg_perf_last), _fmt_k(avg_perf_overall)),
-            ("Trend (↓ -3 .. +3 ↑)", _trend_label(trend_last), _trend_label(trend_overall)),
+            ("Matches", _fmt_int(last_counted), _fmt_int(total_matches_overall)),
+            ("Unexcused", _fmt_int(last_unexcused), _fmt_int(total_unexcused_overall)),
+            ("Avg score", _fmt_int(round(avg_score_last)) if avg_score_last is not None else "-", _fmt_int(round(avg_score_overall)) if avg_score_overall is not None else "-"),
+            ("Avg pts", _fmt_int(round(avg_points_last)) if avg_points_last is not None else "-", _fmt_int(round(avg_points_overall)) if avg_points_overall is not None else "-"),
+            ("Avg perf", _fmt_k(avg_perf_last), _fmt_k(avg_perf_overall)),
+            ("Trend(-3..+3)", _trend_label(trend_last), _trend_label(trend_overall)),
         ]
         _print_summary_2col(f"last {last_n}", "overall", rows)
 
-        # Trend explanation (single short line)
-        print("Trend scale: ↓ = worse, → = stable, ↑ = better (range: -3 .. +3)")
-
-        # -------------------------------------------------
-        # Donations line (exactly like donations module logic)
-        # -------------------------------------------------
+        # Donations (header + single data line, compact)
         cur.execute("SELECT MAX(date) FROM donation")
         row = cur.fetchone()
         cutoff_date = row[0] if row and row[0] is not None else None
@@ -1373,13 +1359,6 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             donation_expected = donation_matches * 600
             donation_index = (donation_total / donation_expected * 100.0) if donation_expected > 0 else 0.0
 
-        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" (cutoff {cutoff_date})" if cutoff_date else ""))
-        print(f"{'Matches':>7} {'Expected':>9} {'Total':>9} {'Index':>6}")
-        print("-" * 36)
-        print(
-            f"{donation_matches:7d} "
-            f"{format_k(donation_expected):>9} "
-            f"{format_k(donation_total):>9} "
-            f"{donation_index:6.1f}"
-        )
-
+        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" (→{cutoff_date})" if cutoff_date else ""))
+        print(f"{'Mch':>3} {'Exp':>7} {'Tot':>7} {'Idx':>5}")
+        print(f"{donation_matches:3d} {format_k(donation_expected):>7} {format_k(donation_total):>7} {donation_index:5.1f}")
