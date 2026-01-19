@@ -853,11 +853,20 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
             SELECT id, name
             FROM players
             WHERE active = 1 AND team = 'PLTE'
-            ORDER BY name COLLATE NOCASE
         """)
         players = cur.fetchall()
 
         latest = _get_latest_donations(conn)
+
+        # Build rows with "previous" donation total (latest known total)
+        rows = []
+        for pid, name in players:
+            _, total = latest.get(pid, (None, 0))
+            prev = int(total or 0)
+            rows.append((pid, name, prev))
+
+        # Sort: highest previous donation first, then name
+        rows.sort(key=lambda x: (-x[2], (x[1] or "").lower()))
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb = Workbook()
@@ -874,23 +883,25 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
         ws["A3"] = "id"
         ws["B3"] = "name"
         ws["C3"] = "donation"
+        ws["D3"] = "previous"  # info only
 
-        for cell in ("A3", "B3", "C3"):
+        for cell in ("A3", "B3", "C3", "D3"):
             ws[cell].font = Font(bold=True)
 
         # Datenzeilen
-        row = 4
-        for pid, name in players:
-            _, total = latest.get(pid, (None, 0))
-            ws.cell(row=row, column=1, value=pid)
-            ws.cell(row=row, column=2, value=name)
-            ws.cell(row=row, column=3, value=int(total or 0))
-            row += 1
+        row_idx = 4
+        for pid, name, prev in rows:
+            ws.cell(row=row_idx, column=1, value=pid)
+            ws.cell(row=row_idx, column=2, value=name)
+            ws.cell(row=row_idx, column=3, value="")     # new donation entry (empty)
+            ws.cell(row=row_idx, column=4, value=prev)   # previous (info)
+            row_idx += 1
 
-        # etwas Format
+        # Format
         ws.column_dimensions["A"].width = 8
         ws.column_dimensions["B"].width = 26
         ws.column_dimensions["C"].width = 12
+        ws.column_dimensions["D"].width = 12
 
         wb.save(out_path)
 
@@ -902,7 +913,6 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
 
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
     print(f"[OK] [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
-
 
 def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
     local = local_xlsx or _download_donations_xlsx()
