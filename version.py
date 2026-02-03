@@ -1,6 +1,7 @@
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 
 HISTORY = [
+    ("0.6.1", "2026-02-03", "sheet(donations): display amounts in k on export and import as thousands"),
     ("0.6.0", "2025-12-09", "Add player stats"),
     ("0.5.2", "2025-12-09", "Add score and points stats"),
     ("0.5.1", "2025-12-09", "Optimize perf stats"),
