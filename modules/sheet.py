@@ -882,8 +882,8 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
         # Header (ab Zeile 3)
         ws["A3"] = "id"
         ws["B3"] = "name"
-        ws["C3"] = "donation"
-        ws["D3"] = "previous"  # info only
+        ws["C3"] = "donation (k)"
+        ws["D3"] = "previous (k)"  # info only
 
         for cell in ("A3", "B3", "C3", "D3"):
             ws[cell].font = Font(bold=True)
@@ -894,7 +894,8 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
             ws.cell(row=row_idx, column=1, value=pid)
             ws.cell(row=row_idx, column=2, value=name)
             ws.cell(row=row_idx, column=3, value="")     # new donation entry (empty)
-            ws.cell(row=row_idx, column=4, value=prev)   # previous (info)
+            ws.cell(row=row_idx, column=4, value=_to_k(prev))   # previous shown in k
+
             row_idx += 1
 
         # Format
@@ -913,6 +914,48 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
 
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
     print(f"[OK] [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+
+def _to_k(val: Optional[int]) -> float:
+    """Convert absolute integer amount to k-units (thousands) for display."""
+    try:
+        return round((int(val or 0)) / 1000.0, 1)
+    except Exception:
+        return 0.0
+
+
+def _parse_k_amount(val) -> Optional[int]:
+    """
+    Parse a donation amount entered in 'k' (thousands) and return absolute int (×1000).
+    Accepts: 12, 12.5, '12,5', ' 12.5 ', optionally with trailing 'k' (tolerant).
+    """
+    if val is None:
+        return None
+
+    # numeric cells
+    if isinstance(val, int):
+        return int(val) * 1000
+    if isinstance(val, float):
+        return int(round(val * 1000))
+
+    # strings
+    if isinstance(val, str):
+        s = val.strip().lower()
+        if not s:
+            return None
+        s = s.replace("k", "").strip()         # tolerant, even if user typed "12k"
+        s = s.replace(" ", "").replace("_", "")
+        s = s.replace(",", ".")                # german decimal comma
+
+        if not re.fullmatch(r"-?\d+(\.\d+)?", s):
+            return None
+
+        f = float(s)
+        if f < 0:
+            return None
+        return int(round(f * 1000))
+
+    return None
+
 
 def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
     local = local_xlsx or _download_donations_xlsx()
@@ -959,20 +1002,15 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
             errors += 1
             continue
 
-        # donation als int
+        # donation is entered in k (thousands) -> store absolute (×1000)
         if donation_val is None or (isinstance(donation_val, str) and donation_val.strip() == ""):
-            # leere Donation ignorieren
-            continue
-        don_int = None
-        if isinstance(donation_val, float) and donation_val.is_integer():
-            don_int = int(donation_val)
-        elif isinstance(donation_val, int):
-            don_int = donation_val
-        elif isinstance(donation_val, str) and donation_val.strip().isdigit():
-            don_int = int(donation_val.strip())
+            continue  # empty -> ignore
+        
+        don_int = _parse_k_amount(donation_val)
         if don_int is None:
             errors += 1
             continue
+
 
         cmd = [
             "python", "hcr2.py", "donations", "add",
