@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import asyncio
 import discord
@@ -142,6 +141,45 @@ def parse_teamevent_add_args(args):
             rest = args[i:]
             return [name] + rest
     return args
+
+def parse_match_add_args(args):
+    """
+    Unterstützt:
+      .m+ Opponent Name
+      .m+ teamevent:12 Opponent Name
+      .m+ season:59 start:2026-03-29 Opponent Name
+      .m+ score:123000 scoreopp:121000 Opponent Name
+
+    Alles mit key:value für bekannte Keys wird als optionales Feld interpretiert,
+    der Rest wird als Opponent zusammengefügt.
+    """
+    flag_map = {
+        "teamevent": "--teamevent",
+        "season": "--season",
+        "start": "--start",
+        "score": "--score",
+        "scoreopp": "--scoreopp",
+    }
+
+    cmd_args = ["match", "add"]
+    opponent_parts = []
+
+    for token in args:
+        if ":" in token:
+            key, value = token.split(":", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if key in flag_map and value:
+                cmd_args += [flag_map[key], value]
+                continue
+        opponent_parts.append(token)
+
+    opponent = " ".join(opponent_parts).strip()
+    if not opponent:
+        return None
+
+    cmd_args += ["--opponent", opponent]
+    return cmd_args
 
 async def is_leader(member: discord.Member) -> bool:
     return any(r.id in LEADER_ROLE_IDS for r in member.roles)
@@ -344,7 +382,8 @@ HELP_MH = help_block(
         (".m",                   "List last 10 matches."),
         (".m <id>",              "Show match details."),
         (".m <id> key:value",    "Edit match.\nkeys: teamevent, season, start, opponent, score, scoreopp"),
-        (".m+ <season> <event> <YYYY-MM-DD> <opponent>", "Add match."),
+        (".m+ <opponent>",       "Add match with defaults."),
+        (".m+ season:59 teamevent:12 start:2026-03-29 Gegner", "Add match with optional fields."),
         (".m- <match>",          "Delete match."),
         (".M <match>",           "Show match details."),
     ],
@@ -831,35 +870,15 @@ async def on_message(message):
 
     # --- Matches ---
     if cmd == ".m+":
-        tokens = content.split()[1:]
-
-        if len(tokens) < 4:
-            await message.channel.send("Usage: .m+ <seasonid> <teameventid> <YYYY-MM-DD> <opponent>")
+        parsed = parse_match_add_args(args)
+        if not parsed:
+            await message.channel.send(
+                "Usage: .m+ <opponent>\n"
+                "   or: .m+ teamevent:<id> season:<num> start:<YYYY-MM-DD> [score:<n>] [scoreopp:<n>] <opponent>"
+            )
             return
 
-        season_str, teamevent_str, date_str = tokens[0], tokens[1], tokens[2]
-        opponent = " ".join(tokens[3:]).strip()
-
-        if not season_str.isdigit() or not teamevent_str.isdigit():
-            await message.channel.send("⚠️ seasonid und teameventid müssen Zahlen sein.")
-            return
-
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
-            await message.channel.send("⚠️ Datum bitte als YYYY-MM-DD angeben.")
-            return
-
-        if not opponent:
-            await message.channel.send("⚠️ Opponent fehlt.")
-            return
-
-        args = [
-            "match", "add",
-            "--teamevent", teamevent_str,
-            "--season", season_str,
-            "--start", date_str,
-            "--opponent", opponent,
-        ]
-        output = await run_hcr2(args)
+        output = await run_hcr2(parsed)
         await send_codeblock(message.channel, output)
         return
 
@@ -1166,4 +1185,3 @@ async def respond(message, output):
 # ===================== Start =================================================
 
 client.run(TOKEN)
-
