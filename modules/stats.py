@@ -67,7 +67,7 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py stats <command> [args]")
     print("\nAvailable commands:")
-    print("  perf [season] [--skip|--no-skip]")
+    print("  perf [season] [--skip|--no-skip] [--active]")
     print("                           Performance ranking:")
     print("                           default / --skip    → like avg (nur gewertete Spieler)")
     print("                           --no-skip           → like rank (alle aktiven PLTE)")
@@ -158,7 +158,16 @@ def _is_absent(score, points, absent_flag):
 
 # ---------------------------------------------------------------------------
 
-def show_average(season_number=None):
+def show_average(season_number=None, active_only=False):
+    """
+    Default:
+      - alle Spieler mit >3 gewerteten Matches in der Season
+      - unabhängig davon, ob sie aktuell noch aktiv / in PLTE sind
+
+    --active:
+      - nur aktuell aktive PLTE-Spieler
+      - dann aber alle mit >0 gewerteten Matches
+    """
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
@@ -168,7 +177,6 @@ def show_average(season_number=None):
             print("⚠️ No matching season found.")
             return
 
-        # Header
         s_name, s_div = _get_season_meta(cur, season_number)
         header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
         print(header_line)
@@ -178,17 +186,18 @@ def show_average(season_number=None):
             print("⚠️ No match scores found.")
             return
 
-        # Matchweise Scores, Abwesende ignorieren
+        # Matchweise Scores
         scores_by_match = {}
         for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            # nur aktive PLTE
-            if not active:
-                continue
-            if not team or team.upper() != "PLTE":
-                continue
-
             if score is None or _is_absent(score, points, absent):
                 continue
+
+            # Nur bei --active auf aktuelle aktive PLTE einschränken
+            if active_only:
+                if not active:
+                    continue
+                if not team or team.upper() != "PLTE":
+                    continue
 
             scaled_score = score * 4 / tracks if tracks else score
             scores_by_match.setdefault(match_id, []).append((pid, name, scaled_score))
@@ -197,7 +206,6 @@ def show_average(season_number=None):
             print("⚠️ No match scores found.")
             return
 
-        # Deltas vs. Median
         player_scores = {}
         player_names = {}
         player_counts = {}
@@ -210,15 +218,15 @@ def show_average(season_number=None):
                 median = statistics.median(scores)
             except statistics.StatisticsError:
                 continue
+
             for pid, name, s in entries:
                 delta = s - median
                 player_scores.setdefault(pid, []).append(delta)
                 player_names[pid] = name
                 player_counts[pid] = player_counts.get(pid, 0) + 1
 
-        # Mindestteilnahme auf Basis tatsächlich gewerteter Matches
-        total_matches = len(scores_by_match)
-        min_matches = 1  # ggf. auf max(1, round(total_matches*0.8)) ändern
+        # default >3 Matches, --active >0 Matches
+        min_matches = 1 if active_only else 4
 
         entries = []
         for pid, deltas in player_scores.items():
@@ -228,13 +236,19 @@ def show_average(season_number=None):
             avg_delta = round(sum(deltas) / len(deltas))
             entries.append((player_names[pid], avg_delta, count))
 
+        if not entries:
+            if active_only:
+                print("⚠️ No active players with scored matches found.")
+            else:
+                print("⚠️ No players with more than 3 matches found.")
+            return
+
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
         print("-" * 31)
         for i, (name, delta, count) in enumerate(sorted(entries, key=lambda x: x[1], reverse=True), 1):
             if i > 50:
                 break
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
-
 # ---------------------------------------------------------------------------
 
 def show_plte_alias():
@@ -366,31 +380,30 @@ def rank_active_plte(season_number=None):
 
 def show_perf(args):
     """
-    stats perf [season] [--skip|--no-skip]
-      --skip / default   → show_average (aktuelle Logik)
-      --no-skip          → rank_active_plte (alle aktiven PLTE, No-Score unten)
+    stats perf [season] [--active]
+
+    default:
+      - alle Spieler mit >3 Matches in der Season
+      - unabhängig von aktuellem active/team Status
+
+    --active:
+      - nur aktuell aktive PLTE-Spieler
+      - alle mit >0 Matches
     """
     season_number = None
-    skip = True  # default
+    active_only = False
 
     for a in args:
-        if a == "--no-skip":
-            skip = False
-        elif a == "--skip":
-            skip = True
+        if a == "--active":
+            active_only = True
         else:
-            # Versuch, Season zu parsen
             try:
                 season_number = int(a)
             except ValueError:
-                print("Usage: stats perf [season] [--skip|--no-skip]")
+                print("Usage: stats perf [season] [--active]")
                 return
 
-    if skip:
-        show_average(season_number)
-    else:
-        rank_active_plte(season_number)
-
+    show_average(season_number, active_only=active_only)
 # ---------------------------------------------------------------------------
 # Neuer Wrapper: stats score / stats points
 # ---------------------------------------------------------------------------
