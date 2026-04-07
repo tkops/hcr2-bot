@@ -1,9 +1,9 @@
-
 #!/usr/bin/env python3
 import sqlite3
 import statistics
 import datetime
 import re
+import math
 
 DB_PATH = "../hcr2-db/hcr2.db"
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # z. B. 08-18, 7/3, 07.03.
@@ -67,10 +67,10 @@ def handle_command(cmd, args):
 def print_help():
     print("Usage: python hcr2.py stats <command> [args]")
     print("\nAvailable commands:")
-    print("  perf [season] [--skip|--no-skip] [--active]")
+    print("  perf [season] [--active]")
     print("                           Performance ranking:")
-    print("                           default / --skip    → like avg (nur gewertete Spieler)")
-    print("                           --no-skip           → like rank (alle aktiven PLTE)")
+    print("                           default           → players with at least 20% scored matches in season")
+    print("                           --active          → only active PLTE players with >0 scored matches")
     print("  avg [season]              (legacy) Show player averages for current or given season")
     print("  alias                     Show alias of active players in plte team sorted by rank")
     print("  rank [season]             (legacy) Rank ALL active PLTE players (no one skipped; no-score at bottom)")
@@ -145,6 +145,20 @@ def _fetch_season_rows(cur, season_number):
     """, (season_number,))
     return cur.fetchall()
 
+def _get_min_required_matches(cur, season_number, ratio=0.20):
+    """
+    Mindestanzahl gewerteter Matches für stats perf.
+    Beispiel:
+      15 Matches in Season -> ceil(15 * 0.20) = 3
+    """
+    cur.execute("SELECT COUNT(*) FROM match WHERE season_number = ?", (season_number,))
+    total_matches = int(cur.fetchone()[0] or 0)
+
+    if total_matches <= 0:
+        return 0, 0
+
+    min_required = math.ceil(total_matches * ratio)
+    return total_matches, min_required
 
 def _is_absent(score, points, absent_flag):
     # Hat jemand >0 Punkte/Score, zählt er als teilgenommen – auch wenn absent=1 gesetzt ist.
@@ -155,13 +169,12 @@ def _is_absent(score, points, absent_flag):
         return bool(absent_flag) and (score is None or score == 0)
     return (points is not None and points == 0) and (score is None or score == 0)
 
-
 # ---------------------------------------------------------------------------
 
 def show_average(season_number=None, active_only=False):
     """
     Default:
-      - alle Spieler mit >3 gewerteten Matches in der Season
+      - alle Spieler mit mindestens 20% gewerteten Matches in der Season
       - unabhängig davon, ob sie aktuell noch aktiv / in PLTE sind
 
     --active:
@@ -180,6 +193,13 @@ def show_average(season_number=None, active_only=False):
         s_name, s_div = _get_season_meta(cur, season_number)
         header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
         print(header_line)
+
+        if not active_only:
+            total_matches, min_matches = _get_min_required_matches(cur, season_number, ratio=0.20)
+            print(f"ℹ️ Required matches: {min_matches}/{total_matches} (20%)")
+        else:
+            total_matches = 0
+            min_matches = 1
 
         rows = _fetch_season_rows(cur, season_number)
         if not rows:
@@ -225,9 +245,6 @@ def show_average(season_number=None, active_only=False):
                 player_names[pid] = name
                 player_counts[pid] = player_counts.get(pid, 0) + 1
 
-        # default >3 Matches, --active >0 Matches
-        min_matches = 1 if active_only else 4
-
         entries = []
         for pid, deltas in player_scores.items():
             count = player_counts.get(pid, 0)
@@ -240,7 +257,7 @@ def show_average(season_number=None, active_only=False):
             if active_only:
                 print("⚠️ No active players with scored matches found.")
             else:
-                print("⚠️ No players with more than 3 matches found.")
+                print(f"⚠️ No players with at least {min_matches} scored matches found.")
             return
 
         print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
@@ -249,6 +266,7 @@ def show_average(season_number=None, active_only=False):
             if i > 50:
                 break
             print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+
 # ---------------------------------------------------------------------------
 
 def show_plte_alias():
@@ -383,7 +401,7 @@ def show_perf(args):
     stats perf [season] [--active]
 
     default:
-      - alle Spieler mit >3 Matches in der Season
+      - alle Spieler mit mindestens 20% Matches in der Season
       - unabhängig von aktuellem active/team Status
 
     --active:
@@ -404,6 +422,7 @@ def show_perf(args):
                 return
 
     show_average(season_number, active_only=active_only)
+
 # ---------------------------------------------------------------------------
 # Neuer Wrapper: stats score / stats points
 # ---------------------------------------------------------------------------
@@ -431,7 +450,6 @@ def show_score(args):
 
     _rank_sum_metric(season_number, metric="score", skip=skip)
 
-
 def show_points(args):
     """
     stats points [season] [--skip|--no-skip]
@@ -454,7 +472,6 @@ def show_points(args):
                 return
 
     _rank_sum_metric(season_number, metric="points", skip=skip)
-
 
 def _rank_sum_metric(season_number=None, metric="score", skip=True):
     """
@@ -577,7 +594,6 @@ def _fetch_avg_score_last_seasons(cur, last_n=20):
     rows = cur.fetchall()
     rows.reverse()
     return rows
-
 
 def _format_k(v):
     return f"{int(round(v/1000.0))}k"
@@ -932,6 +948,7 @@ def show_teamevent_stats_user(offset: int = 0):
     show_teamevent_stats(te_id)
 
 # ---------------------------------------------------------------------------
+
 def show_teamevent_stats(te_id):
     """
     Rank stats for a single team event:

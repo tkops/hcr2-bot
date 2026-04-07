@@ -1,6 +1,7 @@
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 HISTORY = [
+    ("0.7.1", "2026-04-07", "Fix seasons stats"),
     ("0.7.0", "2026-04-04", "Stats showing all members with more than 3 matches for seasons stats"),
     ("0.6.2", "2026-03-29", "Simplify match add"),
     ("0.6.1", "2026-02-03", "sheet(donations): display amounts in k on export and import as thousands"),
