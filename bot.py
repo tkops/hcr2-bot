@@ -140,7 +140,7 @@ def parse_teamevent_add_args(args):
             name = " ".join(args[:i])
             rest = args[i:]
             return [name] + rest
-    return args
+    return [" ".join(args)] if args else args
 
 def parse_match_add_args(args):
     """
@@ -360,7 +360,8 @@ HELP_TH = help_block(
         (".t <id>",              "Show teamevent incl. vehicles."),
         (".t <id> key:value",    "Edit Teamevent\n"
                                  "keys: name, tracks, score, vehicles"),
-        (".t+ <name> <week>",    "Add teamevent (week-format: 2025/38 or 2025-38). "),
+        (".t+ <name> [week]",    "Add teamevent.\n"
+                                 "If week is omitted, the next free ISO week is used."),
     ],
     total_width=65,
     left_col=22,
@@ -370,7 +371,9 @@ HELP_SH = help_block(
     "Seasons (.s) – Admin-Details",
     rows=[
         (".s",                   "List last 10 seasons."),
-        (".s <num> [div]",       "Add or edit season (division optional). "),
+        (".s+ <div>",            "Add the next season.\n"
+                                 "Only the division is required."),
+        (".s <num> [div]",       "Legacy add or edit season."),
     ],
     total_width=65,
     left_col=22,
@@ -861,6 +864,14 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
+    if cmd == ".s+":
+        if not args:
+            await message.channel.send("Usage: .s+ <division>")
+            return
+        output = await run_hcr2(["season", "add"] + args)
+        await send_codeblock(message.channel, output)
+        return
+
     # --- Player search (Admin-Variante weiter nutzbar) ---
     if cmd == ".P" and args:
         term = " ".join(args)
@@ -1008,7 +1019,7 @@ async def on_message(message):
 
     if cmd == ".t+":
         if not args:
-            await message.channel.send("Usage: .t+ <name> <kw>  (e.g. .t+ Teamcup 2025/38)")
+            await message.channel.send("Usage: .t+ <name> [week]  (e.g. .t+ Teamcup 2025/38)\nDefault week: next free ISO week.")
             return
 
         parsed_args = parse_teamevent_add_args(args)
@@ -1101,8 +1112,10 @@ async def on_message(message):
                 (".P <t>",       "Search Player by name/alias/discordname."),
                 (".S <id>",      "Show player stats."),
                 (".s[h]",        "Manage seasons or show help."),
+                (".s+ <div>",    "Add next season with one division."),
                 (".d",           "Show donations index under 100."),
                 (".t[h]",        "Manage teamevents or show help."),
+                (".t+ <name>",   "Add teamevent for the next free ISO week."),
                 (".m[h]",        "Manage matches or show help."),
                 (".x[h]",        "Manages scores or show help."),
                 (".c <matchid>", "Create match sheet in nextcloud."),

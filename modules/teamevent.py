@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from typing import Callable, Optional
 
 from modules.common import connect_db, get_arg_value, parse_flag_map, parse_int
 
 
 USAGE_ADD = (
-    'Usage: teamevent add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score] '
-    '| --name <name> --week <year>/W<week> [--vehicles 1,2,3|codes] [--tracks <num>] [--score <num>]'
+    'Usage: teamevent add "<name>" [<year>/W<week>] [vehicle_ids|vehicle_shortnames] [track-count] [max-score] '
+    '| --name <name> [--week <year>/W<week>] [--vehicles 1,2,3|codes] [--tracks <num>] [--score <num>]'
 )
 USAGE_DELETE = "Usage: teamevent delete <id> | --id <id>"
 USAGE_SHOW = "Usage: teamevent show all | <id> | --all | --id <id>"
@@ -34,8 +35,9 @@ def handle_command(cmd: str, args: list[str]) -> None:
 def print_help() -> None:
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nCommands:")
-    print('  add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
-    print("      or --name <name> --week <year>/W<week> [--vehicles ...] [--tracks <num>] [--score <num>]")
+    print('  add "<name>" [<year>/W<week>] [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
+    print("      or --name <name> [--week <year>/W<week>] [--vehicles ...] [--tracks <num>] [--score <num>]")
+    print("                                         Default week: next free ISO week")
     print("  list                                   Show the latest 10 team events")
     print("  list --all                             Show all team events")
     print("  show all | --all                       Show all team events with summary fields")
@@ -84,6 +86,30 @@ def _parse_iso_week_token(value: str) -> tuple[Optional[int], Optional[int]]:
         return int(year_str), int(week_str)
     except (AttributeError, TypeError, ValueError):
         return None, None
+
+
+def _next_free_iso_week() -> tuple[int, int]:
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT iso_year, iso_week
+            FROM teamevent
+            ORDER BY iso_year DESC, iso_week DESC, id DESC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+
+    if not row:
+        next_week = date.today() + timedelta(days=7)
+        iso_year, iso_week, _ = next_week.isocalendar()
+        return iso_year, iso_week
+
+    latest_year, latest_week = int(row[0]), int(row[1])
+    next_monday = date.fromisocalendar(latest_year, latest_week, 1) + timedelta(days=7)
+    iso_year, iso_week, _ = next_monday.isocalendar()
+    return iso_year, iso_week
 
 
 def _resolve_vehicle_id(cur: sqlite3.Cursor, token: str) -> Optional[int]:
@@ -174,9 +200,13 @@ def add_teamevent(args: list[str]) -> None:
         flags = parse_flag_map(args)
         name = flags.get("name")
         week_token = flags.get("week")
-        if not name or not week_token:
+        if not name:
             print(USAGE_ADD)
             return
+
+        args = [name]
+        if week_token:
+            args.append(week_token)
 
         tail: list[str] = []
         if "vehicles" in flags:
@@ -185,22 +215,31 @@ def add_teamevent(args: list[str]) -> None:
             tail.append(flags["tracks"])
         if "score" in flags:
             tail.append(flags["score"])
-        args = [name, week_token, *tail]
+        args.extend(tail)
 
-    if len(args) < 2:
+    if not args:
         print(USAGE_ADD)
         return
 
     name = args[0]
-    iso_year, iso_week = _parse_iso_week_token(args[1])
-    if iso_year is None or iso_week is None:
-        print("❌ Invalid year/week format. Example: 2025/30 or 2025/W30")
-        return
-
     tracks = 4
     max_score = 15000
     vehicle_inputs: list[str] = []
-    tail = args[2:]
+    tail = args[1:]
+
+    iso_year = None
+    iso_week = None
+    if tail:
+        parsed_year, parsed_week = _parse_iso_week_token(tail[0])
+        if parsed_year is not None and parsed_week is not None:
+            iso_year, iso_week = parsed_year, parsed_week
+            tail = tail[1:]
+        elif any(ch.isdigit() for ch in tail[0]) and ("/" in tail[0] or "W" in tail[0] or "-" in tail[0]):
+            print("❌ Invalid year/week format. Example: 2025/30 or 2025/W30")
+            return
+
+    if iso_year is None or iso_week is None:
+        iso_year, iso_week = _next_free_iso_week()
 
     if tail and tail[-1].isdigit():
         max_score = int(tail.pop())

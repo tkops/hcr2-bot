@@ -10,7 +10,7 @@ from modules.common import connect_db, get_arg_value, parse_int, print_table_hea
 
 VALID_DIVISIONS = {"DIV1", "DIV2", "DIV3", "DIV4", "DIV5", "DIV6", "DIV7", "CC"}
 
-USAGE_ADD = "Usage: season add <number> [division] | --number <number> [--division <division>]"
+USAGE_ADD = "Usage: season add <division> | <number> [division] | --number <number> [--division <division>]"
 USAGE_DELETE = "Usage: season delete <number> | --number <number>"
 
 
@@ -35,6 +35,7 @@ def print_help() -> None:
     print("  list all | --all                       Show all seasons")
     print("  list <number> | --number <number>      Show one season")
     print("  list <division> | --division <division>  Show seasons in one division")
+    print("  add <division>                         Add the next season with one division")
     print("  add <number> [div] | --number <number> [--division <division>]")
     print("                                         Add or update one season")
     print("  delete <number> | --number <number>    Delete one season")
@@ -70,18 +71,40 @@ def _parse_season_number(value: Optional[str], usage: str) -> Optional[int]:
     return number
 
 
+def _get_next_season_number() -> int:
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM season")
+        row = cur.fetchone()
+    return int(row[0]) if row and row[0] is not None else 1
+
+
 def add_or_update_season(args: list[str]) -> None:
     if not args:
         print(USAGE_ADD)
         return
 
-    number = _parse_season_number(get_arg_value(args, "--number") or args[0], USAGE_ADD)
-    if number is None:
-        return
-
     division_token = get_arg_value(args, "--division")
     if division_token is None and len(args) > 1 and not args[1].startswith("--"):
         division_token = args[1]
+
+    number_token = get_arg_value(args, "--number")
+    number: Optional[int]
+    if number_token is not None:
+        number = _parse_season_number(number_token, USAGE_ADD)
+        if number is None:
+            return
+    else:
+        first_token = args[0]
+        first_division = _normalize_division(first_token)
+        if first_division is not None and len(args) == 1 and division_token is None:
+            number = _get_next_season_number()
+            division_token = first_division
+        else:
+            number = _parse_season_number(first_token, USAGE_ADD)
+            if number is None:
+                return
+
     division = _normalize_division(division_token) if division_token is not None else None
     if division_token is not None and division is None:
         return
