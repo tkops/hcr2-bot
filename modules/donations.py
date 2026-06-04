@@ -3,7 +3,7 @@ from datetime import datetime
 
 DB_PATH = "../hcr2-db/hcr2.db"
 
-# Fester Startzeitpunkt für die Match-Zählung
+# Fixed start date for match counting.
 STATS_START_DATE = "2025-11-01"
 
 
@@ -129,7 +129,7 @@ def edit_donation(donation_id, new_total):
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
 
-        # alten Eintrag holen
+        # Load old entry.
         cur.execute(
             """
             SELECT player_id, date, total
@@ -145,7 +145,7 @@ def edit_donation(donation_id, new_total):
 
         player_id, date, old_total = row
 
-        # updaten
+        # Update.
         cur.execute(
             "UPDATE donation SET total = ? WHERE id = ?",
             (total_int, donation_id),
@@ -236,7 +236,7 @@ def show_all_stats():
             return
 
         print("\n📊 Donations (K):")
-        # Player-ID in der ersten Spalte
+        # Player ID in the first column.
         print(f"{'ID':4} {'Name':12} {'Tot':>6} {'Inc':>6} {'Avg':>6}")
         print("-" * 40)
 
@@ -281,7 +281,7 @@ def _compute_donation_index_results():
     cur = conn.cursor()
 
     try:
-        # Stichtag: letzte notierte Spende
+        # Cutoff date: latest recorded donation.
         cur.execute("SELECT MAX(date) FROM donation")
         row = cur.fetchone()
         if not row or row[0] is None:
@@ -289,7 +289,7 @@ def _compute_donation_index_results():
 
         cutoff_date = row[0]
 
-        # Aktive Spieler NUR Team PLTE
+        # Active players, PLTE team only.
         cur.execute(
             "SELECT id, name FROM players "
             "WHERE active = 1 AND team = 'PLTE' "
@@ -302,7 +302,7 @@ def _compute_donation_index_results():
         results = []
 
         for pid, name in players:
-            # Matches zählen
+            # Count matches.
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT m.id)
@@ -317,7 +317,7 @@ def _compute_donation_index_results():
             mrow = cur.fetchone()
             matches = mrow[0] if mrow and mrow[0] is not None else 0
 
-            # Aktueller Spendenstand
+            # Current donation total.
             cur.execute(
                 """
                 SELECT total FROM donation
@@ -364,7 +364,7 @@ def show_donation_index():
         print("ℹ️ No active players in team PLTE.")
         return
 
-    # Sortierung: Index absteigend → niedrige Werte unten
+    # Sort by descending index, with lower values at the bottom.
     results.sort(key=lambda x: x[4], reverse=True)
 
     print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
@@ -392,14 +392,14 @@ def show_donation_index_under():
         print("ℹ️ No donations found in database.")
         return
 
-    # Filter: nur Index < 100
+    # Filter: index < 100 only.
     results = [r for r in results if r[4] < 100.0]
 
     if not results:
         print("ℹ️ No players with donation index below 100 in team PLTE.")
         return
 
-    # Sortierung: Index aufsteigend (schlechtester zuerst)
+    # Sort by ascending index, worst first.
     results.sort(key=lambda x: x[4])
 
     print(f"\n📊 Donation index < 100 from {STATS_START_DATE} to {cutoff_date}:")
@@ -455,7 +455,7 @@ def list_donations_for_date(date_str: str):
     """
     Show all donation entries for a given date.
     """
-    # Validierung des Datumsformats (aber Original-String für Query verwenden)
+    # Validate date format, but use the original string for the query.
     try:
         _ = _parse_date(date_str)
     except Exception:
@@ -595,4 +595,3 @@ def format_k(value):
         return f"{val/1000:.1f}K"
     except Exception:
         return str(value)
-

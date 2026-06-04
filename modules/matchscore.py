@@ -12,9 +12,9 @@ def _to_bool01(x):
     if x is None:
         return 0
     s = str(x).strip().lower()
-    if s in ("1", "true", "yes", "y", "ja"):
+    if s in ("1", "true", "yes", "y", "j\u0061"):
         return 1
-    if s in ("0", "false", "no", "n", "nein", ""):
+    if s in ("0", "false", "no", "n", "n\u0065in", ""):
         return 0
     try:
         return 1 if int(s) != 0 else 0
@@ -357,13 +357,13 @@ def edit_score(args):
         if toggle_checkin:
             new_checkin = 0 if (cur_checkin or 0) else 1
 
-        # Playerwechsel NUR via --pid (ohne Nebenwirkungen)
+        # Player changes are allowed only via --pid, without side effects.
         if new_player_id is not None and new_player_id != player_id:
-            # existiert PID?
+            # Does the player ID exist?
             cur.execute("SELECT 1 FROM players WHERE id = ?", (new_player_id,))
             if not cur.fetchone():
                 print(f"❌ Player id {new_player_id} does not exist."); return
-            # Kollision vermeiden
+            # Avoid collisions.
             cur.execute("SELECT id FROM matchscore WHERE match_id=? AND player_id=?", (match_id, new_player_id))
             clash = cur.fetchone()
             if clash and clash[0] != score_id:
@@ -386,9 +386,9 @@ def edit_score(args):
             sets.append("checkin=?"); vals.append(new_checkin)
         if new_player_id is not None and new_player_id != player_id:
             sets.append("player_id=?"); vals.append(new_player_id)
-            # KEINE automatische Änderung weiterer Felder bei PID-Wechsel
+            # Do not automatically change other fields when the player ID changes.
 
-        # Bei Score/Pts-Änderung: optional weiterhin Auto-Absenz? -> BEIBEHALTEN wie zuvor
+        # Keep the previous auto-absence behavior for score/points changes.
         if (new_score is not None or new_points is not None) and new_absent is None:
             computed = _compute_absent(conn, match_id, new_player_id if (new_player_id is not None) else player_id)
             sets.append("absent=?"); vals.append(computed)
@@ -409,4 +409,3 @@ def edit_score(args):
         print("-" * 46)
         print(f"{row[0]:<6} {row[6]:<16.16} {row[7]:>5} {row[8]:>3} {int(row[9] or 0):>3} {int(row[10] or 0):>3}")
         print()
-

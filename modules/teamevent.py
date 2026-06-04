@@ -26,9 +26,9 @@ def print_help():
     print("Usage: python hcr2.py teamevent <command> [args]")
     print("\nAvailable commands:")
     print('  add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
-    print("  list                        Show latest 10 teamevents (no vehicles)")
-    print("  show all                   Show all teamevents (no vehicles)")
-    print("  show <id>                  Show single teamevent with vehicles")
+    print("  list                        Show latest 10 team events (no vehicles)")
+    print("  show all                   Show all team events (no vehicles)")
+    print("  show <id>                  Show single team event with vehicles")
     print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
     print("  delete <id>")
 
@@ -36,8 +36,8 @@ def print_help():
 def add_teamevent(args):
     if len(args) < 2:
         print('Usage:    .t add <name> <year>/W<week> [vehicle_ids] [track-count] [max-score-per-track]')
-        print('Exmample: .t add The Best Teamevent ever 2025/30 be,ro,sm,sc,hc 5 15000')
-        print('Exmample: .t add The Worst Teamevent ever 2025/31')
+        print('Example:  .t add The Best Team Event ever 2025/30 be,ro,sm,sc,hc 5 15000')
+        print('Example:  .t add The Worst Team Event ever 2025/31')
         return
 
     name = args[0]
@@ -96,11 +96,11 @@ def add_teamevent(args):
                     print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
 
             conn.commit()
-            print("✅ Teamevent added:")
+            print("✅ Team event added:")
             show_teamevent([str(teamevent_id)])
 
         except sqlite3.IntegrityError:
-            print(f"❌ Teamevent for week {iso_week}/{iso_year} already exists.")
+            print(f"❌ Team event for week {iso_week}/{iso_year} already exists.")
 
 
 def list_teamevents():
@@ -153,11 +153,11 @@ def show_teamevent(args):
             """, (eid,))
             row = cur.fetchone()
             if not row:
-                print(f"❌ Teamevent {eid} not found.")
+                print(f"❌ Team event {eid} not found.")
                 return
 
             te_id, name, year, week, tracks, score = row
-            print(f"\nTeamevent {te_id}:")
+            print(f"\nTeam event {te_id}:")
             print(f"  Name         : {name}")
             print(f"  Year/Wk      : {year}/W{week}")
             print(f"  Tracks       : {tracks}")
@@ -187,7 +187,7 @@ def edit_teamevent(args):
     eid = int(args[0])
     name = None
     tracks = max_score = None
-    vehicles_arg = None  # roher String nach --vehicles
+    vehicles_arg = None  # raw string after --vehicles
 
     i = 1
     while i < len(args):
@@ -222,30 +222,30 @@ def edit_teamevent(args):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
 
-        # Basis-Felder updaten
+        # Update base fields.
         if fields:
             values.append(eid)
             query = f"UPDATE teamevent SET {', '.join(fields)} WHERE id = ?"
             cur.execute(query, values)
-            print(f"✅ Teamevent {eid} updated.")
+            print(f"✅ Team event {eid} updated.")
 
-        # Vehicles verarbeiten (optional)
+        # Process vehicles, if provided.
         if vehicles_arg is not None:
-            # Spezialfall: '-' bedeutet Liste leeren
+            # Special case: '-' means clear the list.
             if vehicles_arg == "-":
                 cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
-                print(f"✅ Cleared vehicles for Teamevent {eid}.")
+                print(f"✅ Cleared vehicles for team event {eid}.")
             else:
-                # Tokens splitten und normalisieren
+                # Split and normalize tokens.
                 tokens = [t.strip() for t in vehicles_arg.split(",") if t.strip()]
                 resolved_ids = []
                 warnings = []
 
                 def resolve_token(tok: str):
-                    # 1) Direkte ID?
+                    # 1) Direct ID?
                     if tok.isdigit():
                         return int(tok)
-                    # 2) Lookup per code/kurzname oder name (case-insensitive)
+                    # 2) Lookup by code/shortname or name (case-insensitive).
                     cur.execute("""
                         SELECT id
                         FROM vehicle
@@ -264,11 +264,11 @@ def edit_teamevent(args):
                     else:
                         resolved_ids.append(vid)
 
-                # Duplikate entfernen, Reihenfolge beibehalten
+                # Remove duplicates while preserving order.
                 seen = set()
                 resolved_ids = [v for v in resolved_ids if not (v in seen or seen.add(v))]
 
-                # Liste neu schreiben
+                # Rewrite the list.
                 cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
                 for vid in resolved_ids:
                     try:
@@ -277,13 +277,13 @@ def edit_teamevent(args):
                             (eid, vid)
                         )
                     except sqlite3.IntegrityError:
-                        # Fremdschlüssel verletzt o.ä.
+                        # Foreign-key violation or similar.
                         warnings.append(str(vid))
 
                 if resolved_ids:
-                    print(f"✅ Updated vehicles for Teamevent {eid}: {','.join(map(str, resolved_ids))}")
+                    print(f"✅ Updated vehicles for team event {eid}: {','.join(map(str, resolved_ids))}")
                 else:
-                    print(f"✅ Updated vehicles for Teamevent {eid}: (none)")
+                    print(f"✅ Updated vehicles for team event {eid}: (none)")
 
                 if warnings:
                     print("⚠️  Unresolved/invalid vehicle tokens: " + ", ".join(warnings))
@@ -295,5 +295,4 @@ def delete_teamevent(eid):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
         conn.execute("DELETE FROM teamevent WHERE id = ?", (eid,))
-    print(f"🗑️  Teamevent {eid} deleted.")
-
+    print(f"🗑️  Team event {eid} deleted.")

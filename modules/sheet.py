@@ -14,7 +14,7 @@ DB_PATH = "../hcr2-db/hcr2.db"
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
-# --- Spalten, die NICHT exportiert/importiert werden ---
+# --- Columns that are not exported/imported ---
 EXCLUDED_PLAYER_COLS = {
     "created_at",
     "team",
@@ -29,15 +29,15 @@ EXCLUDED_PLAYER_COLS = {
     "last_modified",
 }
 
-# --- Regex zum Parsen der neuen Player-ID aus der player add-Ausgabe ---
+# --- Regex for parsing the new player ID from player add output ---
 ID_RE = re.compile(r"\bID\s*:\s*(\d+)", re.IGNORECASE)
 
-# --- Player-Export/Import-Ziele ---
+# --- Player export/import targets ---
 PLAYERS_XLSX_NAME = "Ladys.xlsx"
 PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
 PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
 
-# --- Donations-Export/Import-Ziele ---
+# --- Donations export/import targets ---
 DONATIONS_XLSX_NAME = "Donations.xlsx"
 DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
 DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
@@ -99,17 +99,17 @@ def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> 
 
 def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
     """
-    Upload nach Nextcloud.
-    - overwrite=False (Default): nur anlegen, nicht überschreiben.
-    - overwrite=True: vorhandene Datei wird überschrieben (PUT).
-    Rückgabe: (url, created_flag) – created_flag=True nur wenn neu angelegt.
+    Upload to Nextcloud.
+    - overwrite=False (default): create only, do not overwrite.
+    - overwrite=True: overwrite an existing file (PUT).
+    Returns: (url, created_flag); created_flag=True only when newly created.
     """
     import requests
     user, password = NEXTCLOUD_AUTH
     remote_path = str(remote_path).lstrip("/")
     url = NEXTCLOUD_URL.format(user=user, path=remote_path)
 
-    # Existenz prüfen (für created/updated-Flag)
+    # Check existence for the created/updated flag.
     try:
         head = requests.head(url, auth=(user, password))
         exists = (head.status_code == 200)
@@ -117,10 +117,10 @@ def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
         exists = False
 
     if exists and not overwrite:
-        # nichts tun, nicht überschreiben
+        # Do nothing; do not overwrite.
         return url, False
 
-    # Ordnerkette anlegen (idempotent)
+    # Create the folder chain idempotently.
     parts = remote_path.split("/")[:-1]
     current_path = ""
     for part in parts:
@@ -128,18 +128,18 @@ def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
         dir_url = NEXTCLOUD_URL.format(user=user, path=current_path.lstrip("/"))
         requests.request("MKCOL", dir_url, auth=(user, password))
 
-    # Upload (PUT überschreibt falls vorhanden)
+    # Upload; PUT overwrites if present.
     with open(local_path, "rb") as f:
         res = requests.put(url, auth=(user, password), data=f)
 
     if res.status_code in (200, 201, 204):
-        return url, (not exists)  # True wenn neu, False wenn überschrieben
+        return url, (not exists)  # True when new, False when overwritten.
     return None, False
 
 
 def delete_from_nextcloud(remote_path) -> bool:
     """
-    Löscht eine Datei in Nextcloud per WebDAV DELETE. Gibt True bei Erfolg zurück.
+    Delete a file in Nextcloud via WebDAV DELETE. Return True on success.
     """
     import requests
     user, password = NEXTCLOUD_AUTH
@@ -159,7 +159,7 @@ def download_from_nextcloud(season, filename, local_path):
     subprocess.run(curl_cmd, capture_output=True)
 
 
-# -------------------- Ranking-Logik --------------------
+# -------------------- Ranking Logic --------------------
 
 def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
     cur = conn.cursor()
@@ -234,11 +234,11 @@ def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) ->
     return with_scores_sorted + without_scores_sorted
 
 
-# -------------------- Excel-Generierung & Import (Match-Sheet) --------------------
+# -------------------- Excel Generation & Import (Match Sheet) --------------------
 
 def generate_excel(match, players, output_path):
     """
-    Match-Sheet. Unverändert außer Standard-Formatierungen.
+    Match sheet. Unchanged except for standard formatting.
     """
     match_id, match_date_str, season, opponent, event = match
 
@@ -258,13 +258,13 @@ def generate_excel(match, players, output_path):
     ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
 
     ws.insert_rows(2, amount=1)
-    ws["A2"] = "Ergebnis"
-    ws["B2"] = "Power-Ladys -->"
+    ws["A2"] = "Result"
+    ws["B2"] = "Power Ladies -->"
     ws["C2"] = ""
     ws["D2"] = ""
     ws["E2"] = f"<-- {opponent}"
 
-    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Hinweise"])
+    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Notes"])
 
     for row in ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=7):
         for cell in row:
@@ -280,13 +280,13 @@ def generate_excel(match, players, output_path):
     ws.column_dimensions["H"].width = 130
 
     ws["H3"] = (
-        "H1: Nicht gefahren → Score=0 und Points=0 eintragen.\n"
-        "H2: Absent true, wenn ein Spieler entschuldigt ist (Urlaub etc.)\n"
-        "H3: Checkin true, wenn Spieler sich ins Match eingeloghgt hat aber nicht gefahren ist\n"
-        "H4: Falls ein Spieler das Team verlassen hat aber noch in der Liste steht, Zeile einfach löschen\n"
-        "H5: Sollte ein Spieler fehlen, kann er einfach mit richtiger ID hinzugefügt werden\n"
-        "H6: Sollte ein Spieler fehlen, der noch nicht angelegt wurde, dann statt der der ID ein 'a' für add in Spalte B. Spieler wird dann beim Import  angelegt\n"
-        "H7: Die Ergebnisse des Matchs in Zelle C2 (Ladys) und D2 (Gegener) eintragen"
+        "H1: Did not drive: enter Score=0 and Points=0.\n"
+        "H2: Set Absent to true when a player is excused (vacation etc.).\n"
+        "H3: Set Checkin to true when a player logged into the match but did not drive.\n"
+        "H4: If a player left the team but is still listed, delete the row.\n"
+        "H5: If a player is missing, add them with the correct ID.\n"
+        "H6: If a missing player has not been created yet, enter 'a' for add in column B instead of the ID. The player is created during import.\n"
+        "H7: Enter the match results in cell C2 (Ladies) and D2 (opponent)."
     )
     ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
 
@@ -302,7 +302,7 @@ def generate_excel(match, players, output_path):
     wb.save(filepath)
 
     remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
-    upload_to_nextcloud(filepath, remote_path)  # kein overwrite für Match-Sheets
+    upload_to_nextcloud(filepath, remote_path)  # No overwrite for match sheets.
 
     try:
         filepath.unlink()
@@ -313,7 +313,7 @@ def generate_excel(match, players, output_path):
     return f"[{filename}]({web_url})", True
 
 
-# --- Helfer für Match-Import ---
+# --- Helpers for match import ---
 
 def _parse_pid_marker(pid_cell):
     if pid_cell is None:
@@ -359,7 +359,7 @@ def _add_player_plte_and_get_id(name: str) -> Optional[int]:
     return None
 
 
-# --- Normalisierung für Vergleich beim Import ---
+# --- Normalization for import comparisons ---
 def _norm(v):
     if v is None:
         return None
@@ -431,16 +431,16 @@ def import_excel_to_matchscore(match_id):
             if x is None:
                 return 0
             s = str(x).strip().lower()
-            if s in ("1", "true", "yes", "y", "ja"):
+            if s in ("1", "true", "yes", "y", "j\u0061"):
                 return 1
-            if s in ("0", "false", "no", "n", "nein", ""):
+            if s in ("0", "false", "no", "n", "n\u0065in", ""):
                 return 0
             return 0
 
         ladyscore = read_int_or_none(ws["C2"].value)
         oppscore  = read_int_or_none(ws["D2"].value)
         if ladyscore is None or oppscore is None:
-            errors.append("Row 2: please fill team scores in C2 (Power-Ladys) and D2 (Opponent).")
+            errors.append("Row 2: please fill team scores in C2 (Power Ladies) and D2 (Opponent).")
 
         row_idx = 4
         for row in ws.iter_rows(min_row=4, values_only=True):
@@ -584,7 +584,7 @@ def import_excel_to_matchscore(match_id):
         print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
 
 
-# ===================== Players: Export/Import (aktive PLTE, Excludes, Formatierung) =====================
+# ===================== Players: Export/Import (active PLTE, excludes, formatting) =====================
 
 def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Path]:
     local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -596,7 +596,7 @@ def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Pat
 
 
 def _upload_players_xlsx(local_path: Path):
-    # Nur Ladys.xlsx darf überschrieben werden
+    # Only the players workbook may be overwritten.
     return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
 
 
@@ -617,9 +617,9 @@ def _to_bool01_if_needed(val):
     if val is None:
         return None
     s = str(val).strip().lower()
-    if s in ("1", "true", "yes", "y", "ja"):
+    if s in ("1", "true", "yes", "y", "j\u0061"):
         return 1
-    if s in ("0", "false", "no", "n", "nein", ""):
+    if s in ("0", "false", "no", "n", "n\u0065in", ""):
         return 0
     if isinstance(val, (int, float)):
         return 1 if int(val) != 0 else 0
@@ -627,10 +627,10 @@ def _to_bool01_if_needed(val):
 
 
 def _autofit_columns(ws, min_w=10, max_w=60):
-    # Header fett
+    # Bold header.
     for cell in ws[1]:
         cell.font = Font(bold=True)
-    # Auto-Breite anhand Inhalt
+    # Auto width based on content.
     for col_idx, col in enumerate(ws.iter_cols(min_row=1, max_row=ws.max_row,
                                                min_col=1, max_col=ws.max_column),
                                   start=1):
@@ -745,13 +745,13 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
 
             try:
                 if rid_int and rid_int in existing_ids:
-                    # Kandidaten-Spalten (ohne id)
+                    # Candidate columns without id.
                     set_cols = [c for c in row_map.keys() if c != "id"]
                     if not set_cols:
                         skipped += 1
                         continue
 
-                    # aktuelle DB-Werte laden
+                    # Load current DB values.
                     cur.execute(f"SELECT {', '.join(set_cols)} FROM players WHERE id = ?", (rid_int,))
                     db_row = cur.fetchone()
                     if not db_row:
@@ -759,13 +759,13 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
                         continue
                     db_map = {col: db_row[idx] for idx, col in enumerate(set_cols)}
 
-                    # Unterschiede ermitteln
+                    # Determine differences.
                     changed_cols = [c for c in set_cols if _norm(row_map[c]) != _norm(db_map.get(c))]
                     if not changed_cols:
                         skipped += 1
                         continue
 
-                    # last_modified nur bei Änderungen setzen
+                    # Set last_modified only when changes exist.
                     now = datetime.now().isoformat(timespec="seconds")
                     placeholders = ", ".join([f"{c}=?" for c in changed_cols] + ["last_modified=?"])
                     values = [row_map[c] for c in changed_cols] + [now, rid_int]
@@ -796,13 +796,13 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
 
         conn.commit()
 
-    # lokale Kopie löschen (Best Effort)
+    # Delete local copy on a best-effort basis.
     try:
         local.unlink()
     except Exception:
         pass
 
-    # NUR die Players-Excel in Nextcloud löschen (Match-Sheets bleiben unberührt)
+    # Delete only the players Excel file in Nextcloud; leave match sheets untouched.
     deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
@@ -821,13 +821,13 @@ def _download_donations_xlsx(local_path: Path = DONATIONS_LOCAL_TMP) -> Optional
 
 
 def _upload_donations_xlsx(local_path: Path):
-    # Donations.xlsx darf überschrieben werden
+    # Donations.xlsx may be overwritten.
     return upload_to_nextcloud(local_path, DONATIONS_REMOTE_PATH, overwrite=True)
 
 
 def _get_latest_donations(conn: sqlite3.Connection) -> dict:
     """
-    Liefert für jeden player_id ein (date, total) des letzten Donation-Eintrags.
+    Return (date, total) of the latest donation entry for each player_id.
     """
     cur = conn.cursor()
     cur.execute("""
@@ -875,11 +875,11 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
 
         today_str = date.today().isoformat()
 
-        # Kopf
-        ws["A1"] = "Datum:"
+        # Header.
+        ws["A1"] = "Date:"
         ws["A2"] = today_str
 
-        # Header (ab Zeile 3)
+        # Header starting at row 3.
         ws["A3"] = "id"
         ws["B3"] = "name"
         ws["C3"] = "donation (k)"
@@ -888,7 +888,7 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
         for cell in ("A3", "B3", "C3", "D3"):
             ws[cell].font = Font(bold=True)
 
-        # Datenzeilen
+        # Data rows.
         row_idx = 4
         for pid, name, prev in rows:
             ws.cell(row=row_idx, column=1, value=pid)
@@ -966,7 +966,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     wb = load_workbook(filename=local, data_only=True)
     ws = wb.active
 
-    # Datum aus A2
+    # Date from A2.
     raw_date = ws["A2"].value
     if isinstance(raw_date, datetime):
         date_str = raw_date.date().isoformat()
@@ -981,7 +981,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     added = 0
     errors = 0
 
-    # Zeilen ab 4: id, name, donation
+    # Rows from 4 onward: id, name, donation.
     for row in ws.iter_rows(min_row=4, values_only=True):
         if not row:
             continue
@@ -990,7 +990,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
 
         if pid_val is None:
             continue
-        # ID als int
+        # ID as int.
         pid_int = None
         if isinstance(pid_val, float) and pid_val.is_integer():
             pid_int = int(pid_val)
@@ -1022,13 +1022,13 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
         else:
             errors += 1
 
-    # lokale Kopie löschen
+    # Delete local copy.
     try:
         local.unlink()
     except Exception:
         pass
 
-    # Donations-Excel auf Nextcloud löschen (wie bei players)
+    # Delete the donations Excel file in Nextcloud, same as players.
     deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
@@ -1117,4 +1117,3 @@ if __name__ == "__main__":
         print_help()
     else:
         handle_command(sys.argv[2] if len(sys.argv) > 2 else "", sys.argv[3:])
-

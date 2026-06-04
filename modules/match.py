@@ -154,12 +154,12 @@ def add_match(args):
             if teamevent_id is None:
                 return
             if not _teamevent_exists(cur, teamevent_id):
-                print(f"❌ Teamevent-ID {teamevent_id} not found.")
+                print(f"❌ Team event ID {teamevent_id} not found.")
                 return
         else:
             teamevent_id = _get_latest_teamevent_id(cur)
             if teamevent_id is None:
-                print("❌ No teamevent found.")
+                print("❌ No team event found.")
                 return
 
         if "season" in flags:
@@ -183,7 +183,7 @@ def add_match(args):
         )
 
     print(f"✅ Match added: Event {teamevent_id}, Season {season_number}, vs {opponent} on {start} "
-          f"(Score Ladys: {score_ladys}, Score Opponent: {score_opponent})")
+          f"(Score Ladies: {score_ladys}, Score Opponent: {score_opponent})")
 
 
 # ------------------------------- Edit Match ---------------------------------
@@ -207,7 +207,7 @@ def edit_match(args):
             if teamevent_id is None:
                 return
             if not _teamevent_exists(cur, teamevent_id):
-                print(f"❌ Teamevent-ID {teamevent_id} not found.")
+                print(f"❌ Team event ID {teamevent_id} not found.")
                 return
             set_clauses.append("teamevent_id = ?")
             values.append(teamevent_id)
@@ -317,7 +317,7 @@ def show_match(mid):
     print(f"  Season:      {season}")
     print(f"  Event:       {event_name}")
     print(f"  Opponent:    {opponent}")
-    print(f"  Score Ladys: {score_ladys}")
+    print(f"  Score Ladies: {score_ladys}")
     print(f"  Score Opp.:  {score_opp}")
 
 

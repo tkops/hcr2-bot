@@ -5,12 +5,12 @@ import re
 import textwrap
 from datetime import datetime, timedelta
 
-# =====================[ Konfiguration ]=====================
+# =====================[ Configuration ]=====================
 DB_PATH = "../hcr2-db/hcr2.db"
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
 
 # =====================[ CLI Dispatcher ]====================
-# die Helfer mit Optional statt "X | None"
+# Helpers use Optional instead of "X | None".
 ALIAS_BASE_RE = re.compile(r"[^a-z0-9]+")
 
 def _alias_base_from_name(name: str) -> str:
@@ -84,7 +84,7 @@ def handle_command(cmd, args):
         else:
             print("Usage: player bday today | player bday list [--active true|false] [--num N]")
 
-    # --- Legacy alias (Kompatibilität) ---
+    # --- Legacy alias for compatibility ---
     elif cmd == "birthday":
         bday_today()
 
@@ -95,7 +95,7 @@ def handle_command(cmd, args):
         pname_flag = get_arg_value(args, "--name")
         dname_flag = get_arg_value(args, "--discord")
 
-        # Kurzform: player show <id>
+        # Short form: player show <id>
         if len(args) == 1 and not args[0].startswith("--"):
             try:
                 pid = int(args[0])
@@ -104,7 +104,7 @@ def handle_command(cmd, args):
                 print("❌ Invalid ID.")
             return
 
-        # Flags-Variante
+        # Flag variant.
         selectors = [x for x in (pid_flag, pname_flag, dname_flag) if x is not None]
         if len(selectors) == 0:
             print("Usage: player show <id> | (--id ID | --name NAME | --discord NAME)")
@@ -171,15 +171,15 @@ def handle_command(cmd, args):
             return
         grep_players(args[0])
 
-    # --- away/back: flexibel per id | name | alias | discord oder Flags ---
+    # --- away/back: flexible by id | name | alias | discord or flags ---
     elif cmd == "away":
-        # Flags unterstützen
+        # Support flags.
         dur_flag = get_arg_value(args, "--dur")
         pid_flag = get_arg_value(args, "--id")
         pname_flag = get_arg_value(args, "--name")
         dname_flag = get_arg_value(args, "--discord")
 
-        # Kurzform: player away <term> [1w|2w|3w|4w]
+        # Short form: player away <term> [1w|2w|3w|4w]
         term = None
         dur_pos = None
         if args and not args[0].startswith("--"):
@@ -202,7 +202,7 @@ def handle_command(cmd, args):
         pname_flag = get_arg_value(args, "--name")
         dname_flag = get_arg_value(args, "--discord")
 
-        # Kurzform: player back <term>
+        # Short form: player back <term>
         term = None
         if args and not args[0].startswith("--"):
             term = args[0]
@@ -236,19 +236,19 @@ def parse_bool(s, default=False):
     return default
 
 def _days_until_mmdd(mmdd: str):
-    """Gibt Tage bis zum nächsten Auftreten von MM-DD zurück (ab heute)."""
+    """Return days until the next occurrence of MM-DD, starting today."""
     from datetime import date
     try:
         m, d = map(int, mmdd.split("-"))
     except Exception:
         return None
     today = date.today()
-    # handle 29.02 in Nicht-Schaltjahren → auf 01.03 schieben
+    # Move 02-29 to 03-01 in non-leap years.
     def safe_date(y, m, d):
         try:
             return date(y, m, d)
         except ValueError:
-            # 29.02 → 01.03 (einfachste robuste Wahl)
+            # 02-29 -> 03-01 as the simplest robust choice.
             if m == 2 and d == 29:
                 return date(y, 3, 1)
             return None
@@ -302,7 +302,7 @@ def today_mm_dd():
 
 # =====================[ Unified Search ]===================
 def search_players_like(term: str):
-    """LIKE-Suche über name/alias/discord; sortiert by name (case-insensitive)."""
+    """LIKE search over name/alias/discord, sorted by name (case-insensitive)."""
     pat = f"%{term.lower()}%"
     with db() as conn:
         cur = conn.cursor()
@@ -318,7 +318,7 @@ def search_players_like(term: str):
         return cur.fetchall()
 
 def resolve_player_id_exact(term: str):
-    """Exakte Auflösung: numerische ID bzw. exakter Name/Alias/Discord (case-insensitive)."""
+    """Resolve exactly: numeric ID or exact name/alias/discord (case-insensitive)."""
     if term.isdigit():
         pid = int(term)
         with db() as conn:
@@ -339,10 +339,10 @@ def resolve_player_id_exact(term: str):
 
     if len(rows) == 1:
         return rows[0]["id"]
-    return None  # 0 oder >1
+    return None  # 0 or >1
 
 def resolve_player_id_fuzzy(term: str, *, print_when_ambiguous=True):
-    """Exakt → sonst LIKE. Eindeutig? → ID, sonst drucke Liste & None."""
+    """Try exact match first, then LIKE. Return ID if unique; otherwise print matches and return None."""
     pid = resolve_player_id_exact(term)
     if pid is not None:
         return pid
@@ -399,10 +399,10 @@ def list_absent():
             days = 0
         items.append((days, r["id"], r["name"] or "-", r["team"] or "-", r["away_until"][:19] if r["away_until"] else "-"))
 
-    # sortiert nach DAYS absteigend
+    # Sort by DAYS descending.
     items.sort(key=lambda x: x[0], reverse=True)
 
-    print("🛫 Absent Ladys")
+    print("🛫 Absent Ladies")
     print(f"{'ID':<4} {'NAME':<20} {'TEAM':<6} {'UNTIL':<19} {'DAYS':>4}")
     print("-" * 58)
     for days, pid, name, team, until_str in items:
@@ -411,7 +411,7 @@ def list_absent():
     print(f"Count: {len(items)}")
 
 
-# =====================[ Listen & Anzeigen ]================
+# =====================[ Lists & Display ]================
 
 def show_players(active_only=False, sort_by="gp", team_filter=None):
     with db() as conn:
@@ -432,7 +432,7 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
         if cond:
             q += " WHERE " + " AND ".join(cond)
 
-        # Spezialfall: list-active --team <X> → nach GP sortieren und GP anzeigen (ohne Absent-Spalte)
+        # Special case: list-active --team <X> sorts by GP and displays GP without the absent column.
         if team_filter and active_only:
             q += " ORDER BY garage_power DESC"
             cur.execute(q, params)
@@ -443,9 +443,9 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
                 print(f"{i:<3} {r['id']:<4} {r['name']:<14} {int(r['garage_power']):>6}")
             return
 
-        # Bisherige Team-Ansicht (nur --team, ohne list-active)
+        # Existing team view: --team without list-active.
         if team_filter:
-            # Sortierung für Teamliste (ohne active_only): nach GP oder Name, je nach sort_by
+            # Team-list sorting without active_only: by GP or name, depending on sort_by.
             if sort_by == "name":
                 q += " ORDER BY name COLLATE NOCASE"
             else:
@@ -462,7 +462,7 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
             print("-" * 80)
             return
 
-        # Standard-Gesamtansicht
+        # Standard full view.
         if sort_by == "name":
             q += " ORDER BY name COLLATE NOCASE"
         else:
@@ -500,7 +500,7 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
 
 
 def list_leaders():
-    """Listet alle Spieler mit is_leader = 1 (unabhängig von 'active')."""
+    """List all players with is_leader = 1, regardless of active state."""
     with db() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -524,7 +524,7 @@ def list_leaders():
 
 
 def bday_today():
-    """Druckt 'BIRTHDAY_IDS: 12,45,78' für HEUTE (eine Zeile)."""
+    """Print 'BIRTHDAY_IDS: 12,45,78' for today as one line."""
     today = today_mm_dd()
     with db() as conn:
         cur = conn.cursor()
@@ -538,12 +538,12 @@ def bday_today():
     if ids:
         print("BIRTHDAY_IDS: " + ",".join(ids))
 
-# Legacy-Alias für Alt-Code
+# Legacy alias for old code.
 def birthday_command():
     bday_today()
 
 def bday_list(*, active_only=False, num=None):
-    """Listet Geburtstage (ID, Name, Geburtstag, Emoji), sortiert nach nächstem Termin."""
+    """List birthdays (ID, name, birthday, emoji), sorted by next occurrence."""
     with db() as conn:
         cur = conn.cursor()
         q = """
@@ -589,7 +589,7 @@ def show_player(pid: int):
         """, (pid,))
         r = cur.fetchone()
 
-        # First/Last Match + Match Count über matchscore + match.start
+        # First/last match and match count via matchscore + match.start.
         match_count = 0
         first_match = last_match = None
         if r:
@@ -635,28 +635,28 @@ def show_player(pid: int):
     _print_wrapped("Language", r['language'])
     _print_wrapped("Emoji", r['emoji'])
 
-# =====================[ Mutationen ]=======================
+# =====================[ Mutations ]=======================
 
 def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, discord_name=None):
     """
-    - Alias wird sanitisiert (nur [a-z0-9]).
-    - Falls kein Alias angegeben oder (bei PLTE) leer → aus Name erzeugen + Ziffernsuffix 1..9 (eindeutig).
-    - Nach Insert wird die neue ID ausgegeben.
+    - Alias is sanitized to [a-z0-9].
+    - If no alias is provided, or it is empty for PLTE, generate it from the name with a unique 1..9 suffix.
+    - Print the new ID after insert.
     """
     team = (team or "").upper().strip()
     if not is_valid_team(team):
         print("❌ Invalid team name. Allowed: PLTE or PL1–PL9")
         return
 
-    # 1) Alias vorbereiten/sanitisieren
+    # 1) Prepare/sanitize alias.
     alias = _sanitize_alias_token(alias) if alias else None
     alias_generated = False
 
     with db() as conn:
         cur = conn.cursor()
 
-        # 2) Für PLTE ist Alias-Pflicht → wenn fehlt, automatisch generieren
-        #    Für andere Teams: Alias optional; wenn fehlt, wird NICHT erzwungen – außer du möchtest es global.
+        # 2) Alias is required for PLTE; generate it automatically if missing.
+        #    For other teams, alias remains optional and is not enforced globally.
         if team == "PLTE":
             if not alias:
                 base = _alias_base_from_name(name)
@@ -667,18 +667,18 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, di
                 alias = alias_candidate
                 alias_generated = True
             else:
-                # expliziter Alias → prüfen, ob exakt belegt in PLTE
+                # Explicit alias: check whether it is exactly taken in PLTE.
                 if _alias_exists(conn, alias, team_scope="PLTE"):
                     print(f"❌ Alias conflict in PLTE: '{alias}' already exists.")
                     return
         else:
-            # Nicht-PLTE: sanitizen; Doppelt erlaubt, aber falls du global Eindeutigkeit willst:
+            # Non-PLTE: sanitize; duplicates are allowed, but this would enforce global uniqueness:
             # if alias and _alias_exists(conn, alias, team_scope=None):
             #     print(f"❌ Alias conflict: '{alias}' already exists.")
             #     return
             pass
 
-        # 3) Insert
+        # 3) Insert.
         cur.execute("""
             INSERT INTO players (name, alias, garage_power, active, birthday, team, discord_name)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -855,7 +855,7 @@ def away_clear_fuzzy(term):
     away_clear_generic(player_id=str(pid), player_name=None, discord_name=None)
 
 def away_set_generic(player_id=None, player_name=None, discord_name=None, dur_token=None):
-    # Falls per Flags übergeben wurde → auflösen
+    # Resolve when provided via flags.
     if player_id or player_name or discord_name:
         pid = _resolve_player_id(player_id, player_name, discord_name)
         if pid is None:
@@ -980,4 +980,3 @@ def print_help():
     print("  activate <id>                 Set player active")
     print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
     print("  back <term> | (--id ID | --name NAME | --discord NAME)")
-
