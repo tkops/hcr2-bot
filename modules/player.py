@@ -4,10 +4,29 @@ import sys
 import re
 import textwrap
 from datetime import datetime, timedelta
+from modules.common import DB_PATH, connect_dict_db, get_arg_value, parse_bool
 
 # =====================[ Configuration ]=====================
-DB_PATH = "../hcr2-db/hcr2.db"
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
+USAGE_ACTIVATE = "Usage: player activate <id> | --id <id>"
+USAGE_DEACTIVATE = "Usage: player deactivate <id> | --id <id>"
+USAGE_DELETE = "Usage: player delete <id> | --id <id>"
+USAGE_ADD = (
+    "Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name] "
+    "| --team <team> --name <name> [--alias <alias>] [--gp <gp>] [--active true|false] "
+    "[--birthday <dd.mm.>] [--discord <name>]"
+)
+USAGE_EDIT = (
+    "Usage: player edit <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] "
+    "[--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false] "
+    "[--about TEXT] [--vehicles TEXT] [--playstyle TEXT] [--language TEXT] [--emoji EMOJI] "
+    "| --id <id> [same flags]"
+)
+USAGE_GREP = "Usage: player grep <term>"
+USAGE_SHOW = "Usage: player show <id> | (--id ID | --name NAME | --discord NAME)"
+USAGE_BDAY = "Usage: player bday today | player bday list [--active true|false] [--num N]"
+USAGE_AWAY = "Usage: player away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]"
+USAGE_BACK = "Usage: player back <term> | (--id ID | --name NAME | --discord NAME)"
 
 # =====================[ CLI Dispatcher ]====================
 # Helpers use Optional instead of "X | None".
@@ -37,102 +56,173 @@ def _next_free_alias(conn: sqlite3.Connection, base: str, team_scope: Optional[s
 
 
 def handle_command(cmd, args):
-    if cmd == "list":
-        sort = "gp"
-        team = get_arg_value(args, "--team")
-        if team:
-            team = team.upper()
-        if "--sort" in args:
-            sort = get_arg_value(args, "--sort") or sort
-        show_players(active_only=False, sort_by=sort, team_filter=team)
+    handlers = {
+        "list": _handle_list,
+        "activate": _handle_activate,
+        "list-absent": _handle_list_absent,
+        "list-active": _handle_list_active,
+        "list-leader": _handle_list_leader,
+        "bday": _handle_bday,
+        "birthday": _handle_birthday,
+        "show": _handle_show,
+        "add": _handle_add,
+        "edit": _handle_edit,
+        "deactivate": _handle_deactivate,
+        "delete": _handle_delete,
+        "grep": _handle_grep,
+        "away": _handle_away,
+        "back": _handle_back,
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
+        print(f"❌ Unknown player command: {cmd}")
+        print_help()
+        return
+    handler(args)
 
-    elif cmd == "activate":
-        if len(args) != 1:
-            print("Usage: player activate <id>")
-            return
-        activate_player(int(args[0]))
 
-    elif cmd == "list-absent":
-        list_absent()
+def _parse_required_int_arg(args, usage):
+    if not args:
+        print(usage)
+        return None
+    raw = get_arg_value(args, "--id") if "--id" in args else args[0]
+    try:
+        return int(raw)
+    except ValueError:
+        print(usage)
+        return None
 
-    elif cmd == "list-active":
-        sort = "gp"
-        team = get_arg_value(args, "--team")
-        if team:
-            team = team.upper()
-        if "--sort" in args:
-            sort = get_arg_value(args, "--sort") or sort
-        show_players(active_only=True, sort_by=sort, team_filter=team)
 
-    elif cmd == "list-leader":
-        list_leaders()
+def _extract_list_options(args):
+    sort = "gp"
+    team = get_arg_value(args, "--team")
+    if team:
+        team = team.upper()
+    if "--sort" in args:
+        sort = get_arg_value(args, "--sort") or sort
+    return sort, team
 
-    elif cmd == "bday":
-        sub = args[0].lower() if args else "today"
-        if sub == "today":
-            bday_today()
-        elif sub == "list":
-            active_val = get_arg_value(args, "--active")
-            num_val = get_arg_value(args, "--num")
-            active_only = parse_bool(active_val, default=False)
-            try:
-                num = int(num_val) if num_val is not None else None
-            except ValueError:
-                print("❌ --num expects an integer")
-                return
-            bday_list(active_only=active_only, num=num)
-        else:
-            print("Usage: player bday today | player bday list [--active true|false] [--num N]")
 
-    # --- Legacy alias for compatibility ---
-    elif cmd == "birthday":
+def _handle_list(args):
+    sort, team = _extract_list_options(args)
+    show_players(active_only=False, sort_by=sort, team_filter=team)
+
+
+def _handle_activate(args):
+    pid = _parse_required_int_arg(args, USAGE_ACTIVATE)
+    if pid is None:
+        return
+    activate_player(pid)
+
+
+def _handle_list_absent(args):
+    if args:
+        print("Usage: player list-absent")
+        return
+    list_absent()
+
+
+def _handle_list_active(args):
+    sort, team = _extract_list_options(args)
+    show_players(active_only=True, sort_by=sort, team_filter=team)
+
+
+def _handle_list_leader(args):
+    if args:
+        print("Usage: player list-leader")
+        return
+    list_leaders()
+
+
+def _handle_bday(args):
+    sub = args[0].lower() if args else "today"
+    if sub == "today":
         bday_today()
-
-
-    elif cmd == "show":
-        # Flags: --id / --name / --discord
-        pid_flag = get_arg_value(args, "--id")
-        pname_flag = get_arg_value(args, "--name")
-        dname_flag = get_arg_value(args, "--discord")
-
-        # Short form: player show <id>
-        if len(args) == 1 and not args[0].startswith("--"):
-            try:
-                pid = int(args[0])
-                show_player(pid)
-            except ValueError:
-                print("❌ Invalid ID.")
+        return
+    if sub == "list":
+        active_val = get_arg_value(args, "--active")
+        num_val = get_arg_value(args, "--num")
+        active_only = parse_bool(active_val, default=False)
+        try:
+            num = int(num_val) if num_val is not None else None
+        except ValueError:
+            print("❌ --num expects an integer")
             return
+        bday_list(active_only=active_only, num=num)
+        return
+    print(USAGE_BDAY)
 
-        # Flag variant.
-        selectors = [x for x in (pid_flag, pname_flag, dname_flag) if x is not None]
-        if len(selectors) == 0:
-            print("Usage: player show <id> | (--id ID | --name NAME | --discord NAME)")
-            return
-        if len(selectors) > 1:
-            print("❌ Provide exactly one of --id, --name or --discord.")
-            return
 
-        pid = _resolve_player_id(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
-        if pid is None:
-            print("❌ No matching player found.")
-            return
+def _handle_birthday(args):
+    if args:
+        print("Usage: player birthday")
+        return
+    bday_today()
 
-        show_player(pid)
 
-    elif cmd == "add":
+def _handle_show(args):
+    pid_flag = get_arg_value(args, "--id")
+    pname_flag = get_arg_value(args, "--name")
+    dname_flag = get_arg_value(args, "--discord")
+
+    if len(args) == 1 and not args[0].startswith("--"):
+        try:
+            pid = int(args[0])
+            show_player(pid)
+        except ValueError:
+            print("❌ Invalid ID.")
+        return
+
+    selectors = [x for x in (pid_flag, pname_flag, dname_flag) if x is not None]
+    if len(selectors) == 0:
+        print(USAGE_SHOW)
+        return
+    if len(selectors) > 1:
+        print("❌ Provide exactly one of --id, --name or --discord.")
+        return
+
+    pid = _resolve_player_id(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
+    if pid is None:
+        print("❌ No matching player found.")
+        return
+
+    show_player(pid)
+
+
+def _handle_add(args):
         if len(args) < 1:
-            print("Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
+            print(USAGE_ADD)
             print("       alias is required for PLTE and must be unique")
             return
 
-        team_raw = args[0].upper()
-        name = args[1] if len(args) > 1 else None
-        alias = args[2] if len(args) > 2 else None
-        gp = int(args[3]) if len(args) > 3 else 0
-        active = args[4].lower() != "false" if len(args) > 4 else True
-        birthday_raw = args[5] if len(args) > 5 else None
-        discord_name = args[6] if len(args) > 6 else None
+        if args[0].startswith("--"):
+            team_token = get_arg_value(args, "--team")
+            name = get_arg_value(args, "--name")
+            alias = get_arg_value(args, "--alias")
+            gp_token = get_arg_value(args, "--gp")
+            active_token = get_arg_value(args, "--active")
+            birthday_raw = get_arg_value(args, "--birthday")
+            discord_name = get_arg_value(args, "--discord")
+
+            if not team_token or not name:
+                print(USAGE_ADD)
+                return
+
+            team_raw = team_token.upper()
+            try:
+                gp = int(gp_token) if gp_token is not None else 0
+            except ValueError:
+                print("❌ --gp expects an integer.")
+                return
+            active = parse_bool(active_token, default=True)
+        else:
+            team_raw = args[0].upper()
+            name = args[1] if len(args) > 1 else None
+            alias = args[2] if len(args) > 2 else None
+            gp = int(args[3]) if len(args) > 3 else 0
+            active = args[4].lower() != "false" if len(args) > 4 else True
+            birthday_raw = args[5] if len(args) > 5 else None
+            discord_name = args[6] if len(args) > 6 else None
 
         if not name:
             print("❌ Name is required.")
@@ -150,90 +240,75 @@ def handle_command(cmd, args):
         add_player(name=name, alias=alias, gp=gp, active=active,
                    birthday=birthday, team=team_raw, discord_name=discord_name)
 
-    elif cmd == "edit":
-        edit_player(args)
 
-    elif cmd == "deactivate":
-        if len(args) != 1:
-            print("Usage: player deactivate <id>")
-            return
-        deactivate_player(int(args[0]))
+def _handle_edit(args):
+    edit_player(args)
 
-    elif cmd == "delete":
-        if len(args) != 1:
-            print("Usage: player delete <id>")
-            return
-        delete_player(int(args[0]))
 
-    elif cmd == "grep":
-        if len(args) != 1:
-            print("Usage: player grep <term>")
-            return
-        grep_players(args[0])
+def _handle_deactivate(args):
+    pid = _parse_required_int_arg(args, USAGE_DEACTIVATE)
+    if pid is None:
+        return
+    deactivate_player(pid)
 
-    # --- away/back: flexible by id | name | alias | discord or flags ---
-    elif cmd == "away":
-        # Support flags.
-        dur_flag = get_arg_value(args, "--dur")
-        pid_flag = get_arg_value(args, "--id")
-        pname_flag = get_arg_value(args, "--name")
-        dname_flag = get_arg_value(args, "--discord")
 
-        # Short form: player away <term> [1w|2w|3w|4w]
-        term = None
-        dur_pos = None
-        if args and not args[0].startswith("--"):
-            term = args[0]
-            if len(args) > 1 and not args[1].startswith("--"):
-                dur_pos = args[1]
+def _handle_delete(args):
+    pid = _parse_required_int_arg(args, USAGE_DELETE)
+    if pid is None:
+        return
+    delete_player(pid)
 
-        dur = dur_flag or dur_pos
-        if pid_flag or pname_flag or dname_flag:
-            away_set_generic(player_id=pid_flag, player_name=pname_flag,
-                             discord_name=dname_flag, dur_token=dur)
-        elif term:
-            away_set_fuzzy(term, dur)
-        else:
-            print("Usage: player away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
 
-    elif cmd == "back":
-        # Flags
-        pid_flag = get_arg_value(args, "--id")
-        pname_flag = get_arg_value(args, "--name")
-        dname_flag = get_arg_value(args, "--discord")
+def _handle_grep(args):
+    if len(args) != 1:
+        print(USAGE_GREP)
+        return
+    grep_players(args[0])
 
-        # Short form: player back <term>
-        term = None
-        if args and not args[0].startswith("--"):
-            term = args[0]
 
-        if pid_flag or pname_flag or dname_flag:
-            away_clear_generic(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
-        elif term:
-            away_clear_fuzzy(term)
-        else:
-            print("Usage: player back <term> | (--id ID | --name NAME | --discord NAME)")
+def _handle_away(args):
+    dur_flag = get_arg_value(args, "--dur")
+    pid_flag = get_arg_value(args, "--id")
+    pname_flag = get_arg_value(args, "--name")
+    dname_flag = get_arg_value(args, "--discord")
 
+    term = None
+    dur_pos = None
+    if args and not args[0].startswith("--"):
+        term = args[0]
+        if len(args) > 1 and not args[1].startswith("--"):
+            dur_pos = args[1]
+
+    dur = dur_flag or dur_pos
+    if pid_flag or pname_flag or dname_flag:
+        away_set_generic(player_id=pid_flag, player_name=pname_flag,
+                         discord_name=dname_flag, dur_token=dur)
+    elif term:
+        away_set_fuzzy(term, dur)
     else:
-        print(f"❌ Unknown player command: {cmd}")
-        print_help()
+        print(USAGE_AWAY)
+
+
+def _handle_back(args):
+    pid_flag = get_arg_value(args, "--id")
+    pname_flag = get_arg_value(args, "--name")
+    dname_flag = get_arg_value(args, "--discord")
+
+    term = None
+    if args and not args[0].startswith("--"):
+        term = args[0]
+
+    if pid_flag or pname_flag or dname_flag:
+        away_clear_generic(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
+    elif term:
+        away_clear_fuzzy(term)
+    else:
+        print(USAGE_BACK)
 
 # =====================[ Helpers: Common ]==================
 def db():
     """Open connection with dict-like rows."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = lambda cur, row: {d[0]: row[i] for i, d in enumerate(cur.description)}
-    return conn
-
-def parse_bool(s, default=False):
-    if s is None:
-        return default
-    v = s.strip().lower()
-    if v in ("1", "true", "yes", "y", "on"):
-        return True
-    if v in ("0", "false", "no", "n", "off"):
-        return False
-    return default
+    return connect_dict_db()
 
 def _days_until_mmdd(mmdd: str):
     """Return days until the next occurrence of MM-DD, starting today."""
@@ -261,13 +336,6 @@ def _days_until_mmdd(mmdd: str):
             return None
     return (target - today).days
 
-
-def get_arg_value(args, key):
-    if key in args:
-        idx = args.index(key)
-        if idx + 1 < len(args):
-            return args[idx + 1]
-    return None
 
 def parse_birthday(raw):
     if not raw:
@@ -692,18 +760,31 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, di
 
 def edit_player(args):
     if len(args) < 1:
-        print("Usage: player edit <id>"
-              " [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false]"
-              " [--birthday DD.MM.] [--team TEAM] [--discord DISCORD] [--leader true|false]"
-              " [--about TEXT] [--vehicles TEXT] [--playstyle TEXT] [--language TEXT] [--emoji EMOJI]")
+        print(USAGE_EDIT)
         return
 
-    pid = int(args[0])
+    if args[0] == "--id":
+        if len(args) < 2:
+            print(USAGE_EDIT)
+            return
+        try:
+            pid = int(args[1])
+        except ValueError:
+            print(USAGE_EDIT)
+            return
+        i = 2
+    else:
+        try:
+            pid = int(args[0])
+        except ValueError:
+            print(USAGE_EDIT)
+            return
+        i = 1
+
     name = alias = birthday = team = discord = None
     gp = active = leader = None
     about = vehicles = playstyle = language = emoji = None
 
-    i = 1
     while i < len(args):
         if args[i] == "--name":
             i += 1; name = args[i]
@@ -960,23 +1041,28 @@ def _resolve_player_id(player_id=None, player_name=None, discord_name=None):
 
 def print_help():
     print("Usage: python hcr2.py player <command> [args]")
-    print("\nAvailable commands:")
+    print("\nCommands:")
     print("  list [--sort gp|name] [--team TEAM]         Show all players")
-    print("  list-active [--sort gp|name] [--team TEAM]  Show only active players")
-    print("  list-leader                                 Show only leaders (id, name, discord)")
-    print("  list-absent                                 List Absent Players)")
-    print("  bday today                                 Print 'BIRTHDAY_IDS: ...' for today's birthdays")
-    print("  bday list [--active true|false] [--num N]  List birthdays (ID, Name, Birthday, Emoji), sorted by next upcoming")
+    print("  list-active [--sort gp|name] [--team TEAM]  Show active players")
+    print("  list-leader                                 Show leaders only")
+    print("  list-absent                                 Show currently absent players")
+    print("  bday today                                  Print birthday IDs for today")
+    print("  bday list [--active true|false] [--num N]   List birthdays by next upcoming date")
     print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
-    print("  edit <id>                                   Edit fields, e.g.:")
+    print("      or --team TEAM --name NAME [--alias ALIAS] [--gp GP] [--active true|false]")
+    print("         [--birthday DD.MM.] [--discord NAME]")
+    print("  edit <id> | --id <id>                       Edit one player")
     print("      --name NAME --alias ALIAS --gp 90000 --active true|false")
     print("      --birthday 15.07. --team PL3 --discord foo#1234")
     print("      --leader true|false --about '...' --vehicles '...'")
     print("      --playstyle '...' --language en --emoji '🚗'")
-    print("  deactivate <id>               Set player inactive")
-    print("  delete <id>                   Remove player")
+    print("  activate <id> | --id <id>                  Set one player active")
+    print("  deactivate <id> | --id <id>                Set one player inactive")
+    print("  delete <id> | --id <id>                    Delete one player")
     print("  show <id> | (--id ID | --name NAME | --discord NAME)")
-    print("  grep <term>                   Search players by name/alias/discord (case-insensitive)")
-    print("  activate <id>                 Set player active")
+    print("                                             Show one player")
+    print("  grep <term>                                Search by name, alias or Discord")
     print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
+    print("                                             Mark one player as away")
     print("  back <term> | (--id ID | --name NAME | --discord NAME)")
+    print("                                             Clear away status for one player")

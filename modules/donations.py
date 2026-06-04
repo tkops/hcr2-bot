@@ -1,156 +1,210 @@
 import sqlite3
-from datetime import datetime
+from typing import Callable
 
-DB_PATH = "../hcr2-db/hcr2.db"
+from datetime import datetime
+from modules.common import connect_db, get_arg_value, parse_int, print_table_header
 
 # Fixed start date for match counting.
 STATS_START_DATE = "2025-11-01"
 
 
+USAGE_ADD = "Usage: donations add <player_id> <date> <total> | --player <player_id> --date <date> --total <total>"
+USAGE_DELETE = "Usage: donations delete <donation_id> | --id <donation_id>"
+USAGE_EDIT = "Usage: donations edit <donation_id> <total> | --id <donation_id> <total>"
+USAGE_SHOW = "Usage: donations show [<player_id>] | [--player <player_id>]"
+USAGE_LIST = "Usage: donations list [<date>] | [--date <date>]"
+
+
 def print_help():
     print("Usage: python hcr2.py donations <command> [args]")
     print("\nCommands:")
-    print("  add <player_id> <date> <total>    Add a donation snapshot (cumulative total)")
-    print("  delete <donation_id>              Delete a donation by ID")
-    print("  edit <donation_id> <total>        Edit total amount of a donation entry")
-    print("  show [<player_id>]                Show last 10 entries + stats for one player")
-    print("                                    Without player_id: show donation stats for all active players")
-    print("  stats                             Show match count, donation total and index per active player")
-    print("  under                             Show only players with donation index below 100 (for Discord bot)")
-    print("  list [<date>]                     List donation dates or all entries for a specific date")
+    print("  add <player_id> <date> <total> | --player <player_id> --date <date> --total <total>")
+    print("                                         Add one donation snapshot (cumulative total)")
+    print("  delete <donation_id> | --id <donation_id>  Delete one donation entry")
+    print("  edit <donation_id> | --id <donation_id> <total>")
+    print("                                         Edit one donation total")
+    print("  show [<player_id>] | [--player <player_id>]")
+    print("                                         Show one player's donations")
+    print("                                         Without player_id: show stats for all active players")
+    print("  stats                                  Show donation index per active player")
+    print("  under                                  Show players with donation index below 100")
+    print("  list [<date>] | [--date <date>]        List donation dates or entries for one date")
 
 
 def handle_command(command, args):
-    if command == "add":
-        if len(args) != 3:
-            print("❌ Usage: donations add <player_id> <date> <total>")
-            return
-        add_donation(args[0], args[1], args[2])
-
-    elif command == "delete":
-        if len(args) != 1:
-            print("❌ Usage: donations delete <donation_id>")
-            return
-        delete_donation(args[0])
-
-    elif command == "edit":
-        if len(args) != 2:
-            print("❌ Usage: donations edit <donation_id> <total>")
-            return
-        edit_donation(args[0], args[1])
-
-    elif command == "show":
-        if len(args) == 0:
-            show_all_stats()
-        elif len(args) == 1:
-            show_player_donations(args[0])
-        else:
-            print("❌ Usage: donations show [<player_id>]")
-
-    elif command == "stats":
-        show_donation_index()
-
-    elif command == "under":
-        show_donation_index_under()
-
-    elif command == "list":
-        if len(args) == 0:
-            list_donation_dates()
-        elif len(args) == 1:
-            list_donations_for_date(args[0])
-        else:
-            print("❌ Usage: donations list [<date>]")
-    else:
+    handlers: dict[str, Callable[[list[str]], None]] = {
+        "add": _handle_add,
+        "delete": _handle_delete,
+        "edit": _handle_edit,
+        "show": _handle_show,
+        "stats": _handle_stats,
+        "under": _handle_under,
+        "list": _handle_list,
+    }
+    handler = handlers.get(command)
+    if handler is None:
         print(f"❌ Unknown command: {command}")
         print_help()
+        return
+    handler(args)
+
+
+def _handle_add(args):
+    player_id = get_arg_value(args, "--player")
+    date = get_arg_value(args, "--date")
+    total = get_arg_value(args, "--total")
+    if player_id is not None or date is not None or total is not None:
+        if player_id is None or date is None or total is None:
+            print(USAGE_ADD)
+            return
+        add_donation(player_id, date, total)
+        return
+    if len(args) != 3:
+        print(USAGE_ADD)
+        return
+    add_donation(args[0], args[1], args[2])
+
+
+def _handle_delete(args):
+    donation_id = _extract_donation_id(args)
+    if donation_id is None:
+        print(USAGE_DELETE)
+        return
+    delete_donation(donation_id)
+
+
+def _handle_edit(args):
+    donation_id = _extract_donation_id(args)
+    if donation_id is None:
+        print(USAGE_EDIT)
+        return
+    total = args[2] if args and args[0] == "--id" and len(args) > 2 else (args[1] if len(args) > 1 else None)
+    if total is None:
+        print(USAGE_EDIT)
+        return
+    edit_donation(donation_id, total)
+
+
+def _handle_show(args):
+    player_id = get_arg_value(args, "--player")
+    if player_id is not None:
+        show_player_donations(player_id)
+    elif len(args) == 0:
+        show_all_stats()
+    elif len(args) == 1:
+        show_player_donations(args[0])
+    else:
+        print(USAGE_SHOW)
+
+
+def _handle_stats(args):
+    if args:
+        print("Usage: donations stats")
+        return
+    show_donation_index()
+
+
+def _handle_under(args):
+    if args:
+        print("Usage: donations under")
+        return
+    show_donation_index_under()
+
+
+def _handle_list(args):
+    date_arg = get_arg_value(args, "--date")
+    if date_arg is not None:
+        list_donations_for_date(date_arg)
+    elif len(args) == 0:
+        list_donation_dates()
+    elif len(args) == 1:
+        list_donations_for_date(args[0])
+    else:
+        print(USAGE_LIST)
+
+
+def _extract_donation_id(args):
+    if not args:
+        return None
+    if args[0] == "--id":
+        return args[1] if len(args) > 1 else None
+    return args[0] if len(args) == 1 or len(args) == 2 else None
 
 
 # ---------------- Core Functions ---------------- #
 
 
 def add_donation(player_id, date, total):
-    conn = None
     try:
         total_int = int(total)
         if total_int < 0:
             print("❌ total must be >= 0")
             return
         _ = _parse_date(date)
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO donation (player_id, date, total)
-            VALUES (?, ?, ?)
-            ON CONFLICT(player_id, date) DO UPDATE SET total = excluded.total
-            """,
-            (player_id, date, total_int),
-        )
-        conn.commit()
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO donation (player_id, date, total)
+                VALUES (?, ?, ?)
+                ON CONFLICT(player_id, date) DO UPDATE SET total = excluded.total
+                """,
+                (player_id, date, total_int),
+            )
         print(
             f"✅ Donation snapshot added for player {player_id} on {date} (total: {total_int})"
         )
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 def delete_donation(donation_id):
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("DELETE FROM donation WHERE id = ?", (donation_id,))
-        conn.commit()
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM donation WHERE id = ?", (donation_id,))
         if cur.rowcount == 0:
             print(f"ℹ️ No donation with id {donation_id} found.")
         else:
             print(f"✅ Donation {donation_id} deleted")
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 def edit_donation(donation_id, new_total):
     """
     Edit only the 'total' field of a single donation entry.
     """
-    conn = None
     try:
         total_int = int(new_total)
         if total_int < 0:
             print("❌ total must be >= 0")
             return
 
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        with connect_db() as conn:
+            cur = conn.cursor()
 
-        # Load old entry.
-        cur.execute(
-            """
-            SELECT player_id, date, total
-            FROM donation
-            WHERE id = ?
-            """,
-            (donation_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            print(f"ℹ️ No donation with id {donation_id} found.")
-            return
+            # Load old entry.
+            cur.execute(
+                """
+                SELECT player_id, date, total
+                FROM donation
+                WHERE id = ?
+                """,
+                (donation_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                print(f"ℹ️ No donation with id {donation_id} found.")
+                return
 
-        player_id, date, old_total = row
+            player_id, date, old_total = row
 
-        # Update.
-        cur.execute(
-            "UPDATE donation SET total = ? WHERE id = ?",
-            (total_int, donation_id),
-        )
-        conn.commit()
+            # Update.
+            cur.execute(
+                "UPDATE donation SET total = ? WHERE id = ?",
+                (total_int, donation_id),
+            )
 
         print(
             f"✅ Donation {donation_id} updated for player {player_id} on {date}: "
@@ -161,47 +215,42 @@ def edit_donation(donation_id, new_total):
         print("❌ total must be an integer")
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 # ---------------- Show for One Player ---------------- #
 
 
 def show_player_donations(player_id):
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        with connect_db() as conn:
+            cur = conn.cursor()
 
-        # Resolve player name
-        cur.execute("SELECT name FROM players WHERE id = ?", (player_id,))
-        row = cur.fetchone()
-        if not row:
-            print("❌ Player not found.")
-            return
-        player_name = row[0]
+            # Resolve player name
+            cur.execute("SELECT name FROM players WHERE id = ?", (player_id,))
+            row = cur.fetchone()
+            if not row:
+                print("❌ Player not found.")
+                return
+            player_name = row[0]
 
-        # Load all snapshots including ID
-        cur.execute(
-            """
-            SELECT id, date, total FROM donation
-            WHERE player_id = ?
-            ORDER BY date ASC
-            """,
-            (player_id,),
-        )
-        all_snapshots = cur.fetchall()
-        if not all_snapshots:
-            print(f"ℹ️ No donations found for {player_name}.")
-            return
+            # Load all snapshots including ID
+            cur.execute(
+                """
+                SELECT id, date, total FROM donation
+                WHERE player_id = ?
+                ORDER BY date ASC
+                """,
+                (player_id,),
+            )
+            all_snapshots = cur.fetchall()
+            if not all_snapshots:
+                print(f"ℹ️ No donations found for {player_name}.")
+                return
 
         stats = calculate_stats(all_snapshots)
 
         print(f"\n📌 Donations for {player_name} (ID {player_id}):")
-        print(f"{'ID':4} {'Date':12} {'Total':>8} {'Delta':>8}")
-        print("-" * 36)
+        print_table_header(columns=[f"{'ID':4}", f"{'Date':12}", f"{'Total':>8}", f"{'Delta':>8}"], width=36)
 
         last_ten = stats["entries"][-10:]
         for donation_id, ds, tot, delta in reversed(last_ten):
@@ -215,55 +264,47 @@ def show_player_donations(player_id):
 
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 # ---------------- Show All Players (Donation-Only-Stats) ---------------- #
 
 
 def show_all_stats():
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT id, name FROM players WHERE active = 1")
-        players = cur.fetchall()
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, name FROM players WHERE active = 1")
+            players = cur.fetchall()
 
-        if not players:
-            print("ℹ️ No active players.")
-            return
+            if not players:
+                print("ℹ️ No active players.")
+                return
 
-        print("\n📊 Donations (K):")
-        # Player ID in the first column.
-        print(f"{'ID':4} {'Name':12} {'Tot':>6} {'Inc':>6} {'Avg':>6}")
-        print("-" * 40)
+            print("\n📊 Donations (K):")
+            # Player ID in the first column.
+            print_table_header(columns=[f"{'ID':4}", f"{'Name':12}", f"{'Tot':>6}", f"{'Inc':>6}", f"{'Avg':>6}"], width=40)
 
-        for pid, name in players:
-            cur.execute(
-                """
-                SELECT date, total FROM donation
-                WHERE player_id = ?
-                ORDER BY date ASC
-                """,
-                (pid,),
-            )
-            snapshots = cur.fetchall()
-            stats = calculate_stats(snapshots)
-            # entries: (donation_id, ds, tot, delta)
-            last_inc = stats["entries"][-1][3] if stats["entries"] else 0
-            short_name = name[:12]
-            print(
-                f"{pid:4} {short_name:12} {format_k(stats['last_total']):>6} "
-                f"{format_k(last_inc):>6} {format_k(stats['avg_monthly_increment']):>6}"
-            )
+            for pid, name in players:
+                cur.execute(
+                    """
+                    SELECT date, total FROM donation
+                    WHERE player_id = ?
+                    ORDER BY date ASC
+                    """,
+                    (pid,),
+                )
+                snapshots = cur.fetchall()
+                stats = calculate_stats(snapshots)
+                # entries: (donation_id, ds, tot, delta)
+                last_inc = stats["entries"][-1][3] if stats["entries"] else 0
+                short_name = name[:12]
+                print(
+                    f"{pid:4} {short_name:12} {format_k(stats['last_total']):>6} "
+                    f"{format_k(last_inc):>6} {format_k(stats['avg_monthly_increment']):>6}"
+                )
 
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 # -------- Shared calculation for donation index -------- #
@@ -277,10 +318,8 @@ def _compute_donation_index_results():
       (player_id, name, matches, total, index)
     for all active PLTE players.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    try:
+    with connect_db() as conn:
+        cur = conn.cursor()
         # Cutoff date: latest recorded donation.
         cur.execute("SELECT MAX(date) FROM donation")
         row = cur.fetchone()
@@ -337,9 +376,6 @@ def _compute_donation_index_results():
 
         return cutoff_date, results
 
-    finally:
-        conn.close()
-
 
 # ---------------- New Stats / Index (all) ---------------- #
 
@@ -368,8 +404,7 @@ def show_donation_index():
     results.sort(key=lambda x: x[4], reverse=True)
 
     print(f"\n📊 Donation index from {STATS_START_DATE} to {cutoff_date}:")
-    print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
-    print("-" * 50)
+    print_table_header(columns=[f"{'#':3}", f"{'ID':4}", f"{'Name':12}", f"{'Mch':>4}", f"{'Don':>8}", f"{'Idx':>5}"], width=50)
 
     for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
         print(
@@ -403,8 +438,7 @@ def show_donation_index_under():
     results.sort(key=lambda x: x[4])
 
     print(f"\n📊 Donation index < 100 from {STATS_START_DATE} to {cutoff_date}:")
-    print(f"{'#':3} {'ID':4} {'Name':12} {'Mch':>4} {'Don':>8} {'Idx':>5}")
-    print("-" * 50)
+    print_table_header(columns=[f"{'#':3}", f"{'ID':4}", f"{'Name':12}", f"{'Mch':>4}", f"{'Don':>8}", f"{'Idx':>5}"], width=50)
 
     for idx, (pid, name, matches, total, index) in enumerate(results, start=1):
         print(
@@ -420,35 +454,30 @@ def list_donation_dates():
     """
     Show unique donation dates with count of entries, like a sort -u on dates.
     """
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT date, COUNT(*) AS cnt
-            FROM donation
-            GROUP BY date
-            ORDER BY date ASC
-            """
-        )
-        rows = cur.fetchall()
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT date, COUNT(*) AS cnt
+                FROM donation
+                GROUP BY date
+                ORDER BY date ASC
+                """
+            )
+            rows = cur.fetchall()
 
         if not rows:
             print("ℹ️ No donations found.")
             return
 
         print("\n📅 Donation dates:")
-        print(f"{'Date':12} {'Count':>5}")
-        print("-" * 20)
+        print_table_header(columns=[f"{'Date':12}", f"{'Count':>5}"], width=20)
         for ds, cnt in rows:
             print(f"{ds:12} {cnt:5d}")
 
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 def list_donations_for_date(date_str: str):
@@ -462,29 +491,27 @@ def list_donations_for_date(date_str: str):
         print("❌ Invalid date format. Use YYYY-MM-DD or ISO 8601.")
         return
 
-    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT d.id, d.player_id, p.name, IFNULL(p.team, ''), d.total
-            FROM donation d
-            LEFT JOIN players p ON p.id = d.player_id
-            WHERE d.date = ?
-            ORDER BY p.team, p.name, d.player_id
-            """,
-            (date_str,),
-        )
-        rows = cur.fetchall()
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT d.id, d.player_id, p.name, IFNULL(p.team, ''), d.total
+                FROM donation d
+                LEFT JOIN players p ON p.id = d.player_id
+                WHERE d.date = ?
+                ORDER BY p.team, p.name, d.player_id
+                """,
+                (date_str,),
+            )
+            rows = cur.fetchall()
 
         if not rows:
             print(f"ℹ️ No donations found for date {date_str}.")
             return
 
         print(f"\n📋 Donations for {date_str}:")
-        print(f"{'ID':4} {'PID':4} {'Name':12} {'Team':4} {'Total':>8}")
-        print("-" * 40)
+        print_table_header(columns=[f"{'ID':4}", f"{'PID':4}", f"{'Name':12}", f"{'Team':4}", f"{'Total':>8}"], width=40)
 
         for did, pid, name, team, total in rows:
             short_name = (name or "")[:12]
@@ -495,9 +522,6 @@ def list_donations_for_date(date_str: str):
 
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 # ---------------- Helper ---------------- #

@@ -1,6 +1,7 @@
-VERSION = "0.7.1"
+VERSION = "1.0.0"
 
 HISTORY = [
+    ("1.0.0", "2026-06-04", "Codex refactor"),
     ("0.7.1", "2026-04-07", "Fix seasons stats"),
     ("0.7.0", "2026-04-04", "Stats showing all members with more than 3 matches for seasons stats"),
     ("0.6.2", "2026-03-29", "Simplify match add"),

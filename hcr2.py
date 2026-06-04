@@ -2,8 +2,24 @@ import sys
 from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet, donations
 import version
 
+
+ENTITY_MODULES = {
+    "vehicle": vehicle,
+    "player": player,
+    "teamevent": teamevent,
+    "season": season,
+    "match": match,
+    "matchscore": matchscore,
+    "stats": stats,
+    "sheet": sheet,
+    "donations": donations,
+}
+
 def show_main_help():
     print("Usage: python hcr2.py <entity> <command> [args]")
+    print("\nPreferred CLI style:")
+    print("  use flags for ids and filters, e.g. --id, --season, --all, --team")
+    print("  older positional forms still work as legacy aliases")
     print("\nAvailable entities:")
     print("  vehicle     Manage vehicles")
     print("  player      Manage players")
@@ -17,29 +33,17 @@ def show_main_help():
     print("  version     Print version")
 
 def show_entity_help(entity):
-    if entity == "vehicle":
-        vehicle.print_help()
-    elif entity == "player":
-        player.print_help()
-    elif entity == "teamevent":
-        teamevent.print_help()
-    elif entity == "season":
-        season.print_help()
-    elif entity == "match":
-        match.print_help()
-    elif entity == "matchscore":
-        matchscore.print_help()
-    elif entity == "stats":
-        stats.print_help()
-    elif entity == "sheet":
-        sheet.print_help()
-    elif entity == "donations":
-        donations.print_help()
-    elif entity == "version":
+    if entity == "version":
         print(version.get_version())
-    else:
+        return
+
+    module = ENTITY_MODULES.get(entity)
+    if module is None:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
+        return
+
+    module.print_help()
 
 def main():
     if len(sys.argv) < 2:
@@ -58,28 +62,13 @@ def main():
     command = sys.argv[2]
     args = sys.argv[3:]
 
-    if entity == "vehicle":
-        vehicle.handle_command(command, args)
-    elif entity == "teamevent":
-        teamevent.handle_command(command, args)
-    elif entity == "player":
-        player.handle_command(command, args)
-    elif entity == "season":
-        season.handle_command(command, args)
-    elif entity == "match":
-        match.handle_command(command, args)
-    elif entity == "matchscore":
-        matchscore.handle_command(command, args)
-    elif entity == "stats":
-        stats.handle_command(command, args)
-    elif entity == "sheet":
-        sheet.handle_command(command, args)
-    elif entity == "donations":
-        donations.handle_command(command, args)
-    else:
+    module = ENTITY_MODULES.get(entity)
+    if module is None:
         print(f"❌ Unknown entity: {entity}")
         show_main_help()
+        return
+
+    module.handle_command(command, args)
 
 if __name__ == "__main__":
     main()
-

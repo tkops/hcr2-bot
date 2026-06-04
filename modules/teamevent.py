@@ -1,58 +1,205 @@
+from __future__ import annotations
+
 import sqlite3
-from datetime import datetime
+from typing import Callable, Optional
 
-DB_PATH = "../hcr2-db/hcr2.db"
+from modules.common import connect_db, get_arg_value, parse_flag_map, parse_int
 
-def handle_command(cmd, args):
-    if cmd == "add":
-        add_teamevent(args)
-    elif cmd == "list":
-        list_teamevents()
-    elif cmd == "edit":
-        edit_teamevent(args)
-    elif cmd == "delete":
-        if len(args) != 1:
-            print("Usage: teamevent delete <id>")
-            return
-        delete_teamevent(int(args[0]))
-    elif cmd == "show":
-        show_teamevent(args)
-    else:
+
+USAGE_ADD = (
+    'Usage: teamevent add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score] '
+    '| --name <name> --week <year>/W<week> [--vehicles 1,2,3|codes] [--tracks <num>] [--score <num>]'
+)
+USAGE_DELETE = "Usage: teamevent delete <id> | --id <id>"
+USAGE_SHOW = "Usage: teamevent show all | <id> | --all | --id <id>"
+USAGE_EDIT = "Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3|codes] [--score SCORE] | --id <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3|codes] [--score SCORE]"
+
+
+def handle_command(cmd: str, args: list[str]) -> None:
+    handlers: dict[str, Callable[[list[str]], None]] = {
+        "add": _handle_add,
+        "list": _handle_list,
+        "edit": _handle_edit,
+        "delete": _handle_delete,
+        "show": _handle_show,
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
         print(f"❌ Unknown teamevent command: {cmd}")
         print_help()
+        return
+    handler(args)
 
 
-def print_help():
+def print_help() -> None:
     print("Usage: python hcr2.py teamevent <command> [args]")
-    print("\nAvailable commands:")
+    print("\nCommands:")
     print('  add "<name>" <year>/W<week> [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
-    print("  list                        Show latest 10 team events (no vehicles)")
-    print("  show all                   Show all team events (no vehicles)")
-    print("  show <id>                  Show single team event with vehicles")
-    print("  edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
-    print("  delete <id>")
+    print("      or --name <name> --week <year>/W<week> [--vehicles ...] [--tracks <num>] [--score <num>]")
+    print("  list                                   Show the latest 10 team events")
+    print("  list --all                             Show all team events")
+    print("  show all | --all                       Show all team events with summary fields")
+    print("  show <id> | --id <id>                  Show one team event")
+    print("  edit <id> | --id <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
+    print("                                         Edit one team event")
+    print("  delete <id> | --id <id>                Delete one team event")
+    print("\nExamples:")
+    print('  teamevent add "Teamcup" 2025/W38')
+    print('  teamevent add "Teamcup" 2025/W38 be,ro,sm,sc,hc 5 15000')
 
 
-def add_teamevent(args):
+def _handle_add(args: list[str]) -> None:
+    add_teamevent(args)
+
+
+def _handle_list(args: list[str]) -> None:
+    if args == ["--all"]:
+        show_teamevent(["all"])
+        return
+    if args:
+        print("Usage: teamevent list")
+        return
+    list_teamevents()
+
+
+def _handle_edit(args: list[str]) -> None:
+    edit_teamevent(args)
+
+
+def _handle_delete(args: list[str]) -> None:
+    teamevent_id = _extract_teamevent_id(args)
+    if teamevent_id is None:
+        print(USAGE_DELETE)
+        return
+    delete_teamevent(teamevent_id)
+
+
+def _handle_show(args: list[str]) -> None:
+    show_teamevent(args)
+
+
+def _parse_iso_week_token(value: str) -> tuple[Optional[int], Optional[int]]:
+    try:
+        year_str, week_str = value.replace("W", "").split("/")
+        return int(year_str), int(week_str)
+    except (AttributeError, TypeError, ValueError):
+        return None, None
+
+
+def _resolve_vehicle_id(cur: sqlite3.Cursor, token: str) -> Optional[int]:
+    if token.isdigit():
+        return int(token)
+
+    cur.execute(
+        """
+        SELECT id
+        FROM vehicle
+        WHERE LOWER(shortname) = LOWER(?)
+           OR LOWER(name) = LOWER(?)
+        ORDER BY id
+        LIMIT 1
+        """,
+        (token, token),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _resolve_vehicle_inputs(
+    cur: sqlite3.Cursor,
+    tokens: list[str],
+    *,
+    allow_name_lookup: bool = False,
+) -> tuple[list[int], list[str]]:
+    resolved_ids: list[int] = []
+    warnings: list[str] = []
+
+    for token in tokens:
+        vehicle_id = None
+        if token.isdigit():
+            vehicle_id = int(token)
+        else:
+            if allow_name_lookup:
+                vehicle_id = _resolve_vehicle_id(cur, token)
+            else:
+                cur.execute("SELECT id FROM vehicle WHERE shortname = ?", (token,))
+                row = cur.fetchone()
+                vehicle_id = row[0] if row else None
+
+        if vehicle_id is None:
+            warnings.append(token)
+        else:
+            resolved_ids.append(vehicle_id)
+
+    seen = set()
+    deduped_ids = [vid for vid in resolved_ids if not (vid in seen or seen.add(vid))]
+    return deduped_ids, warnings
+
+
+def _parse_edit_args(args: list[str]) -> tuple[Optional[int], Optional[str], Optional[int], Optional[int], Optional[str], bool]:
+    teamevent_id = _extract_teamevent_id(args)
+    if teamevent_id is None:
+        print(USAGE_EDIT)
+        return None, None, None, None, None, False
+
+    flag_args = args[2:] if args and args[0] == "--id" else args[1:]
+    flags = parse_flag_map(flag_args)
+    name = flags.get("name")
+    tracks = parse_int(flags.get("tracks")) if "tracks" in flags else None
+    max_score = parse_int(flags.get("score")) if "score" in flags else None
+    vehicles_arg = flags.get("vehicles")
+
+    if "tracks" in flags and tracks is None:
+        print(USAGE_EDIT)
+        return None, None, None, None, None, False
+    if "score" in flags and max_score is None:
+        print(USAGE_EDIT)
+        return None, None, None, None, None, False
+    if vehicles_arg is not None:
+        vehicles_arg = vehicles_arg.strip()
+
+    return teamevent_id, name, tracks, max_score, vehicles_arg, True
+
+
+def _extract_teamevent_id(args: list[str]) -> Optional[int]:
+    if not args:
+        return None
+    if args[0] == "--id":
+        return parse_int(args[1]) if len(args) > 1 else None
+    return parse_int(args[0])
+
+
+def add_teamevent(args: list[str]) -> None:
+    if args and args[0].startswith("--"):
+        flags = parse_flag_map(args)
+        name = flags.get("name")
+        week_token = flags.get("week")
+        if not name or not week_token:
+            print(USAGE_ADD)
+            return
+
+        tail: list[str] = []
+        if "vehicles" in flags:
+            tail.append(flags["vehicles"])
+        if "tracks" in flags:
+            tail.append(flags["tracks"])
+        if "score" in flags:
+            tail.append(flags["score"])
+        args = [name, week_token, *tail]
+
     if len(args) < 2:
-        print('Usage:    .t add <name> <year>/W<week> [vehicle_ids] [track-count] [max-score-per-track]')
-        print('Example:  .t add The Best Team Event ever 2025/30 be,ro,sm,sc,hc 5 15000')
-        print('Example:  .t add The Worst Team Event ever 2025/31')
+        print(USAGE_ADD)
         return
 
     name = args[0]
-    try:
-        year_str, week_str = args[1].replace("W", "").split("/")
-        iso_year = int(year_str)
-        iso_week = int(week_str)
-    except Exception:
+    iso_year, iso_week = _parse_iso_week_token(args[1])
+    if iso_year is None or iso_week is None:
         print("❌ Invalid year/week format. Example: 2025/30 or 2025/W30")
         return
 
     tracks = 4
     max_score = 15000
-    vehicle_inputs = []
-
+    vehicle_inputs: list[str] = []
     tail = args[2:]
 
     if tail and tail[-1].isdigit():
@@ -62,19 +209,12 @@ def add_teamevent(args):
     if tail:
         vehicle_inputs = [v.strip() for v in tail[0].split(",") if v.strip()]
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
-        resolved_ids = []
-        for val in vehicle_inputs:
-            if val.isdigit():
-                resolved_ids.append(int(val))
-            else:
-                cur.execute("SELECT id FROM vehicle WHERE shortname = ?", (val,))
-                row = cur.fetchone()
-                if row:
-                    resolved_ids.append(row[0])
-                else:
-                    print(f"⚠️  Vehicle '{val}' not found (neither ID nor shortname).")
+        resolved_ids, warnings = _resolve_vehicle_inputs(cur, vehicle_inputs, allow_name_lookup=False)
+
+        for token in warnings:
+            print(f"⚠️  Vehicle '{token}' not found (neither ID nor shortname).")
 
         try:
             cur.execute(
@@ -82,132 +222,117 @@ def add_teamevent(args):
                 INSERT INTO teamevent (name, iso_year, iso_week, tracks, max_score_per_track)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (name, iso_year, iso_week, tracks, max_score)
+                (name, iso_year, iso_week, tracks, max_score),
             )
             teamevent_id = cur.lastrowid
 
-            for vid in resolved_ids:
+            for vehicle_id in resolved_ids:
                 try:
                     cur.execute(
                         "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
-                        (teamevent_id, vid)
+                        (teamevent_id, vehicle_id),
                     )
                 except sqlite3.IntegrityError:
-                    print(f"⚠️  Vehicle ID {vid} does not exist or is already linked.")
+                    print(f"⚠️  Vehicle ID {vehicle_id} does not exist or is already linked.")
 
             conn.commit()
             print("✅ Team event added:")
             show_teamevent([str(teamevent_id)])
-
         except sqlite3.IntegrityError:
             print(f"❌ Team event for week {iso_week}/{iso_year} already exists.")
 
 
-def list_teamevents():
-    with sqlite3.connect(DB_PATH) as conn:
+def list_teamevents() -> None:
+    with connect_db() as conn:
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id, name, iso_year, iso_week
             FROM teamevent ORDER BY iso_year DESC, iso_week DESC LIMIT 10
-        """)
+            """
+        )
         events = cur.fetchall()
 
-        print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name'}")
-        print("-" * 40)
+    print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name'}")
+    print("-" * 40)
+    for teamevent_id, name, iso_year, iso_week in events:
+        print(f"{teamevent_id:>3}. {iso_year:<6} {iso_week:<4}  {name}")
 
-        for eid, name, iso_year, iso_week in events:
-            print(f"{eid:>3}. {iso_year:<6} {iso_week:<4}  {name}")
 
-
-def show_teamevent(args):
+def show_teamevent(args: list[str]) -> None:
     if not args:
-        print("Usage: teamevent show all | <id>")
+        print(USAGE_SHOW)
         return
 
-    if args[0] == "all":
-        with sqlite3.connect(DB_PATH) as conn:
+    if args[0] == "all" or args == ["--all"]:
+        with connect_db() as conn:
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id, name, iso_year, iso_week, tracks, max_score_per_track
                 FROM teamevent ORDER BY iso_year DESC, iso_week DESC
-            """)
+                """
+            )
             events = cur.fetchall()
 
-            print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
-            print("-" * 70)
-
-            for eid, name, year, week, tracks, score in events:
-                print(f"{eid:>3}. {year:<6} {week:<4}  {name:<25}  {tracks:<6}  {score:<12}")
-    else:
-        try:
-            eid = int(args[0])
-        except ValueError:
-            print("❌ Invalid ID")
-            return
-
-        with sqlite3.connect(DB_PATH) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT id, name, iso_year, iso_week, tracks, max_score_per_track
-                FROM teamevent WHERE id = ?
-            """, (eid,))
-            row = cur.fetchone()
-            if not row:
-                print(f"❌ Team event {eid} not found.")
-                return
-
-            te_id, name, year, week, tracks, score = row
-            print(f"\nTeam event {te_id}:")
-            print(f"  Name         : {name}")
-            print(f"  Year/Wk      : {year}/W{week}")
-            print(f"  Tracks       : {tracks}")
-            print(f"  Score/Track  : {score}")
-            print(f"  Vehicles     :")
-
-            cur.execute("""
-                SELECT v.id, v.name
-                FROM teamevent_vehicle tv
-                JOIN vehicle v ON tv.vehicle_id = v.id
-                WHERE tv.teamevent_id = ?
-                ORDER BY v.id
-            """, (te_id,))
-            vehicles = cur.fetchall()
-            if vehicles:
-                for vid, vname in vehicles:
-                    print(f"    - {vid}: {vname}")
-            else:
-                print("    (none)")
-
-
-def edit_teamevent(args):
-    if len(args) < 1:
-        print("Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3|codes] [--score SCORE]")
+        print(f"{'ID.':>4} {'Year':<6} {'Wk':<4}  {'Name':<25}  {'Tracks':<6}  {'Score/Track':<12}")
+        print("-" * 70)
+        for teamevent_id, name, year, week, tracks, score in events:
+            print(f"{teamevent_id:>3}. {year:<6} {week:<4}  {name:<25}  {tracks:<6}  {score:<12}")
         return
 
-    eid = int(args[0])
-    name = None
-    tracks = max_score = None
-    vehicles_arg = None  # raw string after --vehicles
+    teamevent_id = _extract_teamevent_id(args)
+    if teamevent_id is None:
+        print(USAGE_SHOW)
+        return
 
-    i = 1
-    while i < len(args):
-        if args[i] == "--name":
-            i += 1
-            name = args[i]
-        elif args[i] == "--tracks":
-            i += 1
-            tracks = int(args[i])
-        elif args[i] == "--score":
-            i += 1
-            max_score = int(args[i])
-        elif args[i] == "--vehicles":
-            i += 1
-            vehicles_arg = args[i].strip()
-        i += 1
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, iso_year, iso_week, tracks, max_score_per_track
+            FROM teamevent WHERE id = ?
+            """,
+            (teamevent_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            print(f"❌ Team event {teamevent_id} not found.")
+            return
+
+        te_id, name, year, week, tracks, score = row
+        cur.execute(
+            """
+            SELECT v.id, v.name
+            FROM teamevent_vehicle tv
+            JOIN vehicle v ON tv.vehicle_id = v.id
+            WHERE tv.teamevent_id = ?
+            ORDER BY v.id
+            """,
+            (te_id,),
+        )
+        vehicles = cur.fetchall()
+
+    print(f"\nTeam event {te_id}:")
+    print(f"  Name         : {name}")
+    print(f"  Year/Wk      : {year}/W{week}")
+    print(f"  Tracks       : {tracks}")
+    print(f"  Score/Track  : {score}")
+    print(f"  Vehicles     :")
+    if vehicles:
+        for vehicle_id, vehicle_name in vehicles:
+            print(f"    - {vehicle_id}: {vehicle_name}")
+    else:
+        print("    (none)")
+
+
+def edit_teamevent(args: list[str]) -> None:
+    teamevent_id, name, tracks, max_score, vehicles_arg, ok = _parse_edit_args(args)
+    if not ok:
+        return
 
     fields = []
     values = []
-
     if name is not None:
         fields.append("name = ?")
         values.append(name)
@@ -218,81 +343,44 @@ def edit_teamevent(args):
         fields.append("max_score_per_track = ?")
         values.append(max_score)
 
-    import sqlite3
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
-        # Update base fields.
         if fields:
-            values.append(eid)
+            values.append(teamevent_id)
             query = f"UPDATE teamevent SET {', '.join(fields)} WHERE id = ?"
             cur.execute(query, values)
-            print(f"✅ Team event {eid} updated.")
+            print(f"✅ Team event {teamevent_id} updated.")
 
-        # Process vehicles, if provided.
         if vehicles_arg is not None:
-            # Special case: '-' means clear the list.
             if vehicles_arg == "-":
-                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
-                print(f"✅ Cleared vehicles for team event {eid}.")
+                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (teamevent_id,))
+                print(f"✅ Cleared vehicles for team event {teamevent_id}.")
             else:
-                # Split and normalize tokens.
                 tokens = [t.strip() for t in vehicles_arg.split(",") if t.strip()]
-                resolved_ids = []
-                warnings = []
+                resolved_ids, warnings = _resolve_vehicle_inputs(cur, tokens, allow_name_lookup=True)
 
-                def resolve_token(tok: str):
-                    # 1) Direct ID?
-                    if tok.isdigit():
-                        return int(tok)
-                    # 2) Lookup by code/shortname or name (case-insensitive).
-                    cur.execute("""
-                        SELECT id
-                        FROM vehicle
-                        WHERE LOWER(shortname) = LOWER(?)
-                           OR LOWER(name) = LOWER(?)
-                        ORDER BY id
-                        LIMIT 1
-                    """, (tok, tok))
-                    row = cur.fetchone()
-                    return row[0] if row else None
-
-                for tok in tokens:
-                    vid = resolve_token(tok)
-                    if vid is None:
-                        warnings.append(tok)
-                    else:
-                        resolved_ids.append(vid)
-
-                # Remove duplicates while preserving order.
-                seen = set()
-                resolved_ids = [v for v in resolved_ids if not (v in seen or seen.add(v))]
-
-                # Rewrite the list.
-                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
-                for vid in resolved_ids:
+                cur.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (teamevent_id,))
+                for vehicle_id in resolved_ids:
                     try:
                         cur.execute(
                             "INSERT INTO teamevent_vehicle (teamevent_id, vehicle_id) VALUES (?, ?)",
-                            (eid, vid)
+                            (teamevent_id, vehicle_id),
                         )
                     except sqlite3.IntegrityError:
-                        # Foreign-key violation or similar.
-                        warnings.append(str(vid))
+                        warnings.append(str(vehicle_id))
 
                 if resolved_ids:
-                    print(f"✅ Updated vehicles for team event {eid}: {','.join(map(str, resolved_ids))}")
+                    print(f"✅ Updated vehicles for team event {teamevent_id}: {','.join(map(str, resolved_ids))}")
                 else:
-                    print(f"✅ Updated vehicles for team event {eid}: (none)")
+                    print(f"✅ Updated vehicles for team event {teamevent_id}: (none)")
 
                 if warnings:
                     print("⚠️  Unresolved/invalid vehicle tokens: " + ", ".join(warnings))
 
 
-
-
-def delete_teamevent(eid):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (eid,))
-        conn.execute("DELETE FROM teamevent WHERE id = ?", (eid,))
-    print(f"🗑️  Team event {eid} deleted.")
+def delete_teamevent(teamevent_id: int) -> None:
+    with connect_db() as conn:
+        conn.execute("DELETE FROM teamevent_vehicle WHERE teamevent_id = ?", (teamevent_id,))
+        conn.execute("DELETE FROM teamevent WHERE id = ?", (teamevent_id,))
+    print(f"🗑️  Team event {teamevent_id} deleted.")

@@ -9,8 +9,7 @@ from pathlib import Path
 from secrets_config import NEXTCLOUD_AUTH
 import subprocess
 from datetime import datetime, date
-
-DB_PATH = "../hcr2-db/hcr2.db"
+from modules.common import DB_PATH, connect_db, is_absent_on, parse_date_or_none, parse_int
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
@@ -69,32 +68,8 @@ def get_active_players(conn) -> List[Tuple[int, str, Optional[str], Optional[str
     return c.fetchall()
 
 
-def _parse_date_or_none(s: str):
-    if not s:
-        return None
-    s = str(s).strip()
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s).date()
-    except Exception:
-        pass
-    try:
-        return datetime.strptime(s, "%d.%m.%Y").date()
-    except Exception:
-        return None
-
-
 def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> bool:
-    d_from = _parse_date_or_none(frm)
-    d_until = _parse_date_or_none(until)
-    if d_from and d_until:
-        return d_from <= match_day <= d_until
-    if d_from and not d_until:
-        return d_from <= match_day
-    if not d_from and d_until:
-        return match_day <= d_until
-    return False
+    return is_absent_on(match_day, frm, until)
 
 
 def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
@@ -375,7 +350,7 @@ def import_excel_to_matchscore(match_id):
     with sqlite3.connect(DB_PATH) as conn:
         match = get_match_info(conn, match_id)
         if not match:
-            print("[ERROR] No match found")
+            print("❌ No match found.")
             return
 
         match_id, _, season, opponent, event = match
@@ -581,7 +556,7 @@ def import_excel_to_matchscore(match_id):
         web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
         status = "Changed" if changed > 0 else "Unchanged"
         score_status = "Score updated" if upd_ok else "Score update failed"
-        print(f"[OK] [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
+        print(f"✅ [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
 
 
 # ===================== Players: Export/Import (active PLTE, excludes, formatting) =====================
@@ -649,7 +624,7 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
         cur.execute("PRAGMA table_info(players)")
         cols_info = cur.fetchall()
         if not cols_info:
-            print("[ERROR] players table not found")
+            print("❌ players table not found")
             return
         all_columns = [c[1] for c in cols_info]
         export_columns = [c for c in all_columns if c not in EXCLUDED_PLAYER_COLS]
@@ -682,13 +657,13 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
         pass
 
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
-    print(f"[OK] [Power-Ladys-Scores/{PLAYERS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+    print(f"✅ [Power-Ladys-Scores/{PLAYERS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
 
 
 def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
     local = local_xlsx or _download_players_xlsx()
     if not local or not local.exists():
-        print("[ERROR] players Excel not found on Nextcloud")
+        print("❌ players Excel not found on Nextcloud")
         return
 
     wb = load_workbook(filename=local, data_only=True)
@@ -698,7 +673,7 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     header = [str(c) if c is not None else "" for c in (first_row or [])]
     header = [h.strip() for h in header]
     if not header or "id" not in header:
-        print("[ERROR] First row must contain column names including 'id'")
+        print("❌ First row must contain column names including 'id'")
         return
 
     with sqlite3.connect(db_path) as conn:
@@ -806,7 +781,7 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
-    print(f"[OK] players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors ({status} in Nextcloud)")
+    print(f"✅ players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors ({status} in Nextcloud)")
 
 
 # ===================== Donations: Export/Import =====================
@@ -913,7 +888,7 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
         pass
 
     web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
-    print(f"[OK] [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+    print(f"✅ [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
 
 def _to_k(val: Optional[int]) -> float:
     """Convert absolute integer amount to k-units (thousands) for display."""
@@ -960,7 +935,7 @@ def _parse_k_amount(val) -> Optional[int]:
 def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
     local = local_xlsx or _download_donations_xlsx()
     if not local or not local.exists():
-        print("[ERROR] donations Excel not found on Nextcloud")
+        print("❌ donations Excel not found on Nextcloud")
         return
 
     wb = load_workbook(filename=local, data_only=True)
@@ -975,7 +950,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     elif isinstance(raw_date, str):
         date_str = raw_date.strip()
     else:
-        print("[ERROR] No valid date in cell A2")
+        print("❌ No valid date in cell A2")
         return
 
     added = 0
@@ -1032,83 +1007,102 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
-    print(f"[OK] donations import: {added} added, {errors} errors ({status} in Nextcloud)")
+    print(f"✅ donations import: {added} added, {errors} errors ({status} in Nextcloud)")
 
 
 # ===================== CLI =====================
 
+USAGE_SHEET_CREATE = "Usage: sheet create <match_id>"
+USAGE_SHEET_IMPORT = "Usage: sheet import <match_id>"
+USAGE_SHEET_PLAYER = "Usage: sheet player <export|import>"
+USAGE_SHEET_DONATIONS = "Usage: sheet donations <export|import>"
+
 def print_help():
-    print("Usage: python hcr2.py sheet <command> [<args>]")
+    print("Usage: python hcr2.py sheet <command> [args]")
     print("\nCommands:")
-    print("  create <match_id>        Create Excel file and upload to Nextcloud")
-    print("  import <match_id>        Import scores from Excel file on Nextcloud")
-    print("  player export            Export active PLTE players to Power-Ladys-Scores/Ladys.xlsx (bold header, auto width)")
-    print("  player import            Import active PLTE players from Power-Ladys-Scores/Ladys.xlsx (upsert by id)")
-    print("  donations export         Export donations sheet for all active PLTE players")
-    print("  donations import         Import donations from Donations.xlsx and call 'donation add'")
+    print("  create <match_id>        Create one Excel file and upload it to Nextcloud")
+    print("  import <match_id>        Import scores from one Excel file on Nextcloud")
+    print("  player export            Export active PLTE players to Ladys.xlsx")
+    print("  player import            Import active PLTE players from Ladys.xlsx")
+    print("  donations export         Export donations sheet for active PLTE players")
+    print("  donations import         Import donations from Donations.xlsx")
 
 
 def handle_command(command, args):
-    if command == "create":
-        if len(args) != 1:
-            print("Usage: python hcr2.py sheet create <match_id>")
-            return
-        try:
-            match_id = int(args[0])
-        except ValueError:
-            print("[ERROR] Match ID must be an integer.")
-            return
-
-        with sqlite3.connect(DB_PATH) as conn:
-            match = get_match_info(conn, match_id)
-            if not match:
-                print("[ERROR] No match found")
-                return
-
-            _, _, season, _, _ = match
-            ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
-
-            url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
-            print(f"[OK] {url} ({'Created' if uploaded else 'Already existed'})")
-
-    elif command == "import":
-        if len(args) != 1:
-            print("Usage: python hcr2.py sheet import <match_id>")
-            return
-        try:
-            match_id = int(args[0])
-        except ValueError:
-            print("[ERROR] Match ID must be an integer.")
-            return
-        import_excel_to_matchscore(match_id)
-
-    elif command == "player":
-        if not args:
-            print("Usage: python hcr2.py sheet player <export|import>")
-            return
-        sub = args[0]
-        if sub == "export":
-            export_players_to_excel()
-        elif sub == "import":
-            import_players_from_excel()
-        else:
-            print("Usage: python hcr2.py sheet player <export|import>")
-
-    elif command == "donations":
-        if not args:
-            print("Usage: python hcr2.py sheet donations <export|import>")
-            return
-        sub = args[0]
-        if sub == "export":
-            export_donations_to_excel()
-        elif sub == "import":
-            import_donations_from_excel()
-        else:
-            print("Usage: python hcr2.py sheet donations <export|import>")
-
-    else:
-        print("[ERROR] Unknown command:", command)
+    handlers = {
+        "create": _handle_create,
+        "import": _handle_import,
+        "player": _handle_player,
+        "donations": _handle_donations,
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        print(f"❌ Unknown sheet command: {command}")
         print_help()
+        return
+    handler(args)
+
+
+def _parse_match_id_arg(args, usage: str):
+    if len(args) != 1:
+        print(usage)
+        return None
+    match_id = parse_int(args[0], default=None)
+    if match_id is None:
+        print("❌ Match ID must be an integer.")
+        return None
+    return match_id
+
+
+def _handle_create(args):
+    match_id = _parse_match_id_arg(args, USAGE_SHEET_CREATE)
+    if match_id is None:
+        return
+
+    with connect_db() as conn:
+        match = get_match_info(conn, match_id)
+        if not match:
+            print("❌ No match found.")
+            return
+
+        _, _, season, _, _ = match
+        ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
+
+    url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
+    print(f"✅ {url} ({'Created' if uploaded else 'Already existed'})")
+
+
+def _handle_import(args):
+    match_id = _parse_match_id_arg(args, USAGE_SHEET_IMPORT)
+    if match_id is None:
+        return
+    import_excel_to_matchscore(match_id)
+
+
+def _handle_player(args):
+    if not args:
+        print(USAGE_SHEET_PLAYER)
+        return
+    sub = args[0]
+    if sub == "export":
+        export_players_to_excel()
+    elif sub == "import":
+        import_players_from_excel()
+    else:
+        print(USAGE_SHEET_PLAYER)
+
+
+def _handle_donations(args):
+    if not args:
+        print(USAGE_SHEET_DONATIONS)
+        return
+    sub = args[0]
+    if sub == "export":
+        export_donations_to_excel()
+    elif sub == "import":
+        import_donations_from_excel()
+    else:
+        print(USAGE_SHEET_DONATIONS)
 
 
 if __name__ == "__main__":

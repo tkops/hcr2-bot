@@ -4,8 +4,10 @@ import statistics
 import datetime
 import re
 import math
+from typing import Callable, Optional
 
-DB_PATH = "../hcr2-db/hcr2.db"
+from modules.common import connect_db, parse_int
+
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # Examples: 08-18, 7/3, 07.03.
 PERF_TABLE_WIDTH = 31
 PERF_TABLE_LIMIT = 50
@@ -13,80 +15,172 @@ PERF_TABLE_LIMIT = 50
 # ---------------------------------------------------------------------------
 
 def handle_command(cmd, args):
-    if cmd == "avg":
-        season_arg = int(args[0]) if args else None
-        show_average(season_arg)
-    elif cmd == "alias":
-        show_plte_alias()
-    elif cmd == "rank":
-        season_arg = int(args[0]) if args else None
-        rank_active_plte(season_arg)
-    elif cmd == "perf":
-        show_perf(args)
-    elif cmd == "scatter":
-        n = int(args[0]) if args else 20
-        show_season_score_scatter(last_n=n, height=12, symbol="🔵")
-    elif cmd == "bdayplot":
-        show_birthday_plot(width=32, height=31, cols_per_month=1)
-    elif cmd == "battle":
-        if len(args) < 2:
-            print("Usage: stats battle <id1> <id2> [season]")
-            return
-        id1 = int(args[0])
-        id2 = int(args[1])
-        season = int(args[2]) if len(args) > 2 else None
-        show_battle(id1, id2, season)
-    elif cmd == "absent":
-        season_arg = int(args[0]) if args else None
-        show_absent(season_arg)
-    elif cmd == "te":
-        if not args:
-            print("Usage: stats te <team_event_id>")
-            return
-        te_id = int(args[0])
-        show_teamevent_stats(te_id)
-    elif cmd == "te-user":
-        # te-user       -> current/latest team event (offset 0)
-        # te-user 1     -> previous event
-        # te-user 2     -> event before that, etc.
-        offset = int(args[0]) if args else 0
-        show_teamevent_stats_user(offset)
-    elif cmd == "score":
-        show_score(args)
-    elif cmd == "points":
-        show_points(args)
-    elif cmd == "player":
-        if not args:
-            print("Usage: stats player <player_id> [N]")
-            return
-        player_id = int(args[0])
-        n = int(args[1]) if len(args) > 1 else 15
-        show_player_last_matches(player_id, last_n=n)
-    else:
+    handlers: dict[str, Callable[[list[str]], None]] = {
+        "avg": _handle_avg,
+        "alias": _handle_alias,
+        "rank": _handle_rank,
+        "perf": _handle_perf,
+        "scatter": _handle_scatter,
+        "bdayplot": _handle_bdayplot,
+        "battle": _handle_battle,
+        "absent": _handle_absent,
+        "te": _handle_te,
+        "te-user": _handle_te_user,
+        "score": _handle_score,
+        "points": _handle_points,
+        "player": _handle_player,
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
         print(f"❌ Unknown stats command: {cmd}")
         print_help()
+        return
+    handler(args)
+
+
+def _single_optional_int_arg(args, usage: str) -> Optional[int]:
+    if not args:
+        return None
+    value = parse_int(args[0], default=None)
+    if value is None:
+        print(usage)
+        return None
+    return value
+
+
+def _handle_avg(args):
+    if args:
+        season_arg = _single_optional_int_arg(args, "Usage: stats avg [season]")
+        if season_arg is None:
+            return
+    else:
+        season_arg = None
+    show_average(season_arg)
+
+
+def _handle_alias(args):
+    if args:
+        print("Usage: stats alias")
+        return
+    show_plte_alias()
+
+
+def _handle_rank(args):
+    if args:
+        season_arg = _single_optional_int_arg(args, "Usage: stats rank [season]")
+        if season_arg is None:
+            return
+    else:
+        season_arg = None
+    rank_active_plte(season_arg)
+
+
+def _handle_perf(args):
+    show_perf(args)
+
+
+def _handle_scatter(args):
+    if args:
+        n = _single_optional_int_arg(args, "Usage: stats scatter [N]")
+        if n is None:
+            return
+    else:
+        n = 20
+    show_season_score_scatter(last_n=n, height=12, symbol="🔵")
+
+
+def _handle_bdayplot(args):
+    if args:
+        print("Usage: stats bdayplot")
+        return
+    show_birthday_plot(width=32, height=31, cols_per_month=1)
+
+
+def _handle_battle(args):
+    if len(args) < 2:
+        print("Usage: stats battle <id1> <id2> [season]")
+        return
+    player1_id = parse_int(args[0], default=None)
+    player2_id = parse_int(args[1], default=None)
+    season_number = parse_int(args[2], default=None) if len(args) > 2 else None
+    if player1_id is None or player2_id is None or (len(args) > 2 and season_number is None):
+        print("Usage: stats battle <id1> <id2> [season]")
+        return
+    show_battle(player1_id, player2_id, season_number)
+
+
+def _handle_absent(args):
+    if args:
+        season_arg = _single_optional_int_arg(args, "Usage: stats absent [season]")
+        if season_arg is None:
+            return
+    else:
+        season_arg = None
+    show_absent(season_arg)
+
+
+def _handle_te(args):
+    if not args:
+        print("Usage: stats te <team_event_id>")
+        return
+    te_id = parse_int(args[0], default=None)
+    if te_id is None:
+        print("Usage: stats te <team_event_id>")
+        return
+    show_teamevent_stats(te_id)
+
+
+def _handle_te_user(args):
+    if args:
+        offset = _single_optional_int_arg(args, "Usage: stats te-user [n]")
+        if offset is None:
+            return
+    else:
+        offset = 0
+    show_teamevent_stats_user(offset)
+
+
+def _handle_score(args):
+    show_score(args)
+
+
+def _handle_points(args):
+    show_points(args)
+
+
+def _handle_player(args):
+    if not args:
+        print("Usage: stats player <player_id> [N]")
+        return
+    player_id = parse_int(args[0], default=None)
+    last_n = parse_int(args[1], default=None) if len(args) > 1 else 15
+    if player_id is None or (len(args) > 1 and last_n is None):
+        print("Usage: stats player <player_id> [N]")
+        return
+    show_player_last_matches(player_id, last_n=last_n)
 
 def print_help():
     print("Usage: python hcr2.py stats <command> [args]")
-    print("\nAvailable commands:")
-    print("  perf [season] [--active]")
-    print("                           Performance ranking:")
-    print("                           default           → players with at least 20% scored matches in season")
-    print("                           --active          → only active PLTE players with >0 scored matches")
-    print("  avg [season]              (legacy) Show player averages for current or given season")
-    print("  alias                     Show alias of active players in plte team sorted by rank")
-    print("  rank [season]             (legacy) Rank ALL active PLTE players (no one skipped; no-score at bottom)")
-    print("  te <te-id>                Rank stats for given team event")
-    print("  te-user [n]               Like 'te' but with relative index: 0=current, 1=last, 2=prev, ...")
-    print("  scatter [N]               Average score plot for last N seasons")
-    print("  bdayplot                  Birthday Plot")
-    print("  battle <id> <id> [s]      Compare season stats")
-    print("  absent [season]           Absent stats")
-    print("  player <id>               Show player stats")
+    print("\nCommands:")
+    print("  perf [season] [--active]  Show performance ranking")
+    print("                            default: players with at least 20% scored matches in season")
+    print("                            --active: only active PLTE players with >0 scored matches")
+    print("  avg [season]              Show legacy averages for current or given season")
+    print("  alias                     Show aliases of active PLTE players sorted by rank")
+    print("  rank [season]             Show legacy rank of all active PLTE players")
+    print("  te <teamevent_id>         Show rank stats for one team event")
+    print("  te-user [n]               Show relative team-event stats: 0=current, 1=last, 2=prev")
+    print("  scatter [N]               Show average score plot for the last N seasons")
+    print("  bdayplot                  Show birthday plot")
+    print("  battle <id1> <id2> [s]    Compare season stats")
+    print("  absent [season]           Show absent stats")
+    print("  player <id> [N]           Show the last matches for one player")
     print("  score [season] [--skip|--no-skip]")
-    print("                           Sum of scores per player in season (default: scored active PLTE only)")
+    print("                            Show sum of scores per player in season")
+    print("                            default: scored active PLTE only")
     print("  points [season] [--skip|--no-skip]")
-    print("                           Sum of points per player in season (default: scored active PLTE only)")
+    print("                            Show sum of points per player in season")
+    print("                            default: scored active PLTE only")
 
 # ---------------------------------------------------------------------------
 
@@ -234,7 +328,7 @@ def show_average(season_number=None, active_only=False):
       - only currently active PLTE players
       - then all with >0 scored matches
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         if season_number is None:
@@ -290,7 +384,7 @@ def show_average(season_number=None, active_only=False):
 # ---------------------------------------------------------------------------
 
 def show_plte_alias():
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         season_number = find_current_season(cur)
@@ -331,7 +425,7 @@ def rank_active_plte(season_number=None):
     - No 80% filter
     - Players without scores at the end
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         if season_number is None:
@@ -470,7 +564,7 @@ def _rank_sum_metric(season_number=None, metric="score", skip=True):
     """
     assert metric in {"score", "points"}, "metric must be 'score' or 'points'"
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         if season_number is None:
@@ -653,7 +747,7 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
     return "```\n" + "\n".join(lines) + "\n```"
 
 def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
         rows = _fetch_avg_score_last_seasons(cur, last_n=last_n)
         if not rows:
@@ -680,7 +774,7 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
 
     placed = skipped_format = skipped_range = skipped_empty_emoji = 0
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
         cur.execute("""
             SELECT name, birthday, COALESCE(emoji,'')
@@ -744,7 +838,7 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
     import math
     CW = max(2, int(col_width))
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         if season_number is None:
@@ -865,7 +959,7 @@ def show_absent(season_number=None):
     Show unexcused absences for active PLTE players:
     (absent IS NULL or 0) AND points = 0
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         if season_number is None:
@@ -925,7 +1019,7 @@ def show_teamevent_stats_user(offset: int = 0):
     Wrapper for show_teamevent_stats with a relative index:
     offset 0 = current/latest team event, 1 = previous event, ...
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
         te_id = _resolve_teamevent_by_offset(cur, offset)
 
@@ -943,7 +1037,7 @@ def show_teamevent_stats(te_id):
     - Uses avg delta vs. median per match (scaled to 4 tracks), same logic as avg/rank
     - All PLTE players who have at least one score in that event (regardless of current 'active' flag)
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         # Fetch team event metadata.
@@ -1094,7 +1188,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
             and (absent is None or absent == 0)
         )
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect_db() as conn:
         cur = conn.cursor()
 
         # Player meta (+ garage_power)
