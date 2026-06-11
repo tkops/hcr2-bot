@@ -5,6 +5,7 @@ from datetime import datetime
 from modules.common import (
     connect_db,
     get_arg_value,
+    is_help_request,
     parse_int,
     print_command_help,
     print_table_header,
@@ -24,7 +25,7 @@ USAGE_LIST = "Usage: donations list [<date>] | [--date <date>]"
 
 def print_help():
     print_command_help(
-        usage="python hcr2.py donations <command> [args]",
+        usage="hcr2.py donations <command> [options]",
         commands=[
             ("add --player <player_id> --date <date> --total <total>", "Add one donation snapshot (cumulative total)"),
             ("delete --id <donation_id>", "Delete one donation entry"),
@@ -39,6 +40,10 @@ def print_help():
 
 
 def handle_command(command, args):
+    if is_help_request(command, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "add": _handle_add,
         "delete": _handle_delete,

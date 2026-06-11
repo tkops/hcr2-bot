@@ -8,6 +8,7 @@ from dateutil.relativedelta import relativedelta
 from modules.common import (
     connect_db,
     get_arg_value,
+    is_help_request,
     parse_int,
     print_command_help,
     print_table_header,
@@ -22,6 +23,10 @@ USAGE_DELETE = "Usage: season delete <number> | --number <number>"
 
 
 def handle_command(cmd: str, args: list[str]) -> None:
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "add": _handle_add,
         "list": _handle_list,
@@ -37,7 +42,7 @@ def handle_command(cmd: str, args: list[str]) -> None:
 
 def print_help() -> None:
     print_command_help(
-        usage="python hcr2.py season <command> [args]",
+        usage="hcr2.py season <command> [options]",
         commands=[
             ("list", "Show the latest 10 seasons"),
             ("list --all", "Show all seasons"),

@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from modules.common import (
     connect_db,
     is_absent_on,
+    is_help_request,
     parse_bool01,
     parse_flag_map,
     parse_int,
@@ -223,6 +224,10 @@ def _print_grouped_rows(rows, *, show_all, match_filter, short):
 
 
 def handle_command(cmd, args):
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "add": add_score,
         "list": lambda values: list_scores(*values),
@@ -248,7 +253,7 @@ def _handle_delete(args):
 
 def print_help():
     print_command_help(
-        usage="python hcr2.py matchscore <command> [args]",
+        usage="hcr2.py matchscore <command> [options]",
         commands=[
             ("add --match <id> --player <id|name> --score <score> --points <points> [--absent true|false|1|0] [--checkin true|false|1|0]", "Add one match score"),
             ("list [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]", "Show detailed match scores"),

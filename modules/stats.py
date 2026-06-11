@@ -6,7 +6,7 @@ import re
 import math
 from typing import Callable, Optional
 
-from modules.common import connect_db, parse_int, print_command_help, print_unknown_command
+from modules.common import connect_db, is_help_request, parse_int, print_command_help, print_unknown_command
 
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # Examples: 08-18, 7/3, 07.03.
 PERF_TABLE_WIDTH = 31
@@ -15,6 +15,10 @@ PERF_TABLE_LIMIT = 50
 # ---------------------------------------------------------------------------
 
 def handle_command(cmd, args):
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "avg": _handle_avg,
         "alias": _handle_alias,
@@ -161,7 +165,7 @@ def _handle_player(args):
 
 def print_help():
     print_command_help(
-        usage="python hcr2.py stats <command> [args]",
+        usage="hcr2.py stats <command> [options]",
         commands=[
             ("perf [season] [--active]", "Show performance ranking"),
             ("avg [season]", "Show legacy averages for current or given season"),

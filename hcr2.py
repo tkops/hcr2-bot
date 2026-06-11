@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
+
 import sys
 from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet, donations
-from modules.common import print_command_help, print_unknown_entity
+from modules.common import is_help_request, print_command_help, print_unknown_entity
 import version
 
 
@@ -18,7 +20,7 @@ ENTITY_MODULES = {
 
 def show_main_help():
     print_command_help(
-        usage="python hcr2.py <entity> <command> [args]",
+        usage="hcr2.py <entity> <command> [options]",
         commands=[
             ("vehicle", "Manage vehicles"),
             ("player", "Manage players"),
@@ -56,6 +58,10 @@ def main():
         return
 
     entity = sys.argv[1]
+    if is_help_request(entity):
+        show_main_help()
+        return
+
     if entity == "version":
         print(version.get_version())
         return
@@ -71,6 +77,10 @@ def main():
     if module is None:
         print_unknown_entity(entity)
         show_main_help()
+        return
+
+    if is_help_request(command):
+        module.print_help()
         return
 
     module.handle_command(command, args)

@@ -171,6 +171,13 @@ def print_unknown_entity(entity: str) -> None:
     print_error(f"Unknown entity: {entity}")
 
 
+HELP_FLAGS = {"-h", "--help"}
+
+
+def is_help_request(*values: Any) -> bool:
+    return any(str(value) in HELP_FLAGS for value in values if value is not None)
+
+
 def print_command_help(
     *,
     usage: str,
@@ -178,7 +185,9 @@ def print_command_help(
     examples: Optional[list[str]] = None,
     notes: Optional[list[str]] = None,
 ) -> None:
-    print(f"Usage: {usage}")
+    usage = usage.removeprefix("Usage:").strip()
+    print("Usage:")
+    print(f"  {usage}")
     print()
     print("Commands:")
     left_width = max((len(command) for command, _ in commands), default=0)
@@ -188,9 +197,14 @@ def print_command_help(
         if len(wrapped_command) == 1:
             print(f"  {wrapped_command[0]:<{left_width}}  {description}")
             continue
-        for line in wrapped_command:
-            print(f"  {line}")
+        for index, line in enumerate(wrapped_command):
+            prefix = "  " if index == 0 else "    "
+            print(f"{prefix}{line}")
         print(f"  {'':<{left_width}}  {description}")
+
+    print()
+    print("Options:")
+    print("  -h, --help                      Show this help and exit")
 
     if notes:
         print()

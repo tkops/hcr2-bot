@@ -18,6 +18,23 @@ python hcr2.py donations add --player 1 --date 2026-06-04 --total 12345
 python hcr2.py teamevent add --name "Teamcup" --week 2026/W23 --tracks 4 --score 15000
 ```
 
+## Bash Completion
+
+For the current shell:
+
+```bash
+source completions/hcr2.bash
+```
+
+For a persistent per-user install:
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2.py
+```
+
+Then complete `./hcr2.py` or `hcr2.py` with Tab.
+
 # DB Schema
 
 ```mermaid

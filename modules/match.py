@@ -8,6 +8,7 @@ from dateutil.relativedelta import relativedelta
 from modules.common import (
     connect_db,
     get_arg_value,
+    is_help_request,
     parse_flag_map,
     parse_int,
     print_command_help,
@@ -29,6 +30,10 @@ USAGE_DELETE = "Usage: match delete <id> | --id <id>"
 
 
 def handle_command(cmd: str, args: list[str]) -> None:
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "add": _handle_add,
         "list": _handle_list,
@@ -46,7 +51,7 @@ def handle_command(cmd: str, args: list[str]) -> None:
 
 def print_help() -> None:
     print_command_help(
-        usage="python hcr2.py match <command> [args]",
+        usage="hcr2.py match <command> [options]",
         commands=[
             ("add --opponent NAME [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]", "Add one match"),
             ("edit --id ID [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--opponent NAME] [--score N] [--scoreopp N]", "Edit one match"),

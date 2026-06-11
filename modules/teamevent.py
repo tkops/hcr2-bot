@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from modules.common import (
     connect_db,
     get_arg_value,
+    is_help_request,
     parse_flag_map,
     parse_int,
     print_command_help,
@@ -24,6 +25,10 @@ USAGE_EDIT = "Usage: teamevent edit <id> [--name NAME] [--tracks NUM] [--vehicle
 
 
 def handle_command(cmd: str, args: list[str]) -> None:
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "add": _handle_add,
         "list": _handle_list,
@@ -41,7 +46,7 @@ def handle_command(cmd: str, args: list[str]) -> None:
 
 def print_help() -> None:
     print_command_help(
-        usage="python hcr2.py teamevent <command> [args]",
+        usage="hcr2.py teamevent <command> [options]",
         commands=[
             ("add --name <name> [--week <year>/W<week>] [--vehicles <ids|codes>] [--tracks <num>] [--score <num>]", "Add one team event"),
             ("list", "Show the latest 10 team events"),

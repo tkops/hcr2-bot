@@ -9,6 +9,7 @@ import yaml
 
 from modules.common import (
     connect_db,
+    is_help_request,
     parse_int,
     print_command_help,
     print_table_header,
@@ -22,6 +23,10 @@ USAGE_EDIT = "Usage: vehicle edit <id> [--name NAME] [--short SHORTNAME] | --id 
 
 
 def handle_command(cmd: str, args: list[str]) -> None:
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers: dict[str, Callable[[list[str]], None]] = {
         "list": _handle_list,
         "add": _handle_add,
@@ -244,7 +249,7 @@ def drop_table() -> None:
 
 def print_help() -> None:
     print_command_help(
-        usage="python hcr2.py vehicle <command> [args]",
+        usage="hcr2.py vehicle <command> [options]",
         commands=[
             ("list", "Show all vehicles"),
             ("add --name <name> --short <short>", "Add one vehicle"),

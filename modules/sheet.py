@@ -13,6 +13,7 @@ from modules.common import (
     DB_PATH,
     connect_db,
     is_absent_on,
+    is_help_request,
     parse_date_or_none,
     parse_int,
     print_command_help,
@@ -1027,7 +1028,7 @@ USAGE_SHEET_DONATIONS = "Usage: sheet donations <export|import>"
 
 def print_help():
     print_command_help(
-        usage="python hcr2.py sheet <command> [args]",
+        usage="hcr2.py sheet <command> [options]",
         commands=[
             ("create <match_id>", "Create one Excel file and upload it to Nextcloud"),
             ("import <match_id>", "Import scores from one Excel file on Nextcloud"),
@@ -1040,6 +1041,10 @@ def print_help():
 
 
 def handle_command(command, args):
+    if is_help_request(command, *args):
+        print_help()
+        return
+
     handlers = {
         "create": _handle_create,
         "import": _handle_import,

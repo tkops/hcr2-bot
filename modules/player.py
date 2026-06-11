@@ -8,6 +8,7 @@ from modules.common import (
     DB_PATH,
     connect_dict_db,
     get_arg_value,
+    is_help_request,
     parse_bool,
     print_command_help,
     print_unknown_command,
@@ -63,6 +64,10 @@ def _next_free_alias(conn: sqlite3.Connection, base: str, team_scope: Optional[s
 
 
 def handle_command(cmd, args):
+    if is_help_request(cmd, *args):
+        print_help()
+        return
+
     handlers = {
         "list": _handle_list,
         "activate": _handle_activate,
@@ -1048,7 +1053,7 @@ def _resolve_player_id(player_id=None, player_name=None, discord_name=None):
 
 def print_help():
     print_command_help(
-        usage="python hcr2.py player <command> [args]",
+        usage="hcr2.py player <command> [options]",
         commands=[
             ("list [--sort gp|name] [--team TEAM]", "Show all players"),
             ("list-active [--sort gp|name] [--team TEAM]", "Show active players"),
