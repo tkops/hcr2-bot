@@ -4,7 +4,16 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from modules.common import connect_db, is_absent_on, parse_bool01, parse_flag_map, parse_int, parse_ymd
+from modules.common import (
+    connect_db,
+    is_absent_on,
+    parse_bool01,
+    parse_flag_map,
+    parse_int,
+    parse_ymd,
+    print_command_help,
+    print_unknown_command,
+)
 
 
 USAGE_ADD = (
@@ -223,7 +232,7 @@ def handle_command(cmd, args):
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown matchscore command: {cmd}")
+        print_unknown_command("matchscore", cmd)
         print_help()
         return
     handler(args)
@@ -238,18 +247,17 @@ def _handle_delete(args):
 
 
 def print_help():
-    print("Usage: python hcr2.py matchscore <command> [args]")
-    print("\nCommands:")
-    print("  add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>]")
-    print("      or --match <id> --player <id|name> --score <score> --points <points> [--absent ...] [--checkin ...]")
-    print("  list [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
-    print("                                         Show detailed match scores")
-    print("  list-short [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]")
-    print("                                         Show compact match scores")
-    print("  delete <id> | --id <id>                Delete one matchscore")
-    print("  edit <id> | --id <id> [--score <0..75000>] [--points <0..300>] "
-          "[--pid <player_id>] [--absent true|false|toggle] [--checkin true|false|toggle]")
-    print("                                         Edit one matchscore")
+    print_command_help(
+        usage="python hcr2.py matchscore <command> [args]",
+        commands=[
+            ("add --match <id> --player <id|name> --score <score> --points <points> [--absent true|false|1|0] [--checkin true|false|1|0]", "Add one match score"),
+            ("list [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]", "Show detailed match scores"),
+            ("list-short [--all] [--match <id>] [--season [<name_or_pattern>|<number>|S<number>]]", "Show compact match scores"),
+            ("delete --id <id>", "Delete one match score"),
+            ("edit --id <id> [--score <0..75000>] [--points <0..300>] [--pid <player_id>] [--absent true|false|toggle] [--checkin true|false|toggle]", "Edit one match score"),
+        ],
+        notes=["Legacy positional aliases are still accepted for add, edit and delete."],
+    )
 
 
 def add_score(args):

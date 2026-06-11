@@ -6,7 +6,7 @@ import re
 import math
 from typing import Callable, Optional
 
-from modules.common import connect_db, parse_int
+from modules.common import connect_db, parse_int, print_command_help, print_unknown_command
 
 BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # Examples: 08-18, 7/3, 07.03.
 PERF_TABLE_WIDTH = 31
@@ -32,7 +32,7 @@ def handle_command(cmd, args):
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown stats command: {cmd}")
+        print_unknown_command("stats", cmd)
         print_help()
         return
     handler(args)
@@ -160,27 +160,29 @@ def _handle_player(args):
     show_player_last_matches(player_id, last_n=last_n)
 
 def print_help():
-    print("Usage: python hcr2.py stats <command> [args]")
-    print("\nCommands:")
-    print("  perf [season] [--active]  Show performance ranking")
-    print("                            default: players with at least 20% scored matches in season")
-    print("                            --active: only active PLTE players with >0 scored matches")
-    print("  avg [season]              Show legacy averages for current or given season")
-    print("  alias                     Show aliases of active PLTE players sorted by rank")
-    print("  rank [season]             Show legacy rank of all active PLTE players")
-    print("  te <teamevent_id>         Show rank stats for one team event")
-    print("  te-user [n]               Show relative team-event stats: 0=current, 1=last, 2=prev")
-    print("  scatter [N]               Show average score plot for the last N seasons")
-    print("  bdayplot                  Show birthday plot")
-    print("  battle <id1> <id2> [s]    Compare season stats")
-    print("  absent [season]           Show absent stats")
-    print("  player <id> [N]           Show the last matches for one player")
-    print("  score [season] [--skip|--no-skip]")
-    print("                            Show sum of scores per player in season")
-    print("                            default: scored active PLTE only")
-    print("  points [season] [--skip|--no-skip]")
-    print("                            Show sum of points per player in season")
-    print("                            default: scored active PLTE only")
+    print_command_help(
+        usage="python hcr2.py stats <command> [args]",
+        commands=[
+            ("perf [season] [--active]", "Show performance ranking"),
+            ("avg [season]", "Show legacy averages for current or given season"),
+            ("alias", "Show aliases of active PLTE players sorted by rank"),
+            ("rank [season]", "Show legacy rank of all active PLTE players"),
+            ("te <teamevent_id>", "Show rank stats for one team event"),
+            ("te-user [n]", "Show relative team-event stats: 0=current, 1=last, 2=previous"),
+            ("scatter [N]", "Show average score plot for the last N seasons"),
+            ("bdayplot", "Show birthday plot"),
+            ("battle <id1> <id2> [season]", "Compare season stats"),
+            ("absent [season]", "Show absent stats"),
+            ("player <id> [N]", "Show the last matches for one player"),
+            ("score [season] [--skip|--no-skip]", "Show sum of scores per player in season"),
+            ("points [season] [--skip|--no-skip]", "Show sum of points per player in season"),
+        ],
+        notes=[
+            "perf defaults to players with at least 20% scored matches in season.",
+            "perf --active shows only active PLTE players with more than 0 scored matches.",
+            "score and points default to scored active PLTE players.",
+        ],
+    )
 
 # ---------------------------------------------------------------------------
 

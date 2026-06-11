@@ -4,7 +4,14 @@ import sys
 import re
 import textwrap
 from datetime import datetime, timedelta
-from modules.common import DB_PATH, connect_dict_db, get_arg_value, parse_bool
+from modules.common import (
+    DB_PATH,
+    connect_dict_db,
+    get_arg_value,
+    parse_bool,
+    print_command_help,
+    print_unknown_command,
+)
 
 # =====================[ Configuration ]=====================
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
@@ -75,7 +82,7 @@ def handle_command(cmd, args):
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown player command: {cmd}")
+        print_unknown_command("player", cmd)
         print_help()
         return
     handler(args)
@@ -1040,29 +1047,27 @@ def _resolve_player_id(player_id=None, player_name=None, discord_name=None):
 # =====================[ Hilfe ]============================
 
 def print_help():
-    print("Usage: python hcr2.py player <command> [args]")
-    print("\nCommands:")
-    print("  list [--sort gp|name] [--team TEAM]         Show all players")
-    print("  list-active [--sort gp|name] [--team TEAM]  Show active players")
-    print("  list-leader                                 Show leaders only")
-    print("  list-absent                                 Show currently absent players")
-    print("  bday today                                  Print birthday IDs for today")
-    print("  bday list [--active true|false] [--num N]   List birthdays by next upcoming date")
-    print("  add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name]")
-    print("      or --team TEAM --name NAME [--alias ALIAS] [--gp GP] [--active true|false]")
-    print("         [--birthday DD.MM.] [--discord NAME]")
-    print("  edit <id> | --id <id>                       Edit one player")
-    print("      --name NAME --alias ALIAS --gp 90000 --active true|false")
-    print("      --birthday 15.07. --team PL3 --discord foo#1234")
-    print("      --leader true|false --about '...' --vehicles '...'")
-    print("      --playstyle '...' --language en --emoji '🚗'")
-    print("  activate <id> | --id <id>                  Set one player active")
-    print("  deactivate <id> | --id <id>                Set one player inactive")
-    print("  delete <id> | --id <id>                    Delete one player")
-    print("  show <id> | (--id ID | --name NAME | --discord NAME)")
-    print("                                             Show one player")
-    print("  grep <term>                                Search by name, alias or Discord")
-    print("  away (<term> [1w|2w|3w|4w]) | (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]")
-    print("                                             Mark one player as away")
-    print("  back <term> | (--id ID | --name NAME | --discord NAME)")
-    print("                                             Clear away status for one player")
+    print_command_help(
+        usage="python hcr2.py player <command> [args]",
+        commands=[
+            ("list [--sort gp|name] [--team TEAM]", "Show all players"),
+            ("list-active [--sort gp|name] [--team TEAM]", "Show active players"),
+            ("list-leader", "Show leaders only"),
+            ("list-absent", "Show currently absent players"),
+            ("bday today", "Print birthday IDs for today"),
+            ("bday list [--active true|false] [--num N]", "List birthdays by next upcoming date"),
+            ("add --team TEAM --name NAME [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--discord NAME]", "Add one player"),
+            ("edit --id <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord NAME]", "Edit one player"),
+            ("activate --id <id>", "Set one player active"),
+            ("deactivate --id <id>", "Set one player inactive"),
+            ("delete --id <id>", "Delete one player"),
+            ("show --id ID | --name NAME | --discord NAME", "Show one player"),
+            ("grep <term>", "Search by name, alias or Discord"),
+            ("away (--id ID | --name NAME | --discord NAME) [--dur 1w|2w|3w|4w]", "Mark one player as away"),
+            ("back (--id ID | --name NAME | --discord NAME)", "Clear away status for one player"),
+        ],
+        notes=[
+            "edit also supports --leader, --about, --vehicles, --playstyle, --language and --emoji.",
+            "Legacy positional aliases are still accepted for add, edit, activate, deactivate, delete, show, away and back.",
+        ],
+    )

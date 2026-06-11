@@ -9,7 +9,15 @@ from pathlib import Path
 from secrets_config import NEXTCLOUD_AUTH
 import subprocess
 from datetime import datetime, date
-from modules.common import DB_PATH, connect_db, is_absent_on, parse_date_or_none, parse_int
+from modules.common import (
+    DB_PATH,
+    connect_db,
+    is_absent_on,
+    parse_date_or_none,
+    parse_int,
+    print_command_help,
+    print_unknown_command,
+)
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
@@ -1018,14 +1026,17 @@ USAGE_SHEET_PLAYER = "Usage: sheet player <export|import>"
 USAGE_SHEET_DONATIONS = "Usage: sheet donations <export|import>"
 
 def print_help():
-    print("Usage: python hcr2.py sheet <command> [args]")
-    print("\nCommands:")
-    print("  create <match_id>        Create one Excel file and upload it to Nextcloud")
-    print("  import <match_id>        Import scores from one Excel file on Nextcloud")
-    print("  player export            Export active PLTE players to Ladys.xlsx")
-    print("  player import            Import active PLTE players from Ladys.xlsx")
-    print("  donations export         Export donations sheet for active PLTE players")
-    print("  donations import         Import donations from Donations.xlsx")
+    print_command_help(
+        usage="python hcr2.py sheet <command> [args]",
+        commands=[
+            ("create <match_id>", "Create one Excel file and upload it to Nextcloud"),
+            ("import <match_id>", "Import scores from one Excel file on Nextcloud"),
+            ("player export", "Export active PLTE players to Ladys.xlsx"),
+            ("player import", "Import active PLTE players from Ladys.xlsx"),
+            ("donations export", "Export donations sheet for active PLTE players"),
+            ("donations import", "Import donations from Donations.xlsx"),
+        ],
+    )
 
 
 def handle_command(command, args):
@@ -1037,7 +1048,7 @@ def handle_command(command, args):
     }
     handler = handlers.get(command)
     if handler is None:
-        print(f"❌ Unknown sheet command: {command}")
+        print_unknown_command("sheet", command)
         print_help()
         return
     handler(args)

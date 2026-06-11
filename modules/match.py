@@ -5,7 +5,15 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
-from modules.common import connect_db, get_arg_value, parse_flag_map, parse_int, print_table_header
+from modules.common import (
+    connect_db,
+    get_arg_value,
+    parse_flag_map,
+    parse_int,
+    print_command_help,
+    print_table_header,
+    print_unknown_command,
+)
 
 
 USAGE_ADD = (
@@ -30,30 +38,30 @@ def handle_command(cmd: str, args: list[str]) -> None:
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown match command: {cmd}")
+        print_unknown_command("match", cmd)
         print_help()
         return
     handler(args)
 
 
 def print_help() -> None:
-    print("Usage: python hcr2.py match <command> [args]")
-    print("\nCommands:")
-    print("  add --opponent NAME [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]")
-    print("                                      Add one match")
-    print("  edit --id ID [--teamevent ID] [--season NUM] [--start YYYY-MM-DD]")
-    print("       [--opponent NAME] [--score N] [--scoreopp N]")
-    print("                                      Edit one match")
-    print("  show <id> | --id <id>                Show one match")
-    print("  list [season_number|all|--season <n>|--all]")
-    print("                                      List matches")
-    print("  delete <id> | --id <id>              Delete one match")
-    print("\nDefaults for add:")
-    print("  • --teamevent: latest teamevent by ISO year/week")
-    print("  • --season:    current season")
-    print("  • --start:     last match date + 2 days")
-    print("                 or first day of current month if no match exists in current month")
-    print("  • required:    --opponent only")
+    print_command_help(
+        usage="python hcr2.py match <command> [args]",
+        commands=[
+            ("add --opponent NAME [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]", "Add one match"),
+            ("edit --id ID [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--opponent NAME] [--score N] [--scoreopp N]", "Edit one match"),
+            ("show --id <id>", "Show one match"),
+            ("list [--season <n>|--all]", "List matches"),
+            ("delete --id <id>", "Delete one match"),
+        ],
+        notes=[
+            "For add, --opponent is required.",
+            "Default --teamevent is the latest team event by ISO year/week.",
+            "Default --season is the current season.",
+            "Default --start is the last match date + 2 days, or the first day of the current month.",
+            "Legacy positional aliases are still accepted for list, show and delete.",
+        ],
+    )
 
 
 def _handle_add(args: list[str]) -> None:

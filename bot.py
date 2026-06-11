@@ -6,6 +6,7 @@ import textwrap
 import sys
 import subprocess
 import shlex  # für .p++ mit Anführungszeichen
+from typing import Optional
 from secrets_config import CONFIG, NEXTCLOUD_AUTH
 from version import get_version, get_history
 
@@ -16,6 +17,10 @@ from datetime import time       # Uhrzeit für tasks.loop
 # ===================== Konstante Limits & Regexe =============================
 
 MAX_DISCORD_MSG_LEN = 1990
+COLOR_SUCCESS = 0x2ECC71
+COLOR_WARNING = 0xF1C40F
+COLOR_ERROR = 0xE74C3C
+COLOR_INFO = 0x3498DB
 
 # Vorcompilierte Regexe für Parsing aus hcr2-Ausgaben
 ID_LINE_RE = re.compile(r"^ID\s*:?\s*(\d+)", re.MULTILINE)
@@ -34,8 +39,8 @@ COMMANDS = {
 PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
-    ".leader", ".acc",
-    ".search", ".show", ".stats", ".d", ".gp"
+    ".leader", ".profile",
+    ".search", ".player", ".stats", ".d", ".donations", ".garagepower"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -200,7 +205,7 @@ async def get_self_player_id(discord_key: str):
 async def update_self_field(discord_key: str, flag: str, value: str):
     pid = await get_self_player_id(discord_key)
     if not pid:
-        return "❌ Could not resolve your player. Make sure your Discord is set in the players table."
+        return "❌ I could not find your player profile. Ask a leader to set your Discord name in the players table."
     args = ["player", "edit", str(pid), flag, value]
     return await run_hcr2(args)
 
@@ -216,19 +221,270 @@ def _in_channels(message, ids):
 
 async def send_codeblock(channel, text: str):
     if not text:
-        await channel.send("⚠️ No data found or error occurred.")
+        await send_warning(channel, "No data found or an error occurred.")
         return
     s = text.strip()
     if s.startswith("```") and s.endswith("```"):
         if len(s) <= MAX_DISCORD_MSG_LEN:
             await channel.send(s)
         else:
-            await channel.send("⚠️ Output too long to display.")
+            await send_warning(channel, "Output too long to display.")
     else:
         if len(text) + 8 <= MAX_DISCORD_MSG_LEN:
             await channel.send(f"```\n{text}```")
         else:
-            await channel.send("⚠️ Output too long to display.")
+            await send_warning(channel, "Output too long to display.")
+
+def _clean_status_text(text: str) -> str:
+    text = (text or "").strip()
+    for prefix in ("✅", "⚠️", "⚠", "❌", "ℹ️", "ℹ", "🟢", "🟡", "🗑️", "🗑", "✏️", "✏", "🔁"):
+        if text.startswith(prefix):
+            return text[len(prefix):].strip()
+    return text
+
+def _output_is_error(text: str) -> bool:
+    normalized = (text or "").strip().lower()
+    return normalized.startswith("❌") or "not found" in normalized or "invalid" in normalized
+
+async def send_status(channel, title: str, description: str = "", *, color: int = COLOR_INFO):
+    embed = discord.Embed(title=title, description=description or None, color=color)
+    await channel.send(embed=embed)
+
+async def send_success(channel, title: str, description: str = ""):
+    await send_status(channel, title, description, color=COLOR_SUCCESS)
+
+async def send_warning(channel, description: str, *, title: str = "Check input"):
+    await send_status(channel, title, description, color=COLOR_WARNING)
+
+async def send_error(channel, description: str, *, title: str = "Error"):
+    await send_status(channel, title, description, color=COLOR_ERROR)
+
+async def send_usage(channel, usage: str, *, example: Optional[str] = None, note: Optional[str] = None):
+    description = f"`{usage}`"
+    if example:
+        description += f"\nExample: `{example}`"
+    if note:
+        description += f"\n{note}"
+    await send_warning(channel, description, title="How to use this command")
+
+async def send_cli_result(channel, output: str, *, success_title: str = "Done"):
+    if not output:
+        await send_warning(channel, "No data found or an error occurred.")
+        return
+    cleaned = _clean_status_text(output)
+    if _output_is_error(output):
+        await send_error(channel, cleaned or output.strip())
+        return
+    await send_success(channel, success_title, cleaned)
+
+def _parse_show_fields(output: str) -> dict[str, str]:
+    fields = {}
+    current_key = None
+    for line in (output or "").splitlines():
+        if current_key and line.startswith(" "):
+            continuation = line.strip()
+            if continuation:
+                fields[current_key] = f"{fields[current_key]} {continuation}".strip()
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key:
+            fields[key] = value or "-"
+            current_key = key
+    return fields
+
+async def send_player_profile(channel, output: str, *, title: str = "Player profile"):
+    if not output:
+        await send_warning(channel, "No player data found.")
+        return
+    if _output_is_error(output):
+        await send_error(channel, _clean_status_text(output))
+        return
+
+    data = _parse_show_fields(output)
+    if not data:
+        await send_codeblock(channel, output)
+        return
+
+    name = data.get("Name", "Unknown player")
+    player_id = data.get("ID", "-")
+    embed = discord.Embed(title=f"{title}: {name}", color=COLOR_INFO)
+    rows = [("ID", player_id)]
+    for label in (
+        "Alias",
+        "Garage Power",
+        "Team",
+        "Birthday",
+        "Discord",
+        "Active",
+        "Leader",
+        "About",
+        "Vehicles",
+        "Playstyle",
+        "Language",
+        "Away until",
+    ):
+        value = data.get(label)
+        if value and value != "-":
+            rows.append((label, value))
+
+    left_col = max(len(label) for label, _ in rows) + 2
+    value_width = max(20, 58 - left_col)
+    lines = []
+    for label, value in rows:
+        wrapped = textwrap.wrap(
+            value,
+            width=value_width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [""]
+        lines.append(f"{label:<{left_col}} {wrapped[0]}")
+        for line in wrapped[1:]:
+            lines.append(f"{'':<{left_col}} {line}")
+
+    description = "```" + "\n".join(lines)
+    if len(description) > 4090:
+        description = description[:4087].rstrip() + "..."
+    embed.description = description + "```"
+
+    await channel.send(embed=embed)
+
+def help_field(rows, left_col=24):
+    lines = [f"{cmd:<{left_col}} {desc}" for cmd, desc in rows]
+    return "```" + "\n".join(lines) + "```"
+
+async def send_public_help(channel):
+    embed = discord.Embed(
+        title="Public commands",
+        description="Use these commands in the team channel.",
+        color=COLOR_INFO,
+    )
+    embed.add_field(
+        name="Profile",
+        value=help_field([
+            (".profile", "Show your profile"),
+            (".garagepower <number>", "Update Garage Power"),
+            (".birthday <DD.MM.>", "Set birthday"),
+            (".emoji <emoji>", "Set personal emoji"),
+            (".about <text>", "Set bio"),
+            (".vehicles <text>", "Set preferred vehicles"),
+            (".language <text>", "Set language"),
+            (".playstyle <text>", "Set playstyle"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Away",
+        value=help_field([
+            (".away [1w..4w]", "Mark yourself absent"),
+            (".back", "Clear absence"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Search & stats",
+        value=help_field([
+            (".leader", "Show leaders"),
+            (".search <term>", "Search players"),
+            (".player <id>", "Show player"),
+            (".stats", "Current performance"),
+            (".donations", "Donation index below 100"),
+        ]),
+        inline=False,
+    )
+    await channel.send(embed=embed)
+
+async def send_admin_help(channel):
+    embed = discord.Embed(
+        title="Admin commands",
+        description="Lowercase commands list or edit. Uppercase commands show details.",
+        color=COLOR_INFO,
+    )
+    embed.add_field(
+        name="Players",
+        value=help_field([
+            (".p", "List active PLTE players"),
+            (".P <id>", "Show player details"),
+            (".p search <term>", "Search players"),
+            (".p <id> key:value", "Edit player"),
+            ('.p++ "<Name>" <team>', "Add player"),
+            (".p+ <id>", "Activate player"),
+            (".p- <id>", "Deactivate player"),
+            (".pa <id> [1w..4w]", "Set player away"),
+            (".pb <id>", "Clear player away"),
+            (".pl bday", "List birthdays"),
+            (".pl absent", "List absent players"),
+            (".S <id>", "Show player stats"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Team Events",
+        value=help_field([
+            (".t", "List team events"),
+            (".T <id>", "Show team event details"),
+            (".t <id> key:value", "Edit team event"),
+            (".t+ <name> [week]", "Add team event"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Matches",
+        value=help_field([
+            (".m", "List matches"),
+            (".m <season>", "List matches in season"),
+            (".M <id>", "Show match details"),
+            (".m <id> key:value", "Edit match"),
+            (".m+ <opponent>", "Add match"),
+            (".m- <id>", "Delete match"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Scores",
+        value=help_field([
+            (".x", "List current scores"),
+            (".x <matchid>", "List scores for match"),
+            (".x <scoreid> <score> [p]", "Edit score"),
+            (".x <scoreid> - <points>", "Edit points only"),
+            (".xa <scoreid>", "Toggle absent"),
+            (".x- <scoreid>", "Delete score"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Seasons",
+        value=help_field([
+            (".s", "List seasons"),
+            (".s+ <division>", "Add next season"),
+            (".s <num> [division]", "Add/edit season"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Sheets",
+        value=help_field([
+            (".c <matchid>", "Create match sheet"),
+            (".i <matchid>", "Import match sheet"),
+            (".pe", "Export player sheet"),
+            (".pi", "Import player sheet"),
+        ]),
+        inline=False,
+    )
+    embed.add_field(
+        name="Other",
+        value=help_field([
+            (".v", "List vehicles"),
+            (".d", "Donation index below 100"),
+            (".version", "Show bot version"),
+            (".ph .th .sh .mh .xh", "Detailed admin helps"),
+        ]),
+        inline=False,
+    )
+    await channel.send(embed=embed)
 
 # ===================== Birthday Scheduler ===================================
 
@@ -334,11 +590,11 @@ HELP_PH = help_block(
     "Players (.p / .P / .pl) – Admin-Details",
     rows=[
         (".p",                   "List active PLTE Players."),
-        (".p <id>",              "Show Player details."),
+        (".P <id>",              "Show Player details."),
+        (".p search <term>",     "Search Player by name/alias/discordname."),
         (".p <id> key:value",    "Edit Player\n"
                                  "keys: name, alias, gp, active, birthday, team, discord, "
                                  "about, vehicles, playstyle, language, leader, emoji."),
-        (".P <term>",            "Search for Player."),
         (".pl bday",             "List birthdays sorted by next upcoming."),
         (".pl absent",           "List absent Ladys"),
         (".pa <id> [1w..4w]",    "Set Player to away. (absent=true)"),
@@ -354,10 +610,10 @@ HELP_PH = help_block(
 )
 
 HELP_TH = help_block(
-    "Teamevents (.t) – Admin-Details",
+    "Teamevents (.t / .T) – Admin-Details",
     rows=[
         (".t",                   "List last 10 teamevents"),
-        (".t <id>",              "Show teamevent incl. vehicles."),
+        (".T <id>",              "Show teamevent incl. vehicles."),
         (".t <id> key:value",    "Edit Teamevent\n"
                                  "keys: name, tracks, score, vehicles"),
         (".t+ <name> [week]",    "Add teamevent.\n"
@@ -380,15 +636,15 @@ HELP_SH = help_block(
 )
 
 HELP_MH = help_block(
-    "Matches (.m) – Admin-Details",
+    "Matches (.m / .M) – Admin-Details",
     rows=[
         (".m",                   "List last 10 matches."),
-        (".m <id>",              "Show match details."),
+        (".m <season>",          "List matches in one season."),
+        (".M <id>",              "Show match details."),
         (".m <id> key:value",    "Edit match.\nkeys: teamevent, season, start, opponent, score, scoreopp"),
         (".m+ <opponent>",       "Add match with defaults."),
         (".m+ season:59 teamevent:12 start:2026-03-29 Gegner", "Add match with optional fields."),
         (".m- <match>",          "Delete match."),
-        (".M <match>",           "Show match details."),
     ],
     total_width=65,
     left_col=22,
@@ -470,19 +726,22 @@ async def on_message(message):
 
 
     # --- Public: Update own Garage Power ---
-    if cmd == ".gp":
+    if cmd == ".garagepower":
         if len(args) != 1 or not args[0].isdigit():
-            await message.channel.send("Usage: .gp <garagepower>")
+            await send_usage(message.channel, ".garagepower <number>", example=".garagepower 123456")
             return
 
         discord_key = str(message.author)
         pid = await get_self_player_id(discord_key)
         if not pid:
-            await message.channel.send("❌ Could not resolve your player. Set your Discord in players table first.")
+            await send_error(
+                message.channel,
+                "I could not find your player profile. Ask a leader to set your Discord name in the players table.",
+            )
             return
 
         output = await run_hcr2(["player", "edit", pid, "--gp", args[0]])
-        await send_codeblock(message.channel, output)
+        await send_cli_result(message.channel, output, success_title="Garage Power updated")
         return
 
 
@@ -591,16 +850,16 @@ async def on_message(message):
         return
 
     # --- Public: Eigene Account-Infos anzeigen ---
-    if cmd == ".acc":
+    if cmd == ".profile":
         discord_key = str(message.author)
         output = await run_hcr2(["player", "show", "--discord", discord_key])
-        await send_codeblock(message.channel, output)
+        await send_player_profile(message.channel, output, title="Your profile")
         return
 
-    # --- Public: Suche wie `.P <term>` ---
+    # --- Public: Player search ---
     if cmd == ".search":
         if not args:
-            await message.channel.send("Usage: .search <term>")
+            await send_usage(message.channel, ".search <term>", example=".search anna")
             return
         term = " ".join(args)
         output = await run_hcr2(["player", "grep", term])
@@ -608,26 +867,26 @@ async def on_message(message):
         return
 
     # --- Public: Show wie `.p <id>` ---
-    if cmd == ".show":
+    if cmd == ".player":
         if len(args) != 1 or not args[0].isdigit():
-            await message.channel.send("Usage: .show <id>")
+            await send_usage(message.channel, f"{cmd} <id>", example=f"{cmd} 42")
             return
         output = await run_hcr2(["player", "show", args[0]])
-        await send_codeblock(message.channel, output)
+        await send_player_profile(message.channel, output)
         return
 
     # --- Self profile updates (public): .vehicles / .about / .language / .playstyle / .birthday / .emoji ---
     if cmd in (".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji"):
         if not args:
             usage = {
-                ".vehicles": "Usage: .vehicles <text>",
-                ".about": "Usage: .about <text>",
-                ".language": "Usage: .language <code or text>",
-                ".playstyle": "Usage: .playstyle <text>",
-                ".birthday": "Usage: .birthday <DD.MM or DD.MM.>",
-                ".emoji": "Usage: .emoji <emoji>",
+                ".vehicles": (".vehicles <text>", ".vehicles Rally Car, Muscle Car"),
+                ".about": (".about <text>", ".about active daily, team events focused"),
+                ".language": (".language <code or text>", ".language German / English"),
+                ".playstyle": (".playstyle <text>", ".playstyle safe runs first"),
+                ".birthday": (".birthday <DD.MM.>", ".birthday 15.07."),
+                ".emoji": (".emoji <emoji>", ".emoji 🏁"),
             }[cmd]
-            await message.channel.send(usage)
+            await send_usage(message.channel, usage[0], example=usage[1])
             return
 
         discord_key = str(message.author)
@@ -635,13 +894,23 @@ async def on_message(message):
         if cmd == ".birthday":
             value = args[0].strip()
             if not re.fullmatch(r"\d{1,2}\.\d{1,2}\.?", value):
-                await message.channel.send("⚠️ Invalid format. Use `DD.MM` or `DD.MM.` (no year).")
+                await send_usage(
+                    message.channel,
+                    ".birthday <DD.MM.>",
+                    example=".birthday 15.07.",
+                    note="Use day and month only, no year.",
+                )
                 return
             flag = "--birthday"
         elif cmd == ".emoji":
             value = args[0].strip()
             if not value or (" " in value):
-                await message.channel.send("⚠️ Invalid format. Use `.emoji <emoji>` (single token, no spaces).")
+                await send_usage(
+                    message.channel,
+                    ".emoji <emoji>",
+                    example=".emoji 🏁",
+                    note="Use one emoji only.",
+                )
                 return
             flag = "--emoji"
         else:
@@ -655,7 +924,15 @@ async def on_message(message):
             flag = flag_map[cmd]
 
         output = await update_self_field(discord_key, flag, value)
-        await send_codeblock(message.channel, output)
+        titles = {
+            ".vehicles": "Preferred vehicles updated",
+            ".about": "About text updated",
+            ".language": "Language updated",
+            ".playstyle": "Playstyle updated",
+            ".birthday": "Birthday updated",
+            ".emoji": "Emoji updated",
+        }
+        await send_cli_result(message.channel, output, success_title=titles[cmd])
         return
 
     # --- Away / Back ---
@@ -669,13 +946,13 @@ async def on_message(message):
         if dur:
             call += ["--dur", dur]
         output = await run_hcr2(call)
-        await send_codeblock(message.channel, output)
+        await send_cli_result(message.channel, output, success_title="Away status updated")
         return
 
     if cmd == ".back":
         discord_key = str(message.author)
         output = await run_hcr2(["player", "back", "--discord", discord_key])
-        await send_codeblock(message.channel, output)
+        await send_cli_result(message.channel, output, success_title="Welcome back")
         return
 
     # --- Player Commands ---
@@ -685,11 +962,24 @@ async def on_message(message):
             await send_codeblock(message.channel, output)
             return
 
+        if args[0].lower() in ("search", "find"):
+            if len(args) < 2:
+                await send_usage(message.channel, ".p search <term>", example=".p search anna")
+                return
+            term = " ".join(args[1:])
+            output = await run_hcr2(["player", "grep", term])
+            await send_codeblock(message.channel, output)
+            return
+
         if args[0].isdigit():
             player_id = args[0]
             if len(args) == 1:
-                output = await run_hcr2(["player", "show", player_id])
-                await send_codeblock(message.channel, output)
+                await send_usage(
+                    message.channel,
+                    ".P <id>",
+                    example=f".P {player_id}",
+                    note="Uppercase commands show details. Lowercase .p lists or edits players.",
+                )
                 return
 
             edit_args = ["player", "edit", player_id]
@@ -721,7 +1011,11 @@ async def on_message(message):
             await send_codeblock(message.channel, output)
             return
 
-        await message.channel.send("⚠️ Invalid .p format. Use `.p`, `.p <id>` or `.p <id> key:value [...]`")
+        await send_usage(
+            message.channel,
+            ".p | .p search <term> | .p <id> key:value [...]",
+            example=".p 42 gp:123456",
+        )
         return
 
     # --- Sheet create ---
@@ -840,7 +1134,7 @@ async def on_message(message):
             call = ["stats", "te"] + (rest[:1] if rest else [])
         elif sub == "battle":
             if len(rest) != 2 or not rest[0].isdigit() or not rest[1].isdigit():
-                await message.channel.send("Usage: .stats battle <id1> <id2>")
+                await send_usage(message.channel, ".stats battle <id1> <id2>", example=".stats battle 12 34")
                 return
             call = ["stats", "battle", rest[0], rest[1]]
         elif sub == "absent":
@@ -853,7 +1147,7 @@ async def on_message(message):
         return
 
     # --- Donations under index 100 (PLTE) ---
-    if cmd == ".d":
+    if cmd in (".d", ".donations"):
         output = await run_hcr2(["donations", "under"])
         await send_codeblock(message.channel, output)
         return
@@ -872,10 +1166,12 @@ async def on_message(message):
         await send_codeblock(message.channel, output)
         return
 
-    # --- Player search (Admin-Variante weiter nutzbar) ---
-    if cmd == ".P" and args:
-        term = " ".join(args)
-        output = await run_hcr2(["player", "grep", term])
+    # --- Player details ---
+    if cmd == ".P":
+        if len(args) != 1 or not args[0].isdigit():
+            await send_usage(message.channel, ".P <id>", example=".P 42")
+            return
+        output = await run_hcr2(["player", "show", args[0]])
         await send_codeblock(message.channel, output)
         return
 
@@ -946,14 +1242,19 @@ async def on_message(message):
             await send_codeblock(message.channel, show_out)
             return
 
-        await message.channel.send("⚠️ Invalid .m format. Use `.m`, `.m <id>`, or `.m <id> key:value [...]`")
+        await send_usage(
+            message.channel,
+            ".m | .m <season> | .m <id> key:value [...]",
+            example=".m 62",
+            note="Use `.M <id>` to show match details.",
+        )
         return
 
     if cmd == ".M":
         if len(args) == 1 and args[0].isdigit():
             output = await run_hcr2(["match", "show", args[0]])
         else:
-            await message.channel.send("⚠️ Invalid .M format. Use `.M <id>`")
+            await send_usage(message.channel, ".M <id>", example=".M 42")
             return
         await send_codeblock(message.channel, output)
         return
@@ -1032,6 +1333,15 @@ async def on_message(message):
             await message.channel.send("```\n" + output + "```")
         return
 
+    # --- Teamevent details ---
+    if cmd == ".T":
+        if len(args) != 1 or not args[0].isdigit():
+            await send_usage(message.channel, ".T <id>", example=".T 12")
+            return
+        output = await run_hcr2(["teamevent", "show", args[0]])
+        await send_codeblock(message.channel, output)
+        return
+
     # --- Teamevents ---
     if cmd == ".t":
         if not args:
@@ -1040,8 +1350,12 @@ async def on_message(message):
             return
 
         if len(args) == 1 and args[0].isdigit():
-            output = await run_hcr2(["teamevent", "show", args[0]])
-            await send_codeblock(message.channel, output)
+            await send_usage(
+                message.channel,
+                ".T <id>",
+                example=f".T {args[0]}",
+                note="Uppercase commands show details. Lowercase .t lists or edits team events.",
+            )
             return
 
         if args[0].isdigit() and len(args) > 1:
@@ -1069,7 +1383,12 @@ async def on_message(message):
             await send_codeblock(message.channel, show_out)
             return
 
-        await message.channel.send("⚠️ Invalid .t format. Use `.t`, `.t <id>`, or `.t <id> key:value [...]`")
+        await send_usage(
+            message.channel,
+            ".t | .t <id> key:value [...]",
+            example=".t 12 tracks:4 score:15000",
+            note="Use `.T <id>` to show team-event details.",
+        )
         return
 
     # --- Admin Sub-Helps (2 Spalten) ---
@@ -1105,60 +1424,12 @@ async def on_message(message):
 
     # --- Admin Help (Kurz) ---
     if cmd == ".h":
-        help_text = help_block(
-            "Administration (kurz) – Sub-Helps: .ph / .th / .sh / .mh / .xh",
-            rows=[
-                (".p[h]",        "Manage Players or show help."),
-                (".P <t>",       "Search Player by name/alias/discordname."),
-                (".S <id>",      "Show player stats."),
-                (".s[h]",        "Manage seasons or show help."),
-                (".s+ <div>",    "Add next season with one division."),
-                (".d",           "Show donations index under 100."),
-                (".t[h]",        "Manage teamevents or show help."),
-                (".t+ <name>",   "Add teamevent for the next free ISO week."),
-                (".m[h]",        "Manage matches or show help."),
-                (".x[h]",        "Manages scores or show help."),
-                (".c <matchid>", "Create match sheet in nextcloud."),
-                (".i <matchid>", "Import match sheet from nextcloud."),
-                (".v",           "List vehicles."),
-                (".s [s]",       "List matches in season [s] (default=current season)."),
-                (".version",     "Show bot version."),
-            ],
-            total_width=68,
-            left_col=22,
-        )
-        await message.channel.send(help_text)
+        await send_admin_help(message.channel)
         return
 
     # --- User Help ---
     if cmd == ".help":
-        help_text = help_block(
-            "Public Commands",
-            rows=[
-                (".away [1w..4w]",  "Mark yourself absent (default 1w)."),
-                (".back",           "Clear your absence."),
-                (".vehicles <text>","Set your preferred vehicles."),
-                (".about <text>",      "Set your about/bio text."),
-                (".language <text>",   "Set your language (e.g., german, english)."),
-                (".playstyle <text>",  "Set your playstyle."),
-                (".birthday <DD.MM.>","Set your birthday (no year)."),
-                (".emoji <emoji>",  "Set your personal emoji."),
-                (".gp <gp>",        "Set your Garage Power."),
-                (".leader",         "Show all leaders."),
-                (".acc",            "Show your account info."),
-                (".search <term>",  "Search players."),
-                (".show <id>",      "Show player by ID."),
-                (".stats",          "Show Performance Stats for current season"),
-                (".stats [type]",   "Show stats for misc types:\n"
-                                    "perf [seasonid] [noskip], score [seasonid] [noskip], points [seasonid] [noskip],\n"
-                                    "absent [seasonid], battle <playerid1> <playerid2>, bday, te <id>"),
-                (".d",              "Show donation index for PLTE (only players below 100)."),
-                (".help",           "Show this help message."),
-            ],
-            total_width=68,
-            left_col=22,
-        )
-        await message.channel.send(help_text)
+        await send_public_help(message.channel)
         return
 
     # --- Aliases from COMMANDS map ---

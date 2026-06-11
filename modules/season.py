@@ -5,7 +5,14 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
-from modules.common import connect_db, get_arg_value, parse_int, print_table_header
+from modules.common import (
+    connect_db,
+    get_arg_value,
+    parse_int,
+    print_command_help,
+    print_table_header,
+    print_unknown_command,
+)
 
 
 VALID_DIVISIONS = {"DIV1", "DIV2", "DIV3", "DIV4", "DIV5", "DIV6", "DIV7", "CC"}
@@ -22,23 +29,26 @@ def handle_command(cmd: str, args: list[str]) -> None:
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown season command: {cmd}")
+        print_unknown_command("season", cmd)
         print_help()
         return
     handler(args)
 
 
 def print_help() -> None:
-    print("Usage: python hcr2.py season <command> [args]")
-    print("\nCommands:")
-    print("  list                                   Show the latest 10 seasons")
-    print("  list all | --all                       Show all seasons")
-    print("  list <number> | --number <number>      Show one season")
-    print("  list <division> | --division <division>  Show seasons in one division")
-    print("  add <division>                         Add the next season with one division")
-    print("  add <number> [div] | --number <number> [--division <division>]")
-    print("                                         Add or update one season")
-    print("  delete <number> | --number <number>    Delete one season")
+    print_command_help(
+        usage="python hcr2.py season <command> [args]",
+        commands=[
+            ("list", "Show the latest 10 seasons"),
+            ("list --all", "Show all seasons"),
+            ("list --number <number>", "Show one season"),
+            ("list --division <division>", "Show seasons in one division"),
+            ("add <division>", "Add the next season with one division"),
+            ("add --number <number> [--division <division>]", "Add or update one season"),
+            ("delete --number <number>", "Delete one season"),
+        ],
+        notes=["Legacy positional aliases are still accepted for list, add and delete."],
+    )
 
 
 def _handle_add(args: list[str]) -> None:

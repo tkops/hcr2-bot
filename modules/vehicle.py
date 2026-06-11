@@ -7,7 +7,13 @@ from typing import Callable, Optional
 import sqlite3
 import yaml
 
-from modules.common import connect_db, parse_int, print_table_header
+from modules.common import (
+    connect_db,
+    parse_int,
+    print_command_help,
+    print_table_header,
+    print_unknown_command,
+)
 
 
 USAGE_ADD = "Usage: vehicle add <name> <shortname> | --name <name> --short <shortname>"
@@ -27,7 +33,8 @@ def handle_command(cmd: str, args: list[str]) -> None:
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown vehicle command: {cmd}")
+        print_unknown_command("vehicle", cmd)
+        print_help()
         return
     handler(args)
 
@@ -236,14 +243,16 @@ def drop_table() -> None:
 
 
 def print_help() -> None:
-    print("Usage: python hcr2.py vehicle <command> [args]")
-    print("\nCommands:")
-    print("  list                                   Show all vehicles")
-    print("  add <name> <short> | --name <name> --short <short>")
-    print("                                         Add one vehicle")
-    print("  edit <id> | --id <id> [--name NAME] [--short SHORTNAME]")
-    print("                                         Edit one vehicle")
-    print("  delete <id> | --id <id>                Delete one vehicle")
-    print("  import <file>                          Import vehicles from YAML")
-    print("  export [file]                          Export vehicles to YAML or stdout")
-    print("  drop                                   Drop the vehicle table")
+    print_command_help(
+        usage="python hcr2.py vehicle <command> [args]",
+        commands=[
+            ("list", "Show all vehicles"),
+            ("add --name <name> --short <short>", "Add one vehicle"),
+            ("edit --id <id> [--name NAME] [--short SHORTNAME]", "Edit one vehicle"),
+            ("delete --id <id>", "Delete one vehicle"),
+            ("import <file>", "Import vehicles from YAML"),
+            ("export [file]", "Export vehicles to YAML or stdout"),
+            ("drop", "Drop the vehicle table"),
+        ],
+        notes=["Legacy positional aliases are still accepted for add, edit and delete."],
+    )

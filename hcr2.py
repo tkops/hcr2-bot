@@ -1,5 +1,6 @@
 import sys
 from modules import vehicle, player, teamevent, season, match, matchscore, stats, sheet, donations
+from modules.common import print_command_help, print_unknown_entity
 import version
 
 
@@ -16,21 +17,25 @@ ENTITY_MODULES = {
 }
 
 def show_main_help():
-    print("Usage: python hcr2.py <entity> <command> [args]")
-    print("\nPreferred CLI style:")
-    print("  use flags for ids and filters, e.g. --id, --season, --all, --team")
-    print("  older positional forms still work as legacy aliases")
-    print("\nAvailable entities:")
-    print("  vehicle     Manage vehicles")
-    print("  player      Manage players")
-    print("  teamevent   Manage teamevents")
-    print("  season      Manage seasons")
-    print("  match       Manage matches")
-    print("  matchscore  Manage matchscores")
-    print("  stats       Show statistics")
-    print("  sheet       Manage Excel files for matches")
-    print("  donations   Manage Research Lab donations")
-    print("  version     Print version")
+    print_command_help(
+        usage="python hcr2.py <entity> <command> [args]",
+        commands=[
+            ("vehicle", "Manage vehicles"),
+            ("player", "Manage players"),
+            ("teamevent", "Manage team events"),
+            ("season", "Manage seasons"),
+            ("match", "Manage matches"),
+            ("matchscore", "Manage match scores"),
+            ("stats", "Show statistics"),
+            ("sheet", "Manage Excel files for matches"),
+            ("donations", "Manage Research Lab donations"),
+            ("version", "Print version"),
+        ],
+        notes=[
+            "Prefer flags for IDs, filters and optional values, e.g. --id, --season, --all, --team.",
+            "Older positional forms still work as legacy aliases.",
+        ],
+    )
 
 def show_entity_help(entity):
     if entity == "version":
@@ -39,7 +44,7 @@ def show_entity_help(entity):
 
     module = ENTITY_MODULES.get(entity)
     if module is None:
-        print(f"❌ Unknown entity: {entity}")
+        print_unknown_entity(entity)
         show_main_help()
         return
 
@@ -64,7 +69,7 @@ def main():
 
     module = ENTITY_MODULES.get(entity)
     if module is None:
-        print(f"❌ Unknown entity: {entity}")
+        print_unknown_entity(entity)
         show_main_help()
         return
 

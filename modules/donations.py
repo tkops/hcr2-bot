@@ -2,7 +2,14 @@ import sqlite3
 from typing import Callable
 
 from datetime import datetime
-from modules.common import connect_db, get_arg_value, parse_int, print_table_header
+from modules.common import (
+    connect_db,
+    get_arg_value,
+    parse_int,
+    print_command_help,
+    print_table_header,
+    print_unknown_command,
+)
 
 # Fixed start date for match counting.
 STATS_START_DATE = "2025-11-01"
@@ -16,19 +23,19 @@ USAGE_LIST = "Usage: donations list [<date>] | [--date <date>]"
 
 
 def print_help():
-    print("Usage: python hcr2.py donations <command> [args]")
-    print("\nCommands:")
-    print("  add <player_id> <date> <total> | --player <player_id> --date <date> --total <total>")
-    print("                                         Add one donation snapshot (cumulative total)")
-    print("  delete <donation_id> | --id <donation_id>  Delete one donation entry")
-    print("  edit <donation_id> | --id <donation_id> <total>")
-    print("                                         Edit one donation total")
-    print("  show [<player_id>] | [--player <player_id>]")
-    print("                                         Show one player's donations")
-    print("                                         Without player_id: show stats for all active players")
-    print("  stats                                  Show donation index per active player")
-    print("  under                                  Show players with donation index below 100")
-    print("  list [<date>] | [--date <date>]        List donation dates or entries for one date")
+    print_command_help(
+        usage="python hcr2.py donations <command> [args]",
+        commands=[
+            ("add --player <player_id> --date <date> --total <total>", "Add one donation snapshot (cumulative total)"),
+            ("delete --id <donation_id>", "Delete one donation entry"),
+            ("edit --id <donation_id> <total>", "Edit one donation total"),
+            ("show [--player <player_id>]", "Show one player's donations, or stats for all active players"),
+            ("stats", "Show donation index per active player"),
+            ("under", "Show players with donation index below 100"),
+            ("list [--date <date>]", "List donation dates or entries for one date"),
+        ],
+        notes=["Legacy positional aliases are still accepted for add, delete, edit, show and list."],
+    )
 
 
 def handle_command(command, args):
@@ -43,7 +50,7 @@ def handle_command(command, args):
     }
     handler = handlers.get(command)
     if handler is None:
-        print(f"❌ Unknown command: {command}")
+        print_unknown_command("donations", command)
         print_help()
         return
     handler(args)

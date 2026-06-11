@@ -4,7 +4,14 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Callable, Optional
 
-from modules.common import connect_db, get_arg_value, parse_flag_map, parse_int
+from modules.common import (
+    connect_db,
+    get_arg_value,
+    parse_flag_map,
+    parse_int,
+    print_command_help,
+    print_unknown_command,
+)
 
 
 USAGE_ADD = (
@@ -26,28 +33,33 @@ def handle_command(cmd: str, args: list[str]) -> None:
     }
     handler = handlers.get(cmd)
     if handler is None:
-        print(f"❌ Unknown teamevent command: {cmd}")
+        print_unknown_command("teamevent", cmd)
         print_help()
         return
     handler(args)
 
 
 def print_help() -> None:
-    print("Usage: python hcr2.py teamevent <command> [args]")
-    print("\nCommands:")
-    print('  add "<name>" [<year>/W<week>] [vehicle_ids|vehicle_shortnames] [track-count] [max-score]')
-    print("      or --name <name> [--week <year>/W<week>] [--vehicles ...] [--tracks <num>] [--score <num>]")
-    print("                                         Default week: next free ISO week")
-    print("  list                                   Show the latest 10 team events")
-    print("  list --all                             Show all team events")
-    print("  show all | --all                       Show all team events with summary fields")
-    print("  show <id> | --id <id>                  Show one team event")
-    print("  edit <id> | --id <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]")
-    print("                                         Edit one team event")
-    print("  delete <id> | --id <id>                Delete one team event")
-    print("\nExamples:")
-    print('  teamevent add "Teamcup" 2025/W38')
-    print('  teamevent add "Teamcup" 2025/W38 be,ro,sm,sc,hc 5 15000')
+    print_command_help(
+        usage="python hcr2.py teamevent <command> [args]",
+        commands=[
+            ("add --name <name> [--week <year>/W<week>] [--vehicles <ids|codes>] [--tracks <num>] [--score <num>]", "Add one team event"),
+            ("list", "Show the latest 10 team events"),
+            ("list --all", "Show all team events"),
+            ("show --all", "Show all team events with summary fields"),
+            ("show --id <id>", "Show one team event"),
+            ("edit --id <id> [--name NAME] [--tracks NUM] [--vehicles 1,2,3] [--score SCORE]", "Edit one team event"),
+            ("delete --id <id>", "Delete one team event"),
+        ],
+        notes=[
+            "Default week for add is the next free ISO week.",
+            "Legacy positional aliases are still accepted for add, show, edit and delete.",
+        ],
+        examples=[
+            'teamevent add --name "Teamcup" --week 2025/W38',
+            'teamevent add --name "Teamcup" --week 2025/W38 --vehicles be,ro,sm,sc,hc --tracks 5 --score 15000',
+        ],
+    )
 
 
 def _handle_add(args: list[str]) -> None:

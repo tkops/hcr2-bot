@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import textwrap
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -10,6 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PRIMARY_DB_PATH = REPO_ROOT.parent / "hcr2-db" / "hcr2.db"
 FALLBACK_DB_PATH = REPO_ROOT / "hcr2.db"
 DB_PATH = PRIMARY_DB_PATH if PRIMARY_DB_PATH.exists() else FALLBACK_DB_PATH
+
+STATUS_PREFIXES = {
+    "success": "✅",
+    "warning": "⚠️ ",
+    "error": "❌",
+    "info": "ℹ️ ",
+    "delete": "🗑️ ",
+    "update": "✏️ ",
+}
 
 
 def connect_db(*, row_factory=None) -> sqlite3.Connection:
@@ -130,3 +140,66 @@ def print_rule(width: int) -> None:
 def print_table_header(*, columns: list[str], width: int) -> None:
     print(" ".join(columns))
     print_rule(width)
+
+
+def print_status(level: str, message: str) -> None:
+    prefix = STATUS_PREFIXES.get(level, STATUS_PREFIXES["info"])
+    print(f"{prefix} {message}")
+
+
+def print_error(message: str) -> None:
+    print_status("error", message)
+
+
+def print_warning(message: str) -> None:
+    print_status("warning", message)
+
+
+def print_info(message: str) -> None:
+    print_status("info", message)
+
+
+def print_success(message: str) -> None:
+    print_status("success", message)
+
+
+def print_unknown_command(entity: str, command: str) -> None:
+    print_error(f"Unknown {entity} command: {command}")
+
+
+def print_unknown_entity(entity: str) -> None:
+    print_error(f"Unknown entity: {entity}")
+
+
+def print_command_help(
+    *,
+    usage: str,
+    commands: list[tuple[str, str]],
+    examples: Optional[list[str]] = None,
+    notes: Optional[list[str]] = None,
+) -> None:
+    print(f"Usage: {usage}")
+    print()
+    print("Commands:")
+    left_width = max((len(command) for command, _ in commands), default=0)
+    left_width = min(max(left_width, 32), 56)
+    for command, description in commands:
+        wrapped_command = textwrap.wrap(command, width=left_width) or [""]
+        if len(wrapped_command) == 1:
+            print(f"  {wrapped_command[0]:<{left_width}}  {description}")
+            continue
+        for line in wrapped_command:
+            print(f"  {line}")
+        print(f"  {'':<{left_width}}  {description}")
+
+    if notes:
+        print()
+        print("Notes:")
+        for note in notes:
+            print(f"  {note}")
+
+    if examples:
+        print()
+        print("Examples:")
+        for example in examples:
+            print(f"  {example}")
