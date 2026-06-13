@@ -21,7 +21,7 @@ Aktueller Stand:
   - `hcr2/db/migrations/0001_initial_schema.sql`
 - Nextcloud/WebDAV ist aus `modules/sheet.py` nach `hcr2/integrations/nextcloud.py` extrahiert.
 - Tests liegen in `tests/test_cli_smoke.py`.
-- Letzter Teststand: `python3 -m unittest discover -v` lief mit `81 tests` erfolgreich.
+- Letzter Teststand: `python3 -m unittest discover -v` lief mit `84 tests` erfolgreich.
 
 Bereits migrierte Domains:
 
@@ -81,13 +81,15 @@ Der naechste konkrete Einstieg ist Step 4 (`Sheet Import/Export weiter entkoppel
   - Player-Import-Diff/Update und Donation-Import-Upserts liegen in `hcr2/services/sheets.py`.
   - Donations-Import nutzt keinen Selbstaufruf per `python hcr2.py donations add` mehr.
   - Match-Sheet-Import nutzt keine Selbstaufrufe per `python hcr2.py player add`, `matchscore add` oder `match edit` mehr.
-  - Tests fuer Pfade, netzwerkfreien Match-Sheet-Export, Workbook-Strukturen, Workbook-Reading und Import-Services sind ergaenzt.
-- Naechster sinnvoller Einstieg: Match-Sheet-Import-Parsing/Validierung aus `modules/sheet.py` extrahieren und danach lokale Datei-/Upload-Orchestrierung weiter ausduennen.
+  - Match-Sheet-Workbook-Reading liegt in `hcr2/exporters/excel.py`.
+  - Match-Sheet-Import-Parsing/Validierung liegt in `hcr2/services/sheets.py`.
+  - Tests fuer Pfade, netzwerkfreien Match-Sheet-Export, Workbook-Strukturen, Workbook-Reading, Import-Services und Match-Sheet-Validierung sind ergaenzt.
+- Naechster sinnvoller Einstieg: lokale Datei-/Upload-Orchestrierung in `modules/sheet.py` weiter ausduennen, besonders Player-/Donation-/Match-Exportdaten in Services/Repositories vorbereiten.
 
 Bitte mit folgendem Prompt weitermachen:
 
 ```text
-Wir machen im hcr2-bot weiter. Noch uebrig: 5 Top-Level-Steps. Stand: Stats Step 1, der dokumentierte Matchscore-Teil aus Step 2 und Donations Step 3 sind erledigt. Step 4 hat erste Slices: `hcr2/services/sheets.py` fuer Sheet-Dateinamen/Remote-Pfade/Web-URLs, Donation-k-Parsing, Player-Import-Diff/Update, Donation-Import-Upserts und Match-Sheet-Anwendung ohne Selbstaufrufe; `hcr2/exporters/excel.py` fuer Player-/Donation-Workbook-Erzeugung und Import-Reading. `python3 -m unittest discover -v` ist mit 81 Tests gruen. Bitte mach als naechstes in Step 4 weiter: Match-Sheet-Import-Parsing/Validierung aus `modules/sheet.py` extrahieren und danach lokale Datei-/Upload-Orchestrierung weiter ausduennen.
+Wir machen im hcr2-bot weiter. Noch uebrig: 5 Top-Level-Steps. Stand: Stats Step 1, der dokumentierte Matchscore-Teil aus Step 2 und Donations Step 3 sind erledigt. Step 4 hat erste Slices: `hcr2/services/sheets.py` fuer Sheet-Dateinamen/Remote-Pfade/Web-URLs, Donation-k-Parsing, Player-Import-Diff/Update, Donation-Import-Upserts, Match-Sheet-Anwendung ohne Selbstaufrufe und Match-Sheet-Import-Validierung; `hcr2/exporters/excel.py` fuer Player-/Donation-Workbook-Erzeugung sowie Player-/Donation-/Match-Sheet-Workbook-Reading. `python3 -m unittest discover -v` ist mit 84 Tests gruen. Bitte mach als naechstes in Step 4 weiter: lokale Datei-/Upload-Orchestrierung in `modules/sheet.py` weiter ausduennen, besonders Player-/Donation-/Match-Exportdaten in Services/Repositories vorbereiten.
 ```
 
 ## Naechste Schritte

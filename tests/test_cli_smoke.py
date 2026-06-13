@@ -639,6 +639,49 @@ class TemporaryDatabaseSmokeTests(unittest.TestCase):
         self.assertEqual(scores, [(1, 51000, 210, 0, 1), (2, 42000, 120, 1, 0)])
         self.assertEqual(match_scores, (330, 220))
 
+    def test_sheet_service_validates_match_sheet_rows(self) -> None:
+        rows = [
+            (4, (1, 1, "Alice", 51000, 210, "false", "true")),
+            (5, (1, "a", "Cara", 42000, 120, "yes", "no")),
+        ]
+
+        result = sheet_service.validate_match_sheet_rows(
+            lady_score=330,
+            opponent_score=220,
+            rows=rows,
+            player_creator=lambda name: 3 if name == "Cara" else None,
+        )
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(
+            result.entries,
+            [
+                {"row": 4, "pid": 1, "score": 51000, "points": 210, "absent": 0, "checkin": 1},
+                {"row": 5, "pid": 3, "score": 42000, "points": 120, "absent": 1, "checkin": 0},
+            ],
+        )
+
+    def test_sheet_service_reports_match_sheet_validation_errors(self) -> None:
+        rows = [
+            (4, (1, "bad", "Alice", 51000, 100, "false", "false")),
+            (5, (1, 1, "Alice", 50000, 120, "false", "false")),
+            (6, (1, 2, "Betty", 49000, 120, "false", "false")),
+            (7, (1, 3, "Cara", 48000, 130, "false", "false")),
+        ]
+
+        result = sheet_service.validate_match_sheet_rows(
+            lady_score=300,
+            opponent_score=None,
+            rows=rows,
+            player_creator=lambda _name: None,
+        )
+
+        self.assertIn("Row 2: please fill team scores in C2 (Power Ladies) and D2 (Opponent).", result.errors)
+        self.assertIn("Row 4: invalid playerID 'bad' – use a number or 'a'", result.errors)
+        self.assertTrue(any("High points duplicated" in error for error in result.errors))
+        self.assertTrue(any("Monotony violation" in error for error in result.errors))
+        self.assertTrue(any("Team points mismatch" in error for error in result.errors))
+
     def test_sheet_generate_excel_uses_sanitized_paths_and_uploads(self) -> None:
         output_path = Path(self.tempdir.name) / "scores"
         match = (7, "2021-06-05", 62, "Fast Opps #1", "Team Cup!")
@@ -1203,6 +1246,23 @@ class OutputFormattingTests(unittest.TestCase):
         self.assertEqual(date_str, "2026-06-13")
         self.assertEqual(entries, [(1, 13500)])
         self.assertEqual(errors, 2)
+
+    def test_excel_exporter_reads_match_sheet_workbook(self) -> None:
+        wb = excel_exporter.Workbook()
+        ws = wb.active
+        ws["C2"] = 330
+        ws["D2"] = "220"
+        ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin"])
+        ws.append([1, 1, "Alice", 51000, 210, "false", "true"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "match.xlsx"
+            wb.save(path)
+
+            lady_score, opponent_score, rows = excel_exporter.read_match_sheet_workbook(path)
+
+        self.assertEqual(lady_score, 330)
+        self.assertEqual(opponent_score, 220)
+        self.assertEqual(rows, [(4, (1, 1, "Alice", 51000, 210, "false", "true"))])
 
     def test_stats_output_prints_absent_stats(self) -> None:
         buffer = io.StringIO()

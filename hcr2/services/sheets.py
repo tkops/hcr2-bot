@@ -35,6 +35,12 @@ class MatchSheetApplyResult:
     errors: int = 0
 
 
+@dataclass(frozen=True)
+class MatchSheetValidationResult:
+    entries: list[dict[str, int]]
+    errors: list[str]
+
+
 def sanitize_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "", value.replace(" ", "_"))
 
@@ -215,6 +221,74 @@ def add_plte_player_from_sheet(name: str) -> int | None:
     return result.player_id
 
 
+def validate_match_sheet_rows(
+    *,
+    lady_score: int | None,
+    opponent_score: int | None,
+    rows: list[tuple[int, tuple]],
+    player_creator=add_plte_player_from_sheet,
+) -> MatchSheetValidationResult:
+    errors: list[str] = []
+    entries: list[dict[str, int]] = []
+
+    if lady_score is None or opponent_score is None:
+        errors.append("Row 2: please fill team scores in C2 (Power Ladies) and D2 (Opponent).")
+
+    for row_idx, row in rows:
+        pid_cell = row[1]
+        player_name_cell = row[2]
+
+        mode, pid_or_msg = parse_player_id_marker(pid_cell)
+        if mode == "SKIP":
+            continue
+        if mode == "ERROR":
+            errors.append(f"Row {row_idx}: {pid_or_msg}")
+            continue
+        if mode == "CREATE":
+            name = (player_name_cell or "").strip()
+            if not name:
+                errors.append(f"Row {row_idx}: cannot create player – column C (Player) is empty.")
+                continue
+            new_id = player_creator(name)
+            if not new_id:
+                errors.append(f"Row {row_idx}: failed to create player '{name}'.")
+                continue
+            player_id = int(new_id)
+        else:
+            player_id = int(pid_or_msg)
+
+        score_cell = row[3] if len(row) >= 4 else None
+        points_cell = row[4] if len(row) >= 5 else None
+        absent_raw = row[5] if len(row) >= 6 else "false"
+        checkin_raw = row[6] if len(row) >= 7 else "false"
+
+        score_val = _strict_int(score_cell, "Score", row_idx, errors)
+        points_val = _strict_int(points_cell, "Points", row_idx, errors)
+
+        if score_val is not None and not (0 <= score_val <= 75000):
+            errors.append(f"Row {row_idx}: Score out of range (0..75000): {score_val}")
+        if points_val is not None and not (0 <= points_val <= 300):
+            errors.append(f"Row {row_idx}: Points out of range (0..300): {points_val}")
+
+        if score_val is not None and points_val is not None:
+            entries.append({
+                "row": row_idx,
+                "pid": int(player_id),
+                "score": int(score_val),
+                "points": int(points_val),
+                "absent": int(_to_bool01(absent_raw)),
+                "checkin": int(_to_bool01(checkin_raw)),
+            })
+
+    errors.extend(_validate_match_sheet_point_order(entries))
+
+    sum_points = sum(entry["points"] for entry in entries)
+    if lady_score is not None and sum_points != lady_score:
+        errors.append(f"Team points mismatch: sum(points)={sum_points} != C2={lady_score}")
+
+    return MatchSheetValidationResult(entries=entries, errors=errors)
+
+
 def apply_match_sheet_entries(
     *,
     match_id: int,
@@ -253,6 +327,23 @@ def apply_match_sheet_entries(
         score_updated=score_updated,
         errors=errors,
     )
+
+
+def parse_player_id_marker(pid_cell):
+    if pid_cell is None:
+        return ("SKIP", None)
+    if isinstance(pid_cell, float) and float(pid_cell).is_integer():
+        return ("OK", int(pid_cell))
+    if isinstance(pid_cell, int):
+        return ("OK", int(pid_cell))
+    text = str(pid_cell).strip().lower()
+    if text == "":
+        return ("SKIP", None)
+    if text in ("a", "add", "new", "+", "none", "-"):
+        return ("CREATE", None)
+    if text.isdigit():
+        return ("OK", int(text))
+    return ("ERROR", f"invalid playerID '{pid_cell}' – use a number or 'a'")
 
 
 def _detect_boolean_columns(conn: sqlite3.Connection, table: str, candidate_overrides=None) -> set[str]:
@@ -300,3 +391,66 @@ def _read_int(value) -> int | None:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     return None
+
+
+def _strict_int(value, label: str, row_idx: int, errors: list[str]) -> int | None:
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        errors.append(f"Row {row_idx}: {label} must not be empty.")
+        return None
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        errors.append(f"Row {row_idx}: {label} must be an integer, got float={value}.")
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+        errors.append(f"Row {row_idx}: {label} must be a number, got '{value}'.")
+        return None
+    errors.append(f"Row {row_idx}: {label} has invalid type {type(value).__name__}.")
+    return None
+
+
+def _to_bool01(value) -> int:
+    if value is None:
+        return 0
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "j\u0061"):
+        return 1
+    if text in ("0", "false", "no", "n", "n\u0065in", ""):
+        return 0
+    return 0
+
+
+def _validate_match_sheet_point_order(entries: list[dict[str, int]]) -> list[str]:
+    errors: list[str] = []
+
+    seen_high: dict[int, list[dict[str, int]]] = {}
+    for entry in entries:
+        points = entry["points"]
+        if points > 20:
+            seen_high.setdefault(points, []).append(entry)
+    for points, duplicate_rows in seen_high.items():
+        if len(duplicate_rows) > 1:
+            ids = ", ".join(f"row {row['row']} (pid {row['pid']})" for row in duplicate_rows)
+            errors.append(f"High points duplicated (>20): {points} appears in {ids}")
+
+    entries_sorted = sorted(entries, key=lambda row: (-row["score"], row["pid"]))
+    for idx in range(len(entries_sorted) - 1):
+        current = entries_sorted[idx]
+        next_entry = entries_sorted[idx + 1]
+        if current["points"] < next_entry["points"]:
+            errors.append(
+                f"Monotony violation: row {current['row']} (score {current['score']}, points {current['points']}) "
+                f"vs row {next_entry['row']} (score {next_entry['score']}, points {next_entry['points']})"
+            )
+        if current["points"] == next_entry["points"] and current["points"] >= 20:
+            errors.append(
+                f"Equal high points not allowed (>=20): rows {current['row']} & {next_entry['row']} "
+                f"both {current['points']}"
+            )
+
+    return errors

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sqlite3
 from typing import Optional, List, Tuple
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Alignment
 from pathlib import Path
 from datetime import date
@@ -245,29 +245,6 @@ def generate_excel(match, players, output_path):
     return f"[{filename}]({web_url})", True
 
 
-# --- Helpers for match import ---
-
-def _parse_pid_marker(pid_cell):
-    if pid_cell is None:
-        return ("SKIP", None)
-    if isinstance(pid_cell, float) and float(pid_cell).is_integer():
-        return ("OK", int(pid_cell))
-    if isinstance(pid_cell, int):
-        return ("OK", int(pid_cell))
-    s = str(pid_cell).strip().lower()
-    if s == "":
-        return ("SKIP", None)
-    if s in ("a", "add", "new", "+", "none", "-"):
-        return ("CREATE", None)
-    if s.isdigit():
-        return ("OK", int(s))
-    return ("ERROR", f"invalid playerID '{pid_cell}' – use a number or 'a'")
-
-
-def _add_player_plte_and_get_id(name: str) -> Optional[int]:
-    return sheet_service.add_plte_player_from_sheet(name)
-
-
 def import_excel_to_matchscore(match_id):
     with sqlite3.connect(DB_PATH) as conn:
         match = get_match_info(conn, match_id)
@@ -282,157 +259,22 @@ def import_excel_to_matchscore(match_id):
         local_path.parent.mkdir(parents=True, exist_ok=True)
         download_from_nextcloud(season, filename, local_path)
 
-        wb = load_workbook(filename=local_path, data_only=True)
-        ws = wb.active
+        ladyscore, oppscore, rows = excel_exporter.read_match_sheet_workbook(local_path)
+        validation = sheet_service.validate_match_sheet_rows(
+            lady_score=ladyscore,
+            opponent_score=oppscore,
+            rows=rows,
+        )
 
-        errors = []
-        entries = []
-
-        def strict_int(cell_val, label, row_idx):
-            if cell_val is None or (isinstance(cell_val, str) and cell_val.strip() == ""):
-                errors.append(f"Row {row_idx}: {label} must not be empty.")
-                return None
-            if isinstance(cell_val, float):
-                if cell_val.is_integer():
-                    return int(cell_val)
-                errors.append(f"Row {row_idx}: {label} must be an integer, got float={cell_val}.")
-                return None
-            if isinstance(cell_val, int):
-                return cell_val
-            if isinstance(cell_val, str):
-                s = cell_val.strip()
-                if s.isdigit():
-                    return int(s)
-                errors.append(f"Row {row_idx}: {label} must be a number, got '{cell_val}'.")
-                return None
-            errors.append(f"Row {row_idx}: {label} has invalid type {type(cell_val).__name__}.")
-            return None
-
-        def read_int_or_none(val):
-            if val is None:
-                return None
-            if isinstance(val, int):
-                return val
-            if isinstance(val, float) and val.is_integer():
-                return int(val)
-            if isinstance(val, str):
-                s = val.strip()
-                if s.isdigit():
-                    return int(s)
-            return None
-
-        def to_bool01(x):
-            if x is None:
-                return 0
-            s = str(x).strip().lower()
-            if s in ("1", "true", "yes", "y", "j\u0061"):
-                return 1
-            if s in ("0", "false", "no", "n", "n\u0065in", ""):
-                return 0
-            return 0
-
-        ladyscore = read_int_or_none(ws["C2"].value)
-        oppscore  = read_int_or_none(ws["D2"].value)
-        if ladyscore is None or oppscore is None:
-            errors.append("Row 2: please fill team scores in C2 (Power Ladies) and D2 (Opponent).")
-
-        row_idx = 4
-        for row in ws.iter_rows(min_row=4, values_only=True):
-            if not row or len(row) < 3:
-                row_idx += 1
-                continue
-
-            pid_cell = row[1]
-            player_name_cell = row[2]
-
-            mode, pid_or_msg = _parse_pid_marker(pid_cell)
-            if mode == "SKIP":
-                row_idx += 1
-                continue
-            if mode == "ERROR":
-                errors.append(f"Row {row_idx}: {pid_or_msg}")
-                row_idx += 1
-                continue
-            if mode == "CREATE":
-                name = (player_name_cell or "").strip()
-                if not name:
-                    errors.append(f"Row {row_idx}: cannot create player – column C (Player) is empty.")
-                    row_idx += 1
-                    continue
-                new_id = _add_player_plte_and_get_id(name)
-                if not new_id:
-                    errors.append(f"Row {row_idx}: failed to create player '{name}'.")
-                    row_idx += 1
-                    continue
-                pid = int(new_id)
-            else:
-                pid = int(pid_or_msg)
-
-            score_cell   = row[3] if len(row) >= 4 else None
-            points_cell  = row[4] if len(row) >= 5 else None
-            absent_raw   = row[5] if len(row) >= 6 else "false"
-            checkin_raw  = row[6] if len(row) >= 7 else "false"
-
-            score_val  = strict_int(score_cell,  "Score",  row_idx)
-            points_val = strict_int(points_cell, "Points", row_idx)
-
-            if score_val is not None and not (0 <= score_val <= 75000):
-                errors.append(f"Row {row_idx}: Score out of range (0..75000): {score_val}")
-            if points_val is not None and not (0 <= points_val <= 300):
-                errors.append(f"Row {row_idx}: Points out of range (0..300): {points_val}")
-
-            absent01  = to_bool01(absent_raw)
-            checkin01 = to_bool01(checkin_raw)
-
-            if score_val is not None and points_val is not None:
-                entries.append({
-                    "row": row_idx,
-                    "pid": int(pid),
-                    "score": int(score_val),
-                    "points": int(points_val),
-                    "absent": int(absent01),
-                    "checkin": int(checkin01),
-                })
-
-            row_idx += 1
-
-        seen_high = {}
-        for e in entries:
-            p = e["points"]
-            if p > 20:
-                seen_high.setdefault(p, []).append(e)
-        for pval, rows_dup in seen_high.items():
-            if len(rows_dup) > 1:
-                ids = ", ".join(f"row {r['row']} (pid {r['pid']})" for r in rows_dup)
-                errors.append(f"High points duplicated (>20): {pval} appears in {ids}")
-
-        entries_sorted = sorted(entries, key=lambda x: (-x["score"], x["pid"]))
-        for i in range(len(entries_sorted) - 1):
-            a = entries_sorted[i]
-            b = entries_sorted[i + 1]
-            if a["points"] < b["points"]:
-                errors.append(
-                    f"Monotony violation: row {a['row']} (score {a['score']}, points {a['points']}) "
-                    f"vs row {b['row']} (score {b['score']}, points {b['points']})"
-                )
-            if a["points"] == b["points"] and a["points"] >= 20:
-                errors.append(
-                    f"Equal high points not allowed (>=20): rows {a['row']} & {b['row']} both {a['points']}"
-                )
-
-        sum_points = sum(e["points"] for e in entries)
-        if ladyscore is not None and sum_points != ladyscore:
-            errors.append(f"Team points mismatch: sum(points)={sum_points} != C2={ladyscore}")
-
-        if errors:
+        if validation.errors:
             print("❌ Import aborted due to validation errors:")
-            for msg in errors:
+            for msg in validation.errors:
                 print(" -", msg)
             return
 
         result = sheet_service.apply_match_sheet_entries(
             match_id=match_id,
-            entries=entries,
+            entries=validation.entries,
             score_ladys=ladyscore if ladyscore is not None else 0,
             score_opponent=oppscore if oppscore is not None else 0,
         )

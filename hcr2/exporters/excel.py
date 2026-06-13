@@ -123,6 +123,19 @@ def read_donations_workbook(path: Path) -> tuple[str | None, list[tuple[int, int
     return date_str, entries, errors
 
 
+def read_match_sheet_workbook(path: Path) -> tuple[int | None, int | None, list[tuple[int, tuple]]]:
+    wb = load_workbook(filename=path, data_only=True)
+    ws = wb.active
+    lady_score = _read_int(ws["C2"].value)
+    opponent_score = _read_int(ws["D2"].value)
+    rows = [
+        (row_idx, row)
+        for row_idx, row in enumerate(ws.iter_rows(min_row=4, values_only=True), start=4)
+        if row and len(row) >= 3
+    ]
+    return lady_score, opponent_score, rows
+
+
 def _read_donation_date(value) -> str | None:
     if isinstance(value, datetime):
         return value.date().isoformat()
