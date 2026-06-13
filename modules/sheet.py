@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import sqlite3
-from typing import Optional, List, Tuple
+from typing import Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment
 from pathlib import Path
@@ -16,7 +15,6 @@ from hcr2.integrations.nextcloud import (
 from hcr2.services import sheets as sheet_service
 from modules.common import (
     DB_PATH,
-    connect_db,
     is_absent_on,
     is_help_request,
     parse_date_or_none,
@@ -55,28 +53,6 @@ def sanitize_filename(s):
     return sheet_service.sanitize_filename(s)
 
 
-def get_match_info(conn, match_id):
-    c = conn.cursor()
-    c.execute("""
-        SELECT m.id, m.start, m.season_number, m.opponent, e.name
-        FROM match m
-        JOIN teamevent e ON m.teamevent_id = e.id
-        WHERE m.id = ?
-    """, (match_id,))
-    return c.fetchone()
-
-
-def get_active_players(conn) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, name, away_from, away_until
-        FROM players
-        WHERE active = 1 AND team = 'PLTE'
-        ORDER BY name
-    """)
-    return c.fetchall()
-
-
 def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> bool:
     return is_absent_on(match_day, frm, until)
 
@@ -91,81 +67,6 @@ def delete_from_nextcloud(remote_path) -> bool:
 
 def download_from_nextcloud(season, filename, local_path):
     return download_file(match_sheet_remote_path(season, filename), Path(local_path))
-
-
-# -------------------- Ranking Logic --------------------
-
-def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT
-            ms.player_id,
-            p.name,
-            p.team,
-            p.active,
-            ms.score,
-            m.id,
-            t.tracks
-        FROM matchscore ms
-        JOIN players p ON ms.player_id = p.id
-        JOIN match m ON ms.match_id = m.id
-        JOIN teamevent t ON m.teamevent_id = t.id
-        WHERE m.season_number = ?
-    """, (season_number,))
-    return cur.fetchall()
-
-
-def rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) -> List[Tuple[int, str, Optional[str], Optional[str]]]:
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, name, away_from, away_until
-        FROM players
-        WHERE active = 1 AND team = 'PLTE'
-    """)
-    base_players = cur.fetchall()
-    if not base_players:
-        return []
-    id_to_player = {pid: (pid, name, a_from, a_until) for (pid, name, a_from, a_until) in base_players}
-
-    rows = _fetch_season_rows(conn, season_number)
-
-    scores_by_match = {}
-    for pid, name, team, active, score, match_id, tracks in rows:
-        if team != "PLTE" or not active:
-            continue
-        if score is None:
-            continue
-        scaled = score * 4 / tracks if tracks else score
-        scores_by_match.setdefault(match_id, []).append((pid, scaled))
-
-    import statistics
-    player_deltas, player_counts = {}, {}
-    for _, entries in scores_by_match.items():
-        vals = [s for _, s in entries]
-        if not vals:
-            continue
-        try:
-            med = statistics.median(vals)
-        except statistics.StatisticsError:
-            continue
-        for pid, s in entries:
-            delta = s - med
-            player_deltas.setdefault(pid, []).append(delta)
-            player_counts[pid] = player_counts.get(pid, 0) + 1
-
-    with_scores, without_scores = [], []
-    for pid, (pid_, name, a_from, a_until) in id_to_player.items():
-        deltas = player_deltas.get(pid)
-        if deltas:
-            avg_delta = round(sum(deltas) / len(deltas))
-            cnt = player_counts.get(pid, 0)
-            with_scores.append((avg_delta, -cnt, name.lower(), (pid_, name, a_from, a_until)))
-        else:
-            without_scores.append((name.lower(), (pid_, name, a_from, a_until)))
-
-    with_scores_sorted = [p for _, _, _, p in sorted(with_scores, key=lambda x: (x[0], x[1], x[2]), reverse=True)]
-    without_scores_sorted = [p for _, p in sorted(without_scores, key=lambda x: x[0])]
-    return with_scores_sorted + without_scores_sorted
 
 
 # -------------------- Excel Generation & Import (Match Sheet) --------------------
@@ -246,51 +147,51 @@ def generate_excel(match, players, output_path):
 
 
 def import_excel_to_matchscore(match_id):
-    with sqlite3.connect(DB_PATH) as conn:
-        match = get_match_info(conn, match_id)
-        if not match:
-            print("❌ No match found.")
-            return
+    export_data = sheet_service.get_match_export_data(DB_PATH, match_id)
+    if export_data is None:
+        print("❌ No match found.")
+        return
 
-        match_id, _, season, opponent, event = match
-        filename = sheet_service.match_sheet_filename(match_id, event, opponent)
-        local_path = Path("tmp") / filename
+    match = export_data.match
+    match_id, _, season, opponent, event = match
+    filename = sheet_service.match_sheet_filename(match_id, event, opponent)
+    local_path = Path("tmp") / filename
 
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        download_from_nextcloud(season, filename, local_path)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    download_from_nextcloud(season, filename, local_path)
 
-        ladyscore, oppscore, rows = excel_exporter.read_match_sheet_workbook(local_path)
-        validation = sheet_service.validate_match_sheet_rows(
-            lady_score=ladyscore,
-            opponent_score=oppscore,
-            rows=rows,
-        )
+    ladyscore, oppscore, rows = excel_exporter.read_match_sheet_workbook(local_path)
+    validation = sheet_service.validate_match_sheet_rows(
+        lady_score=ladyscore,
+        opponent_score=oppscore,
+        rows=rows,
+    )
 
-        if validation.errors:
-            print("❌ Import aborted due to validation errors:")
-            for msg in validation.errors:
-                print(" -", msg)
-            return
+    if validation.errors:
+        print("❌ Import aborted due to validation errors:")
+        for msg in validation.errors:
+            print(" -", msg)
+        return
 
-        result = sheet_service.apply_match_sheet_entries(
-            match_id=match_id,
-            entries=validation.entries,
-            score_ladys=ladyscore if ladyscore is not None else 0,
-            score_opponent=oppscore if oppscore is not None else 0,
-        )
+    result = sheet_service.apply_match_sheet_entries(
+        match_id=match_id,
+        entries=validation.entries,
+        score_ladys=ladyscore if ladyscore is not None else 0,
+        score_opponent=oppscore if oppscore is not None else 0,
+    )
 
-        try:
-            local_path.unlink()
-        except Exception:
-            pass
+    try:
+        local_path.unlink()
+    except Exception:
+        pass
 
-        web_url = sheet_service.scores_web_url(season)
-        status = "Changed" if result.changed > 0 else "Unchanged"
-        score_status = "Score updated" if result.score_updated else "Score update failed"
-        print(
-            f"✅ [{filename}]({web_url}) "
-            f"({status}, {result.imported} imported, {result.changed} changed; {score_status})"
-        )
+    web_url = sheet_service.scores_web_url(season)
+    status = "Changed" if result.changed > 0 else "Unchanged"
+    score_status = "Score updated" if result.score_updated else "Score update failed"
+    print(
+        f"✅ [{filename}]({web_url}) "
+        f"({status}, {result.imported} imported, {result.changed} changed; {score_status})"
+    )
 
 
 # ===================== Players: Export/Import (active PLTE, excludes, formatting) =====================
@@ -471,16 +372,12 @@ def _handle_create(args):
     if match_id is None:
         return
 
-    with connect_db() as conn:
-        match = get_match_info(conn, match_id)
-        if not match:
-            print("❌ No match found.")
-            return
+    export_data = sheet_service.get_match_export_data(DB_PATH, match_id)
+    if export_data is None:
+        print("❌ No match found.")
+        return
 
-        _, _, season, _, _ = match
-        ranked_players = rank_active_plte_for_season(conn, season) or get_active_players(conn)
-
-    url, uploaded = generate_excel(match, ranked_players, output_path=NEXTCLOUD_BASE)
+    url, uploaded = generate_excel(export_data.match, export_data.players, output_path=NEXTCLOUD_BASE)
     print(f"✅ {url} ({'Created' if uploaded else 'Already existed'})")
 
 

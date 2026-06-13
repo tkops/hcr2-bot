@@ -614,6 +614,27 @@ class TemporaryDatabaseSmokeTests(unittest.TestCase):
 
         self.assertEqual(rows, [(1, "Alice", 15000), (3, "Cara", 0)])
 
+    def test_sheet_service_builds_match_export_data(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO players (id, name, alias, garage_power, active, team)
+                VALUES (3, 'Cara', 'cara', 3000, 1, 'PLTE')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO matchscore (match_id, player_id, score, points, absent, checkin)
+                VALUES (1, 3, 60000, 250, 0, 1)
+                """
+            )
+
+        export_data = sheet_service.get_match_export_data(self.db_path, 1)
+
+        self.assertIsNotNone(export_data)
+        self.assertEqual(export_data.match, (1, "2021-06-05", 2, "Rivals", "Teamcup"))
+        self.assertEqual([player[1] for player in export_data.players], ["Cara", "Alice"])
+
     def test_sheet_service_imports_donation_entries_without_subprocess(self) -> None:
         result = sheet_service.import_donation_entries(
             self.db_path,

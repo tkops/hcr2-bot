@@ -47,6 +47,12 @@ class PlayerExportData:
     rows: list[tuple]
 
 
+@dataclass(frozen=True)
+class MatchExportData:
+    match: tuple[int, str, int, str, str]
+    players: list[tuple[int, str, str | None, str | None]]
+
+
 def sanitize_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "", value.replace(" ", "_"))
 
@@ -226,6 +232,17 @@ def get_donation_export_rows(db_path: str | Path) -> list[tuple[int, str, int]]:
 
     rows.sort(key=lambda row: (-row[2], (row[1] or "").lower()))
     return rows
+
+
+def get_match_export_data(db_path: str | Path, match_id: int) -> MatchExportData | None:
+    with sqlite3.connect(db_path) as conn:
+        match = _get_match_info(conn, match_id)
+        if match is None:
+            return None
+
+        _, _, season, _, _ = match
+        players = _rank_active_plte_for_season(conn, season) or _get_active_players(conn)
+        return MatchExportData(match=match, players=players)
 
 
 def import_donation_entries(
@@ -417,6 +434,107 @@ def _get_latest_donations(conn: sqlite3.Connection) -> dict[int, tuple[str, int]
         ON d.player_id = latest.player_id AND d.date = latest.max_date
     """)
     return {player_id: (date, total) for player_id, date, total in cur.fetchall()}
+
+
+def _get_match_info(conn: sqlite3.Connection, match_id: int) -> tuple[int, str, int, str, str] | None:
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT m.id, m.start, m.season_number, m.opponent, e.name
+        FROM match m
+        JOIN teamevent e ON m.teamevent_id = e.id
+        WHERE m.id = ?
+    """, (match_id,))
+    return cur.fetchone()
+
+
+def _get_active_players(conn: sqlite3.Connection) -> list[tuple[int, str, str | None, str | None]]:
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, away_from, away_until
+        FROM players
+        WHERE active = 1 AND team = 'PLTE'
+        ORDER BY name
+    """)
+    return cur.fetchall()
+
+
+def _fetch_season_rows(conn: sqlite3.Connection, season_number: int):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            ms.player_id,
+            p.name,
+            p.team,
+            p.active,
+            ms.score,
+            m.id,
+            t.tracks
+        FROM matchscore ms
+        JOIN players p ON ms.player_id = p.id
+        JOIN match m ON ms.match_id = m.id
+        JOIN teamevent t ON m.teamevent_id = t.id
+        WHERE m.season_number = ?
+    """, (season_number,))
+    return cur.fetchall()
+
+
+def _rank_active_plte_for_season(conn: sqlite3.Connection, season_number: int) -> list[tuple[int, str, str | None, str | None]]:
+    import statistics
+
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, away_from, away_until
+        FROM players
+        WHERE active = 1 AND team = 'PLTE'
+    """)
+    base_players = cur.fetchall()
+    if not base_players:
+        return []
+    id_to_player = {
+        player_id: (player_id, name, away_from, away_until)
+        for player_id, name, away_from, away_until in base_players
+    }
+
+    rows = _fetch_season_rows(conn, season_number)
+
+    scores_by_match = {}
+    for player_id, _name, team, active, score, match_id, tracks in rows:
+        if team != "PLTE" or not active:
+            continue
+        if score is None:
+            continue
+        scaled = score * 4 / tracks if tracks else score
+        scores_by_match.setdefault(match_id, []).append((player_id, scaled))
+
+    player_deltas, player_counts = {}, {}
+    for _, entries in scores_by_match.items():
+        values = [score for _, score in entries]
+        if not values:
+            continue
+        try:
+            median = statistics.median(values)
+        except statistics.StatisticsError:
+            continue
+        for player_id, score in entries:
+            delta = score - median
+            player_deltas.setdefault(player_id, []).append(delta)
+            player_counts[player_id] = player_counts.get(player_id, 0) + 1
+
+    with_scores, without_scores = [], []
+    for player_id, (player_id_, name, away_from, away_until) in id_to_player.items():
+        deltas = player_deltas.get(player_id)
+        if deltas:
+            avg_delta = round(sum(deltas) / len(deltas))
+            count = player_counts.get(player_id, 0)
+            with_scores.append((avg_delta, -count, name.lower(), (player_id_, name, away_from, away_until)))
+        else:
+            without_scores.append((name.lower(), (player_id_, name, away_from, away_until)))
+
+    with_scores_sorted = [
+        player for _, _, _, player in sorted(with_scores, key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    ]
+    without_scores_sorted = [player for _, player in sorted(without_scores, key=lambda item: item[0])]
+    return with_scores_sorted + without_scores_sorted
 
 
 def _to_bool01_if_needed(value):
