@@ -41,6 +41,12 @@ class MatchSheetValidationResult:
     errors: list[str]
 
 
+@dataclass(frozen=True)
+class PlayerExportData:
+    columns: list[str]
+    rows: list[tuple]
+
+
 def sanitize_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "", value.replace(" ", "_"))
 
@@ -181,6 +187,45 @@ def import_player_rows(
         conn.commit()
 
     return PlayerImportResult(updated=updated, inserted=inserted, skipped=skipped, errors=errors)
+
+
+def get_player_export_data(db_path: str | Path, *, excluded_columns: set[str]) -> PlayerExportData | None:
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(players)")
+        cols_info = cur.fetchall()
+        if not cols_info:
+            return None
+        all_columns = [column[1] for column in cols_info]
+        export_columns = [column for column in all_columns if column not in excluded_columns]
+
+        cur.execute(f"""
+            SELECT {', '.join(export_columns)}
+            FROM players
+            WHERE team = 'PLTE' AND active = 1
+            ORDER BY garage_power DESC, name COLLATE NOCASE
+        """)
+        return PlayerExportData(columns=export_columns, rows=cur.fetchall())
+
+
+def get_donation_export_rows(db_path: str | Path) -> list[tuple[int, str, int]]:
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name
+            FROM players
+            WHERE active = 1 AND team = 'PLTE'
+        """)
+        players = cur.fetchall()
+
+        latest = _get_latest_donations(conn)
+        rows = []
+        for player_id, name in players:
+            _, total = latest.get(player_id, (None, 0))
+            rows.append((player_id, name, int(total or 0)))
+
+    rows.sort(key=lambda row: (-row[2], (row[1] or "").lower()))
+    return rows
 
 
 def import_donation_entries(
@@ -357,6 +402,21 @@ def _detect_boolean_columns(conn: sqlite3.Connection, table: str, candidate_over
     if candidate_overrides:
         out |= set(candidate_overrides)
     return out
+
+
+def _get_latest_donations(conn: sqlite3.Connection) -> dict[int, tuple[str, int]]:
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT d.player_id, d.date, d.total
+        FROM donation d
+        JOIN (
+            SELECT player_id, MAX(date) AS max_date
+            FROM donation
+            GROUP BY player_id
+        ) latest
+        ON d.player_id = latest.player_id AND d.date = latest.max_date
+    """)
+    return {player_id: (date, total) for player_id, date, total in cur.fetchall()}
 
 
 def _to_bool01_if_needed(value):

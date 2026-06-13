@@ -586,6 +586,34 @@ class TemporaryDatabaseSmokeTests(unittest.TestCase):
         self.assertEqual(alice, ("Alice Prime", 5100, 0))
         self.assertEqual(cara, ("Cara", "PLTE", 1))
 
+    def test_sheet_service_builds_player_export_data(self) -> None:
+        export_data = sheet_service.get_player_export_data(
+            self.db_path,
+            excluded_columns=sheet.EXCLUDED_PLAYER_COLS,
+        )
+
+        self.assertIsNotNone(export_data)
+        self.assertIn("id", export_data.columns)
+        self.assertIn("name", export_data.columns)
+        self.assertNotIn("team", export_data.columns)
+        self.assertEqual(len(export_data.rows), 1)
+        self.assertEqual(export_data.rows[0][export_data.columns.index("name")], "Alice")
+
+    def test_sheet_service_builds_donation_export_rows(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO donation (player_id, date, total) VALUES (1, '2026-06-01', 12000)")
+            conn.execute("INSERT INTO donation (player_id, date, total) VALUES (1, '2026-06-13', 15000)")
+            conn.execute(
+                """
+                INSERT INTO players (id, name, alias, garage_power, active, team)
+                VALUES (3, 'Cara', 'cara', 3000, 1, 'PLTE')
+                """
+            )
+
+        rows = sheet_service.get_donation_export_rows(self.db_path)
+
+        self.assertEqual(rows, [(1, "Alice", 15000), (3, "Cara", 0)])
+
     def test_sheet_service_imports_donation_entries_without_subprocess(self) -> None:
         result = sheet_service.import_donation_entries(
             self.db_path,

@@ -305,27 +305,14 @@ def _upload_players_xlsx(local_path: Path):
 
 
 def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOCAL_TMP):
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("PRAGMA table_info(players)")
-        cols_info = cur.fetchall()
-        if not cols_info:
-            print("❌ players table not found")
-            return
-        all_columns = [c[1] for c in cols_info]
-        export_columns = [c for c in all_columns if c not in EXCLUDED_PLAYER_COLS]
+    export_data = sheet_service.get_player_export_data(db_path, excluded_columns=EXCLUDED_PLAYER_COLS)
+    if export_data is None:
+        print("❌ players table not found")
+        return
 
-        cur.execute(f"""
-            SELECT {', '.join(export_columns)}
-            FROM players
-            WHERE team = 'PLTE' AND active = 1
-            ORDER BY garage_power DESC, name COLLATE NOCASE
-        """)
-        rows = cur.fetchall()
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        wb = excel_exporter.build_players_workbook(export_columns, rows)
-        wb.save(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb = excel_exporter.build_players_workbook(export_data.columns, export_data.rows)
+    wb.save(out_path)
 
     url, created = _upload_players_xlsx(out_path)
     try:
@@ -381,53 +368,12 @@ def _upload_donations_xlsx(local_path: Path):
     return upload_to_nextcloud(local_path, DONATIONS_REMOTE_PATH, overwrite=True)
 
 
-def _get_latest_donations(conn: sqlite3.Connection) -> dict:
-    """
-    Return (date, total) of the latest donation entry for each player_id.
-    """
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT d.player_id, d.date, d.total
-        FROM donation d
-        JOIN (
-            SELECT player_id, MAX(date) AS max_date
-            FROM donation
-            GROUP BY player_id
-        ) latest
-        ON d.player_id = latest.player_id AND d.date = latest.max_date
-    """)
-    out = {}
-    for pid, ddate, total in cur.fetchall():
-        out[pid] = (ddate, total)
-    return out
-
-
 def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS_LOCAL_TMP):
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, name
-            FROM players
-            WHERE active = 1 AND team = 'PLTE'
-        """)
-        players = cur.fetchall()
-
-        latest = _get_latest_donations(conn)
-
-        # Build rows with "previous" donation total (latest known total)
-        rows = []
-        for pid, name in players:
-            _, total = latest.get(pid, (None, 0))
-            prev = int(total or 0)
-            rows.append((pid, name, prev))
-
-        # Sort: highest previous donation first, then name
-        rows.sort(key=lambda x: (-x[2], (x[1] or "").lower()))
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        today_str = date.today().isoformat()
-        wb = excel_exporter.build_donations_workbook(rows, today_str)
-        wb.save(out_path)
+    rows = sheet_service.get_donation_export_rows(db_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    today_str = date.today().isoformat()
+    wb = excel_exporter.build_donations_workbook(rows, today_str)
+    wb.save(out_path)
 
     url, created = _upload_donations_xlsx(out_path)
     try:
