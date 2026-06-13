@@ -5,14 +5,14 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
+from hcr2.output.matches import print_match_detail, print_match_list
+from hcr2.repositories import matches as match_repo
 from modules.common import (
-    connect_db,
     get_arg_value,
     is_help_request,
     parse_flag_map,
     parse_int,
     print_command_help,
-    print_table_header,
     print_unknown_command,
 )
 
@@ -135,21 +135,11 @@ def _require_int(flags: dict[str, str], key: str) -> Optional[int]:
 
 
 def _teamevent_exists(cur, teamevent_id: int) -> bool:
-    cur.execute("SELECT 1 FROM teamevent WHERE id = ? LIMIT 1", (teamevent_id,))
-    return cur.fetchone() is not None
+    return match_repo.teamevent_exists(teamevent_id)
 
 
 def _get_latest_teamevent_id(cur) -> Optional[int]:
-    cur.execute(
-        """
-        SELECT id
-        FROM teamevent
-        ORDER BY iso_year DESC, iso_week DESC, id DESC
-        LIMIT 1
-        """
-    )
-    row = cur.fetchone()
-    return row[0] if row else None
+    return match_repo.latest_teamevent_id()
 
 
 def _get_default_start(cur) -> str:
@@ -157,21 +147,11 @@ def _get_default_start(cur) -> str:
     month_start = today.replace(day=1).strftime("%Y-%m-%d")
     month_end = (today.replace(day=1) + relativedelta(months=1)).strftime("%Y-%m-%d")
 
-    cur.execute(
-        """
-        SELECT start
-        FROM match
-        WHERE start >= ? AND start < ?
-        ORDER BY start DESC, id DESC
-        LIMIT 1
-        """,
-        (month_start, month_end),
-    )
-    row = cur.fetchone()
-    if not row:
+    latest_start = match_repo.latest_match_start_between(month_start, month_end)
+    if latest_start is None:
         return month_start
 
-    last_start = datetime.strptime(row[0], "%Y-%m-%d")
+    last_start = datetime.strptime(latest_start, "%Y-%m-%d")
     return (last_start + timedelta(days=2)).strftime("%Y-%m-%d")
 
 
@@ -193,38 +173,36 @@ def add_match(args: list[str]) -> None:
         print(f"❌ Invalid integer for 'scoreopp': {flags.get('scoreopp', '0')!r}")
         return
 
-    with connect_db() as conn:
-        cur = conn.cursor()
+    if "teamevent" in flags:
+        teamevent_id = _require_int(flags, "teamevent")
+        if teamevent_id is None:
+            return
+        if not match_repo.teamevent_exists(teamevent_id):
+            print(f"❌ Team event ID {teamevent_id} not found.")
+            return
+    else:
+        teamevent_id = match_repo.latest_teamevent_id()
+        if teamevent_id is None:
+            print("❌ No team event found.")
+            return
 
-        if "teamevent" in flags:
-            teamevent_id = _require_int(flags, "teamevent")
-            if teamevent_id is None:
-                return
-            if not _teamevent_exists(cur, teamevent_id):
-                print(f"❌ Team event ID {teamevent_id} not found.")
-                return
-        else:
-            teamevent_id = _get_latest_teamevent_id(cur)
-            if teamevent_id is None:
-                print("❌ No team event found.")
-                return
+    if "season" in flags:
+        season_number = _require_int(flags, "season")
+        if season_number is None:
+            return
+    else:
+        season_number = get_current_season_number()
 
-        if "season" in flags:
-            season_number = _require_int(flags, "season")
-            if season_number is None:
-                return
-        else:
-            season_number = get_current_season_number()
+    start = flags.get("start") if "start" in flags else _get_default_start(None)
 
-        start = flags.get("start") if "start" in flags else _get_default_start(cur)
-
-        cur.execute(
-            """
-            INSERT INTO match (teamevent_id, season_number, start, opponent, score_ladys, score_opponent)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (teamevent_id, season_number, start, opponent, score_ladys, score_opponent),
-        )
+    match_repo.add_match(
+        teamevent_id=teamevent_id,
+        season_number=season_number,
+        start=start,
+        opponent=opponent,
+        score_ladys=score_ladys,
+        score_opponent=score_opponent,
+    )
 
     print(f"✅ Match added: Event {teamevent_id}, Season {season_number}, vs {opponent} on {start} "
           f"(Score Ladies: {score_ladys}, Score Opponent: {score_opponent})")
@@ -238,60 +216,49 @@ def edit_match(args: list[str]) -> None:
         print(USAGE_EDIT)
         return
 
-    set_clauses: list[str] = []
-    values: list[object] = []
+    updates: dict[str, object] = {}
 
-    with connect_db() as conn:
-        cur = conn.cursor()
-
-        if "teamevent" in flags:
-            teamevent_id = _require_int(flags, "teamevent")
-            if teamevent_id is None:
-                return
-            if not _teamevent_exists(cur, teamevent_id):
-                print(f"❌ Team event ID {teamevent_id} not found.")
-                return
-            set_clauses.append("teamevent_id = ?")
-            values.append(teamevent_id)
-
-        if "season" in flags:
-            season_number = _require_int(flags, "season")
-            if season_number is None:
-                return
-            set_clauses.append("season_number = ?")
-            values.append(season_number)
-
-        if "start" in flags:
-            set_clauses.append("start = ?")
-            values.append(flags.get("start"))
-
-        if "opponent" in flags:
-            set_clauses.append("opponent = ?")
-            values.append(flags.get("opponent"))
-
-        if "score" in flags:
-            score_ladys = _require_int(flags, "score")
-            if score_ladys is None:
-                return
-            set_clauses.append("score_ladys = ?")
-            values.append(score_ladys)
-
-        if "scoreopp" in flags:
-            score_opponent = _require_int(flags, "scoreopp")
-            if score_opponent is None:
-                return
-            set_clauses.append("score_opponent = ?")
-            values.append(score_opponent)
-
-        if not set_clauses:
-            print("Nothing to update. Provide at least one of: "
-                  "--teamevent / --season / --start / --opponent / --score / --scoreopp")
+    if "teamevent" in flags:
+        teamevent_id = _require_int(flags, "teamevent")
+        if teamevent_id is None:
             return
-
-        cur.execute(f"UPDATE match SET {', '.join(set_clauses)} WHERE id = ?", (*values, match_id))
-        if cur.rowcount == 0:
-            print(f"❌ Match ID {match_id} not found.")
+        if not match_repo.teamevent_exists(teamevent_id):
+            print(f"❌ Team event ID {teamevent_id} not found.")
             return
+        updates["teamevent_id"] = teamevent_id
+
+    if "season" in flags:
+        season_number = _require_int(flags, "season")
+        if season_number is None:
+            return
+        updates["season_number"] = season_number
+
+    if "start" in flags:
+        updates["start"] = flags.get("start")
+
+    if "opponent" in flags:
+        updates["opponent"] = flags.get("opponent")
+
+    if "score" in flags:
+        score_ladys = _require_int(flags, "score")
+        if score_ladys is None:
+            return
+        updates["score_ladys"] = score_ladys
+
+    if "scoreopp" in flags:
+        score_opponent = _require_int(flags, "scoreopp")
+        if score_opponent is None:
+            return
+        updates["score_opponent"] = score_opponent
+
+    if not updates:
+        print("Nothing to update. Provide at least one of: "
+              "--teamevent / --season / --start / --opponent / --score / --scoreopp")
+        return
+
+    if match_repo.update_match(match_id, updates) == 0:
+        print(f"❌ Match ID {match_id} not found.")
+        return
 
     print(f"✏️  Match {match_id} updated.")
 
@@ -304,70 +271,19 @@ def get_current_season_number() -> int:
 
 
 def list_matches(season_number: Optional[int] = None, all_seasons: bool = False) -> None:
-    with connect_db() as conn:
-        cur = conn.cursor()
-        if all_seasons:
-            cur.execute(
-                """
-                SELECT m.id, m.start, t.name, m.opponent
-                FROM match m
-                JOIN teamevent t ON m.teamevent_id = t.id
-                ORDER BY m.start DESC
-                """
-            )
-            matches = cur.fetchall()
-        else:
-            if season_number is None:
-                season_number = get_current_season_number()
-            cur.execute(
-                """
-                SELECT m.id, m.start, t.name, m.opponent
-                FROM match m
-                JOIN teamevent t ON m.teamevent_id = t.id
-                WHERE m.season_number = ?
-                ORDER BY m.start DESC
-                """,
-                (season_number,),
-            )
-            matches = cur.fetchall()
-
-    print_table_header(
-        columns=[f"{'ID':<5}", f"{'Start':<12}", f"{'Event':<30}", f"{'Opponent':<20}"],
-        width=75,
-    )
-    for match_id, start, event_name, opponent in matches:
-        print(f"{match_id:<5} {start:<12} {event_name:<30} {opponent:<20}")
-
-    if not all_seasons:
-        print(f"\n📊 {len(matches)} matches in Season {season_number}")
+    if not all_seasons and season_number is None:
+        season_number = get_current_season_number()
+    matches = match_repo.list_matches(season_number=season_number, all_seasons=all_seasons)
+    print_match_list(matches, season_number=season_number, all_seasons=all_seasons)
 
 
 def show_match(match_id: int) -> None:
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent
-            FROM match m
-            JOIN teamevent t ON m.teamevent_id = t.id
-            WHERE m.id = ?
-            """,
-            (match_id,),
-        )
-        row = cur.fetchone()
-
-    if not row:
+    match = match_repo.get_match(match_id)
+    if match is None:
         print(f"❌ Match ID {match_id} not found.")
         return
 
-    mid, start, season_number, opponent, event_name, score_ladys, score_opponent = row
-    print(f"📅 Match {mid}")
-    print(f"  Start:       {start}")
-    print(f"  Season:      {season_number}")
-    print(f"  Event:       {event_name}")
-    print(f"  Opponent:    {opponent}")
-    print(f"  Score Ladies: {score_ladys}")
-    print(f"  Score Opp.:  {score_opponent}")
+    print_match_detail(match)
 
 
 def warn_if_unusual_match_count(season_number: int, actual_count: int) -> None:
@@ -387,6 +303,5 @@ def warn_if_unusual_match_count(season_number: int, actual_count: int) -> None:
 
 
 def delete_match(match_id: int) -> None:
-    with connect_db() as conn:
-        conn.execute("DELETE FROM match WHERE id = ?", (match_id,))
+    match_repo.delete_match(match_id)
     print(f"🗑️  Match {match_id} deleted.")

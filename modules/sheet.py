@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 import sqlite3
 from typing import Optional, List, Tuple
-import re
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment
 from pathlib import Path
-from secrets_config import NEXTCLOUD_AUTH
-import subprocess
-from datetime import datetime, date
+from datetime import date
+from hcr2.exporters import excel as excel_exporter
+from hcr2.integrations.nextcloud import (
+    NEXTCLOUD_BASE,
+    delete_file,
+    download_file,
+    match_sheet_remote_path,
+    upload_file,
+)
+from hcr2.services import sheets as sheet_service
 from modules.common import (
     DB_PATH,
     connect_db,
@@ -19,8 +24,6 @@ from modules.common import (
     print_command_help,
     print_unknown_command,
 )
-NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
-NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
 # --- Columns that are not exported/imported ---
 EXCLUDED_PLAYER_COLS = {
@@ -37,9 +40,6 @@ EXCLUDED_PLAYER_COLS = {
     "last_modified",
 }
 
-# --- Regex for parsing the new player ID from player add output ---
-ID_RE = re.compile(r"\bID\s*:\s*(\d+)", re.IGNORECASE)
-
 # --- Player export/import targets ---
 PLAYERS_XLSX_NAME = "Ladys.xlsx"
 PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
@@ -52,7 +52,7 @@ DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
 
 
 def sanitize_filename(s):
-    return re.sub(r'[^A-Za-z0-9_]', '', s.replace(' ', '_'))
+    return sheet_service.sanitize_filename(s)
 
 
 def get_match_info(conn, match_id):
@@ -82,65 +82,15 @@ def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> 
 
 
 def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
-    """
-    Upload to Nextcloud.
-    - overwrite=False (default): create only, do not overwrite.
-    - overwrite=True: overwrite an existing file (PUT).
-    Returns: (url, created_flag); created_flag=True only when newly created.
-    """
-    import requests
-    user, password = NEXTCLOUD_AUTH
-    remote_path = str(remote_path).lstrip("/")
-    url = NEXTCLOUD_URL.format(user=user, path=remote_path)
-
-    # Check existence for the created/updated flag.
-    try:
-        head = requests.head(url, auth=(user, password))
-        exists = (head.status_code == 200)
-    except Exception:
-        exists = False
-
-    if exists and not overwrite:
-        # Do nothing; do not overwrite.
-        return url, False
-
-    # Create the folder chain idempotently.
-    parts = remote_path.split("/")[:-1]
-    current_path = ""
-    for part in parts:
-        current_path += f"/{part}"
-        dir_url = NEXTCLOUD_URL.format(user=user, path=current_path.lstrip("/"))
-        requests.request("MKCOL", dir_url, auth=(user, password))
-
-    # Upload; PUT overwrites if present.
-    with open(local_path, "rb") as f:
-        res = requests.put(url, auth=(user, password), data=f)
-
-    if res.status_code in (200, 201, 204):
-        return url, (not exists)  # True when new, False when overwritten.
-    return None, False
+    return upload_file(local_path, remote_path, overwrite=overwrite)
 
 
 def delete_from_nextcloud(remote_path) -> bool:
-    """
-    Delete a file in Nextcloud via WebDAV DELETE. Return True on success.
-    """
-    import requests
-    user, password = NEXTCLOUD_AUTH
-    url = NEXTCLOUD_URL.format(user=user, path=str(remote_path).lstrip("/"))
-    try:
-        r = requests.delete(url, auth=(user, password))
-        return r.status_code in (200, 204)
-    except Exception:
-        return False
+    return delete_file(remote_path)
 
 
 def download_from_nextcloud(season, filename, local_path):
-    user, password = NEXTCLOUD_AUTH
-    remote_path = f"Power-Ladys-Scores/S{season}/{filename}"
-    url = NEXTCLOUD_URL.format(user=user, path=remote_path)
-    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
-    subprocess.run(curl_cmd, capture_output=True)
+    return download_file(match_sheet_remote_path(season, filename), Path(local_path))
 
 
 # -------------------- Ranking Logic --------------------
@@ -226,13 +176,11 @@ def generate_excel(match, players, output_path):
     """
     match_id, match_date_str, season, opponent, event = match
 
-    md = _parse_date_or_none(match_date_str) or date(1970, 1, 1)
+    md = parse_date_or_none(match_date_str) or date(1970, 1, 1)
 
-    safe_event = sanitize_filename(event)
-    safe_opponent = sanitize_filename(opponent)
-    filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
-    folder = output_path / f"S{season}"
-    filepath = folder / filename
+    filename = sheet_service.match_sheet_filename(match_id, event, opponent)
+    filepath = sheet_service.match_sheet_local_path(output_path, season, filename)
+    folder = filepath.parent
 
     folder.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
@@ -285,7 +233,7 @@ def generate_excel(match, players, output_path):
 
     wb.save(filepath)
 
-    remote_path = NEXTCLOUD_BASE / f"S{season}" / filename
+    remote_path = sheet_service.match_sheet_remote_path_for_filename(season, filename)
     upload_to_nextcloud(filepath, remote_path)  # No overwrite for match sheets.
 
     try:
@@ -293,7 +241,7 @@ def generate_excel(match, players, output_path):
     except Exception:
         pass
 
-    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
+    web_url = sheet_service.scores_web_url(season)
     return f"[{filename}]({web_url})", True
 
 
@@ -317,42 +265,7 @@ def _parse_pid_marker(pid_cell):
 
 
 def _add_player_plte_and_get_id(name: str) -> Optional[int]:
-    name = (name or "").strip()
-    if not name:
-        return None
-    cmd = ["python", "hcr2.py", "player", "add", "PLTE", name]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
-    except Exception:
-        return None
-    if res.returncode != 0:
-        return None
-    out = (res.stdout or "") + "\n" + (res.stderr or "")
-    m = ID_RE.search(out)
-    if m:
-        try:
-            return int(m.group(1))
-        except Exception:
-            pass
-    fallback = re.findall(r"\b(\d{1,9})\b", out)
-    if fallback:
-        try:
-            return int(fallback[-1])
-        except Exception:
-            return None
-    return None
-
-
-# --- Normalization for import comparisons ---
-def _norm(v):
-    if v is None:
-        return None
-    if isinstance(v, float) and v.is_integer():
-        return int(v)
-    if isinstance(v, str):
-        s = v.strip()
-        return s if s != "" else None
-    return v
+    return sheet_service.add_plte_player_from_sheet(name)
 
 
 def import_excel_to_matchscore(match_id):
@@ -363,13 +276,10 @@ def import_excel_to_matchscore(match_id):
             return
 
         match_id, _, season, opponent, event = match
-        safe_event = sanitize_filename(event)
-        safe_opponent = sanitize_filename(opponent)
-        filename = f"{match_id}_{safe_event}_{safe_opponent}.xlsx"
+        filename = sheet_service.match_sheet_filename(match_id, event, opponent)
         local_path = Path("tmp") / filename
-        tsv_path = Path("tmp") / f"sheet_{match_id}.tsv"
 
-        tsv_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         download_from_nextcloud(season, filename, local_path)
 
         wb = load_workbook(filename=local_path, data_only=True)
@@ -520,111 +430,36 @@ def import_excel_to_matchscore(match_id):
                 print(" -", msg)
             return
 
-        with open(tsv_path, "w", encoding="utf-8") as f:
-            for e in entries:
-                f.write(f"{match_id}\t{e['pid']}\t{e['score']}\t{e['points']}\t{e['absent']}\t{e['checkin']}\n")
+        result = sheet_service.apply_match_sheet_entries(
+            match_id=match_id,
+            entries=entries,
+            score_ladys=ladyscore if ladyscore is not None else 0,
+            score_opponent=oppscore if oppscore is not None else 0,
+        )
 
-        imported = 0
-        changed = 0
-        with open(tsv_path, encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) < 6:
-                    parts = parts + ["0"]
-                mid, player_id, score, points, absent01, checkin01 = parts[:6]
-                cmd = [
-                    "python", "hcr2.py", "matchscore", "add",
-                    mid, player_id, score, points, absent01, checkin01
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0:
-                    imported += 1
-                    out = (result.stdout or "").upper()
-                    if "CHANGED" in out:
-                        changed += 1
-
-        upd_ok = False
         try:
-            cmd_upd = [
-                "python", "hcr2.py", "match", "edit",
-                "--id", str(match_id),
-                "--score", str(ladyscore if ladyscore is not None else 0),
-                "--scoreopp", str(oppscore if oppscore is not None else 0),
-            ]
-            upd_res = subprocess.run(cmd_upd, capture_output=True, text=True)
-            upd_ok = (upd_res.returncode == 0)
+            local_path.unlink()
         except Exception:
-            upd_ok = False
+            pass
 
-        for path in (local_path, tsv_path):
-            try:
-                path.unlink()
-            except Exception:
-                pass
-
-        web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S{season}"
-        status = "Changed" if changed > 0 else "Unchanged"
-        score_status = "Score updated" if upd_ok else "Score update failed"
-        print(f"✅ [{filename}]({web_url}) ({status}, {imported} imported, {changed} changed; {score_status})")
+        web_url = sheet_service.scores_web_url(season)
+        status = "Changed" if result.changed > 0 else "Unchanged"
+        score_status = "Score updated" if result.score_updated else "Score update failed"
+        print(
+            f"✅ [{filename}]({web_url}) "
+            f"({status}, {result.imported} imported, {result.changed} changed; {score_status})"
+        )
 
 
 # ===================== Players: Export/Import (active PLTE, excludes, formatting) =====================
 
 def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Path]:
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    user, password = NEXTCLOUD_AUTH
-    url = NEXTCLOUD_URL.format(user=user, path=str(PLAYERS_REMOTE_PATH).lstrip("/"))
-    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
-    subprocess.run(curl_cmd, capture_output=True)
-    return local_path if local_path.exists() and local_path.stat().st_size > 0 else None
+    return download_file(PLAYERS_REMOTE_PATH, local_path)
 
 
 def _upload_players_xlsx(local_path: Path):
     # Only the players workbook may be overwritten.
     return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
-
-
-def _detect_boolean_columns(conn: sqlite3.Connection, table: str, candidate_overrides=None):
-    cur = conn.cursor()
-    cur.execute(f"PRAGMA table_info({table})")
-    out = set()
-    for _, name, ctype, *_ in cur.fetchall():
-        t = (ctype or "").upper()
-        if "BOOL" in t:
-            out.add(name)
-    if candidate_overrides:
-        out |= set(candidate_overrides)
-    return out
-
-
-def _to_bool01_if_needed(val):
-    if val is None:
-        return None
-    s = str(val).strip().lower()
-    if s in ("1", "true", "yes", "y", "j\u0061"):
-        return 1
-    if s in ("0", "false", "no", "n", "n\u0065in", ""):
-        return 0
-    if isinstance(val, (int, float)):
-        return 1 if int(val) != 0 else 0
-    return None
-
-
-def _autofit_columns(ws, min_w=10, max_w=60):
-    # Bold header.
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    # Auto width based on content.
-    for col_idx, col in enumerate(ws.iter_cols(min_row=1, max_row=ws.max_row,
-                                               min_col=1, max_col=ws.max_column),
-                                  start=1):
-        max_len = 0
-        for cell in col:
-            v = "" if cell.value is None else str(cell.value)
-            if len(v) > max_len:
-                max_len = len(v)
-        width = max(min_w, min(max_w, max_len + 2))
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
 def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOCAL_TMP):
@@ -647,16 +482,7 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
         rows = cur.fetchall()
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "players"
-
-        ws.append(export_columns)
-        for r in rows:
-            ws.append(list(r))
-
-        _autofit_columns(ws, min_w=10, max_w=60)
-
+        wb = excel_exporter.build_players_workbook(export_columns, rows)
         wb.save(out_path)
 
     url, created = _upload_players_xlsx(out_path)
@@ -665,7 +491,7 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
     except Exception:
         pass
 
-    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
+    web_url = sheet_service.scores_web_url()
     print(f"✅ [Power-Ladys-Scores/{PLAYERS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
 
 
@@ -675,110 +501,16 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
         print("❌ players Excel not found on Nextcloud")
         return
 
-    wb = load_workbook(filename=local, data_only=True)
-    ws = wb.active
-
-    first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
-    header = [str(c) if c is not None else "" for c in (first_row or [])]
-    header = [h.strip() for h in header]
-    if not header or "id" not in header:
+    header, workbook_rows = excel_exporter.read_players_workbook(local)
+    if header is None or workbook_rows is None:
         print("❌ First row must contain column names including 'id'")
         return
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        cur.execute("PRAGMA table_info(players)")
-        db_cols_info = cur.fetchall()
-        db_cols = [c[1] for c in db_cols_info]
-        db_cols_set = set(db_cols)
-
-        allowed_import_cols = (db_cols_set - EXCLUDED_PLAYER_COLS) | {"id"}
-
-        bool_cols = _detect_boolean_columns(conn, "players", candidate_overrides={"active", "is_leader"})
-
-        cur.execute("SELECT id FROM players WHERE team='PLTE'")
-        existing_ids = {r[0] for r in cur.fetchall()}
-
-        updated = 0
-        inserted = 0
-        skipped = 0
-        errors = 0
-
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            row_map_full = dict(zip(header, row))
-            row_map = {k: v for k, v in row_map_full.items() if k in allowed_import_cols}
-
-            if all((v is None or str(v).strip() == "") for v in row_map.values()):
-                continue
-
-            rid = row_map.get("id")
-            rid_int = None
-            if isinstance(rid, float) and rid.is_integer():
-                rid_int = int(rid)
-            elif isinstance(rid, int):
-                rid_int = rid
-            elif isinstance(rid, str) and rid.strip().isdigit():
-                rid_int = int(rid.strip())
-
-            for b in (set(row_map.keys()) & bool_cols):
-                row_map[b] = _to_bool01_if_needed(row_map[b])
-
-            try:
-                if rid_int and rid_int in existing_ids:
-                    # Candidate columns without id.
-                    set_cols = [c for c in row_map.keys() if c != "id"]
-                    if not set_cols:
-                        skipped += 1
-                        continue
-
-                    # Load current DB values.
-                    cur.execute(f"SELECT {', '.join(set_cols)} FROM players WHERE id = ?", (rid_int,))
-                    db_row = cur.fetchone()
-                    if not db_row:
-                        skipped += 1
-                        continue
-                    db_map = {col: db_row[idx] for idx, col in enumerate(set_cols)}
-
-                    # Determine differences.
-                    changed_cols = [c for c in set_cols if _norm(row_map[c]) != _norm(db_map.get(c))]
-                    if not changed_cols:
-                        skipped += 1
-                        continue
-
-                    # Set last_modified only when changes exist.
-                    now = datetime.now().isoformat(timespec="seconds")
-                    placeholders = ", ".join([f"{c}=?" for c in changed_cols] + ["last_modified=?"])
-                    values = [row_map[c] for c in changed_cols] + [now, rid_int]
-                    cur.execute(f"UPDATE players SET {placeholders} WHERE id = ?", values)
-                    updated += 1
-                else:
-                    # Insert
-                    row_map["team"] = "PLTE"
-                    if "active" not in row_map or row_map["active"] is None:
-                        row_map["active"] = 1
-
-                    insert_cols = [c for c in row_map.keys() if c != "id" and c not in EXCLUDED_PLAYER_COLS]
-                    if not insert_cols:
-                        skipped += 1
-                        continue
-
-                    now = datetime.now().isoformat(timespec="seconds")
-                    insert_cols.append("last_modified")
-                    placeholders = ", ".join(["?"] * len(insert_cols))
-                    values = [row_map[c] for c in insert_cols if c != "last_modified"] + [now]
-                    cur.execute(
-                        f"INSERT INTO players ({', '.join(insert_cols)}) VALUES ({placeholders})",
-                        values,
-                    )
-                    inserted += 1
-            except Exception:
-                errors += 1
-
-        conn.commit()
+    result = sheet_service.import_player_rows(
+        db_path,
+        workbook_rows,
+        excluded_columns=EXCLUDED_PLAYER_COLS,
+    )
 
     # Delete local copy on a best-effort basis.
     try:
@@ -790,18 +522,16 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
-    print(f"✅ players import: {updated} updated, {inserted} inserted, {skipped} skipped, {errors} errors ({status} in Nextcloud)")
+    print(
+        f"✅ players import: {result.updated} updated, {result.inserted} inserted, "
+        f"{result.skipped} skipped, {result.errors} errors ({status} in Nextcloud)"
+    )
 
 
 # ===================== Donations: Export/Import =====================
 
 def _download_donations_xlsx(local_path: Path = DONATIONS_LOCAL_TMP) -> Optional[Path]:
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    user, password = NEXTCLOUD_AUTH
-    url = NEXTCLOUD_URL.format(user=user, path=str(DONATIONS_REMOTE_PATH).lstrip("/"))
-    curl_cmd = ["curl", "-s", "-u", f"{user}:{password}", "-H", "Cache-Control: no-cache", "-o", str(local_path), url]
-    subprocess.run(curl_cmd, capture_output=True)
-    return local_path if local_path.exists() and local_path.stat().st_size > 0 else None
+    return download_file(DONATIONS_REMOTE_PATH, local_path)
 
 
 def _upload_donations_xlsx(local_path: Path):
@@ -853,41 +583,8 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
         rows.sort(key=lambda x: (-x[2], (x[1] or "").lower()))
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "donations"
-
         today_str = date.today().isoformat()
-
-        # Header.
-        ws["A1"] = "Date:"
-        ws["A2"] = today_str
-
-        # Header starting at row 3.
-        ws["A3"] = "id"
-        ws["B3"] = "name"
-        ws["C3"] = "donation (k)"
-        ws["D3"] = "previous (k)"  # info only
-
-        for cell in ("A3", "B3", "C3", "D3"):
-            ws[cell].font = Font(bold=True)
-
-        # Data rows.
-        row_idx = 4
-        for pid, name, prev in rows:
-            ws.cell(row=row_idx, column=1, value=pid)
-            ws.cell(row=row_idx, column=2, value=name)
-            ws.cell(row=row_idx, column=3, value="")     # new donation entry (empty)
-            ws.cell(row=row_idx, column=4, value=_to_k(prev))   # previous shown in k
-
-            row_idx += 1
-
-        # Format
-        ws.column_dimensions["A"].width = 8
-        ws.column_dimensions["B"].width = 26
-        ws.column_dimensions["C"].width = 12
-        ws.column_dimensions["D"].width = 12
-
+        wb = excel_exporter.build_donations_workbook(rows, today_str)
         wb.save(out_path)
 
     url, created = _upload_donations_xlsx(out_path)
@@ -896,50 +593,8 @@ def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS
     except Exception:
         pass
 
-    web_url = f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores"
+    web_url = sheet_service.scores_web_url()
     print(f"✅ [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
-
-def _to_k(val: Optional[int]) -> float:
-    """Convert absolute integer amount to k-units (thousands) for display."""
-    try:
-        return round((int(val or 0)) / 1000.0, 1)
-    except Exception:
-        return 0.0
-
-
-def _parse_k_amount(val) -> Optional[int]:
-    """
-    Parse a donation amount entered in 'k' (thousands) and return absolute int (×1000).
-    Accepts: 12, 12.5, '12,5', ' 12.5 ', optionally with trailing 'k' (tolerant).
-    """
-    if val is None:
-        return None
-
-    # numeric cells
-    if isinstance(val, int):
-        return int(val) * 1000
-    if isinstance(val, float):
-        return int(round(val * 1000))
-
-    # strings
-    if isinstance(val, str):
-        s = val.strip().lower()
-        if not s:
-            return None
-        s = s.replace("k", "").strip()         # tolerant, even if user typed "12k"
-        s = s.replace(" ", "").replace("_", "")
-        s = s.replace(",", ".")                # german decimal comma
-
-        if not re.fullmatch(r"-?\d+(\.\d+)?", s):
-            return None
-
-        f = float(s)
-        if f < 0:
-            return None
-        return int(round(f * 1000))
-
-    return None
-
 
 def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
     local = local_xlsx or _download_donations_xlsx()
@@ -947,64 +602,17 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
         print("❌ donations Excel not found on Nextcloud")
         return
 
-    wb = load_workbook(filename=local, data_only=True)
-    ws = wb.active
-
-    # Date from A2.
-    raw_date = ws["A2"].value
-    if isinstance(raw_date, datetime):
-        date_str = raw_date.date().isoformat()
-    elif isinstance(raw_date, date):
-        date_str = raw_date.isoformat()
-    elif isinstance(raw_date, str):
-        date_str = raw_date.strip()
-    else:
+    date_str, donation_entries, errors = excel_exporter.read_donations_workbook(local)
+    if date_str is None:
         print("❌ No valid date in cell A2")
         return
 
-    added = 0
-    errors = 0
-
-    # Rows from 4 onward: id, name, donation.
-    for row in ws.iter_rows(min_row=4, values_only=True):
-        if not row:
-            continue
-        pid_val = row[0]
-        donation_val = row[2] if len(row) >= 3 else None
-
-        if pid_val is None:
-            continue
-        # ID as int.
-        pid_int = None
-        if isinstance(pid_val, float) and pid_val.is_integer():
-            pid_int = int(pid_val)
-        elif isinstance(pid_val, int):
-            pid_int = pid_val
-        elif isinstance(pid_val, str) and pid_val.strip().isdigit():
-            pid_int = int(pid_val.strip())
-        if pid_int is None:
-            errors += 1
-            continue
-
-        # donation is entered in k (thousands) -> store absolute (×1000)
-        if donation_val is None or (isinstance(donation_val, str) and donation_val.strip() == ""):
-            continue  # empty -> ignore
-        
-        don_int = _parse_k_amount(donation_val)
-        if don_int is None:
-            errors += 1
-            continue
-
-
-        cmd = [
-            "python", "hcr2.py", "donations", "add",
-            str(pid_int), date_str, str(don_int)
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode == 0:
-            added += 1
-        else:
-            errors += 1
+    result = sheet_service.import_donation_entries(
+        db_path,
+        date_str,
+        donation_entries,
+        initial_errors=errors,
+    )
 
     # Delete local copy.
     try:
@@ -1016,7 +624,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
     status = "deleted" if deleted else "delete failed"
 
-    print(f"✅ donations import: {added} added, {errors} errors ({status} in Nextcloud)")
+    print(f"✅ donations import: {result.added} added, {result.errors} errors ({status} in Nextcloud)")
 
 
 # ===================== CLI =====================

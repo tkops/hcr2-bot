@@ -110,11 +110,16 @@ _hcr2()
     fi
 
     if (( COMP_CWORD == 1 )); then
-        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet donations version -h --help" "$cur"
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet donations version help -h --help" "$cur"
         return
     fi
 
     entity="${COMP_WORDS[1]}"
+    if [[ "$entity" == "help" ]]; then
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet donations version -h --help" "$cur"
+        return
+    fi
+
     if [[ "$entity" == "version" ]]; then
         COMPREPLY=()
         return
@@ -122,7 +127,7 @@ _hcr2()
 
     if (( COMP_CWORD == 2 )); then
         commands="$(_hcr2_entity_commands "$entity")"
-        _hcr2_comp_words "$commands -h --help" "$cur"
+        _hcr2_comp_words "$commands help -h --help" "$cur"
         return
     fi
 

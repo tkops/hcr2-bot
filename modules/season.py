@@ -5,13 +5,13 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
+from hcr2.output.seasons import print_seasons
+from hcr2.repositories import seasons as season_repo
 from modules.common import (
-    connect_db,
     get_arg_value,
     is_help_request,
     parse_int,
     print_command_help,
-    print_table_header,
     print_unknown_command,
 )
 
@@ -87,11 +87,7 @@ def _parse_season_number(value: Optional[str], usage: str) -> Optional[int]:
 
 
 def _get_next_season_number() -> int:
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM season")
-        row = cur.fetchone()
-    return int(row[0]) if row and row[0] is not None else 1
+    return season_repo.get_next_season_number()
 
 
 def add_or_update_season(args: list[str]) -> None:
@@ -127,24 +123,16 @@ def add_or_update_season(args: list[str]) -> None:
     start = get_start_date(number)
     name = get_month_year_name(start)
 
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT 1 FROM season WHERE number = ?", (number,))
-        exists = cur.fetchone()
+    if season_repo.season_exists(number):
+        if division:
+            season_repo.update_division(number, division)
+            print(f"🔁 Season {number} updated to division {division}")
+        else:
+            print(f"ℹ️ Season {number} already exists (no division update)")
+        return
 
-        if exists:
-            if division:
-                conn.execute("UPDATE season SET division = ? WHERE number = ?", (division, number))
-                print(f"🔁 Season {number} updated to division {division}")
-            else:
-                print(f"ℹ️ Season {number} already exists (no division update)")
-            return
-
-        conn.execute(
-            "INSERT INTO season (number, name, start, division) VALUES (?, ?, ?, ?)",
-            (number, name, start, division or ""),
-        )
-        print(f"✅ Season {number} ('{name}') added with start {start}")
+    season_repo.add_season(number, name, start, division or "")
+    print(f"✅ Season {number} ('{name}') added with start {start}")
 
 
 def delete_season(args: list[str]) -> None:
@@ -156,15 +144,12 @@ def delete_season(args: list[str]) -> None:
     if number is None:
         return
 
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT 1 FROM season WHERE number = ?", (number,))
-        if not cur.fetchone():
-            print(f"⚠️ Season {number} does not exist.")
-            return
+    if not season_repo.season_exists(number):
+        print(f"⚠️ Season {number} does not exist.")
+        return
 
-        conn.execute("DELETE FROM season WHERE number = ?", (number,))
-        print(f"🗑️ Season {number} deleted.")
+    season_repo.delete_season(number)
+    print(f"🗑️ Season {number} deleted.")
 
 
 def get_start_date(number: int) -> str:
@@ -178,58 +163,47 @@ def get_month_year_name(date_str: str) -> str:
     return dt.strftime("%b %y")
 
 
-def _build_list_query(args: list[str]) -> tuple[str, list[object]]:
-    query = "SELECT number, name, start, division FROM season"
-    params: list[object] = []
-    suffix = "ORDER BY number DESC LIMIT 10"
-
+def _list_matching_seasons(args: list[str]):
     if not args:
-        return f"{query} {suffix}", params
+        return season_repo.list_latest()
 
     flags_all = "--all" in args
     if flags_all:
-        return f"{query} ORDER BY number", params
+        return season_repo.list_all()
 
     flag_number = get_arg_value(args, "--number")
     if flag_number is not None:
         number = parse_int(flag_number)
         if number is None:
             print("Usage: season list [all|<number>|<division>|--all|--number <number>|--division <division>]")
-            return "", []
-        return f"{query} WHERE number = ?", [number]
+            return None
+        return season_repo.list_by_number(number)
 
     flag_division = get_arg_value(args, "--division")
     if flag_division is not None:
         division = _normalize_division(flag_division)
         if division is None:
-            return "", []
-        return f"{query} WHERE division = ? ORDER BY number", [division]
+            return None
+        return season_repo.list_by_division(division)
 
     token = args[0]
     if token.lower() == "all":
-        return f"{query} ORDER BY number", params
+        return season_repo.list_all()
 
     number = parse_int(token)
     if number is not None:
-        return f"{query} WHERE number = ?", [number]
+        return season_repo.list_by_number(number)
 
     division = _normalize_division(token)
     if division is None:
-        return "", []
+        return None
 
-    return f"{query} WHERE division = ? ORDER BY number", [division]
+    return season_repo.list_by_division(division)
 
 
 def list_seasons(args: list[str]) -> None:
-    query, params = _build_list_query(args)
-    if not query:
+    seasons = _list_matching_seasons(args)
+    if seasons is None:
         return
 
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute(query, params)
-        rows = cur.fetchall()
-
-    print_table_header(columns=[f"{'No.':3}", f"{'Name':<8}", f"{'Div':<6}"], width=25)
-    for number, name, _, division in rows:
-        print(f"{number:>3}.  {name:<8} {division:<6}")
+    print_seasons(seasons)

@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-import sqlite3
-import statistics
-import datetime
-import re
-import math
 from typing import Callable, Optional
 
-from modules.common import connect_db, is_help_request, parse_int, print_command_help, print_unknown_command
+from hcr2.output import stats as stats_output
+from hcr2.repositories import stats as stats_repo
+from hcr2.services import stats as stats_service
+from modules.common import is_help_request, parse_int, print_command_help, print_unknown_command
 
-BIRTHDAY_RE = re.compile(r"^\s*(\d{1,2})\D+(\d{1,2})\s*$")  # Examples: 08-18, 7/3, 07.03.
 PERF_TABLE_WIDTH = 31
 PERF_TABLE_LIMIT = 50
 
@@ -191,61 +188,23 @@ def print_help():
 # ---------------------------------------------------------------------------
 
 def format_k(value):
-    if value is None:
-        return "-"
-    abs_val = abs(value)
-    if abs_val >= 100:
-        return f"{'-' if value < 0 else ''}{round(abs_val / 1000, 1)}k"
-    else:
-        return f"{'-' if value < 0 else ''}0.0k"
+    return stats_output.format_k(value)
 
 def find_current_season(cur):
-    today = datetime.date.today().isoformat()
-    cur.execute("SELECT number FROM season WHERE start <= ? ORDER BY start DESC LIMIT 1", (today,))
-    row = cur.fetchone()
-    return row[0] if row else None
+    return stats_repo.find_current_season()
 
 def _get_season_meta(cur, season_number):
     """
     Return (name, division) for the season.
     Return empty strings if the columns do not exist.
     """
-    name = ""
-    division = ""
-    try:
-        cur.execute("SELECT name, division FROM season WHERE number = ?", (season_number,))
-        row = cur.fetchone()
-        if row:
-            name = row[0] or ""
-            division = row[1] or ""
-    except sqlite3.OperationalError:
-        pass
-    return name, division
+    return stats_repo.get_season_meta(season_number)
 
 def _fetch_season_rows(cur, season_number):
     """
     Fetch all relevant season rows including points and absent.
     """
-    cur.execute("""
-        SELECT
-            ms.player_id,
-            p.name,
-            p.alias,
-            p.team,
-            p.active,
-            ms.score,
-            ms.points,
-            ms.absent,
-            m.id,
-            t.tracks,
-            t.max_score_per_track
-        FROM matchscore ms
-        JOIN players   p ON ms.player_id = p.id
-        JOIN match     m ON ms.match_id = m.id
-        JOIN teamevent t ON m.teamevent_id = t.id
-        WHERE m.season_number = ?
-    """, (season_number,))
-    return cur.fetchall()
+    return stats_repo.fetch_season_rows(season_number)
 
 def _get_min_required_matches(cur, season_number, ratio=0.20):
     """
@@ -253,74 +212,31 @@ def _get_min_required_matches(cur, season_number, ratio=0.20):
     Example:
       15 Matches in Season -> ceil(15 * 0.20) = 3
     """
-    cur.execute("SELECT COUNT(*) FROM match WHERE season_number = ?", (season_number,))
-    total_matches = int(cur.fetchone()[0] or 0)
-
-    if total_matches <= 0:
-        return 0, 0
-
-    min_required = math.ceil(total_matches * ratio)
-    return total_matches, min_required
+    return stats_repo.get_min_required_matches(season_number, ratio=ratio)
 
 def _is_absent(score, points, absent_flag):
-    # Positive points/score count as participation, even if absent=1 is set.
-    if score is not None and score > 0:
-        return False
-    # Fallback if absent is not maintained: points==0 and score==0/None => absent.
-    if absent_flag is not None:
-        return bool(absent_flag) and (score is None or score == 0)
-    return (points is not None and points == 0) and (score is None or score == 0)
+    return stats_service.is_absent(score, points, absent_flag)
 
 def _is_active_plte(active, team):
-    return bool(active) and bool(team) and team.upper() == "PLTE"
+    return stats_service.is_active_plte(active, team)
 
 def _scaled_score(score, tracks):
-    return score * 4 / tracks if tracks else score
+    return stats_service.scaled_score(score, tracks)
 
 def _append_scored_match(scores_by_match, match_id, pid, label, score, tracks):
-    scores_by_match.setdefault(match_id, []).append((pid, label, _scaled_score(score, tracks)))
+    stats_service.append_scored_match(scores_by_match, match_id, pid, label, score, tracks)
 
 def _calculate_match_deltas(scores_by_match):
-    player_scores = {}
-    player_labels = {}
-    player_counts = {}
-
-    for match_id, entries in scores_by_match.items():
-        scores = [s for _, _, s in entries]
-        if not scores:
-            continue
-        try:
-            median = statistics.median(scores)
-        except statistics.StatisticsError:
-            continue
-
-        for pid, label, score in entries:
-            player_scores.setdefault(pid, []).append(score - median)
-            player_labels[pid] = label
-            player_counts[pid] = player_counts.get(pid, 0) + 1
-
-    return player_scores, player_labels, player_counts
+    return stats_service.calculate_match_deltas(scores_by_match)
 
 def _build_delta_entries(player_scores, player_labels, player_counts, min_count=0):
-    entries = []
-    for pid, deltas in player_scores.items():
-        count = player_counts.get(pid, 0)
-        if count < min_count:
-            continue
-        avg_delta = round(sum(deltas) / len(deltas))
-        entries.append((player_labels[pid], avg_delta, count))
-    return entries
+    return stats_service.build_delta_entries(player_scores, player_labels, player_counts, min_count)
 
 def _sorted_delta_entries(entries):
-    return sorted(entries, key=lambda x: x[1], reverse=True)
+    return stats_service.sorted_delta_entries(entries)
 
 def _print_perf_table(entries, limit=None):
-    print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
-    print("-" * PERF_TABLE_WIDTH)
-    for i, (name, delta, count) in enumerate(_sorted_delta_entries(entries), 1):
-        if limit is not None and i > limit:
-            break
-        print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+    stats_output.print_perf_table(_sorted_delta_entries(entries), limit=limit)
 
 # ---------------------------------------------------------------------------
 
@@ -334,93 +250,86 @@ def show_average(season_number=None, active_only=False):
       - only currently active PLTE players
       - then all with >0 scored matches
     """
-    with connect_db() as conn:
-        cur = conn.cursor()
+    if season_number is None:
+        season_number = find_current_season(None)
+    if not season_number:
+        print("⚠️ No matching season found.")
+        return
 
-        if season_number is None:
-            season_number = find_current_season(cur)
-        if not season_number:
-            print("⚠️ No matching season found.")
-            return
+    s_name, s_div = _get_season_meta(None, season_number)
+    header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
+    print(header_line)
 
-        s_name, s_div = _get_season_meta(cur, season_number)
-        header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
-        print(header_line)
+    if not active_only:
+        total_matches, min_matches = _get_min_required_matches(None, season_number, ratio=0.20)
+        print(f"ℹ️ Required matches: {min_matches}/{total_matches} (20%)")
+    else:
+        total_matches = 0
+        min_matches = 1
 
-        if not active_only:
-            total_matches, min_matches = _get_min_required_matches(cur, season_number, ratio=0.20)
-            print(f"ℹ️ Required matches: {min_matches}/{total_matches} (20%)")
+    rows = _fetch_season_rows(None, season_number)
+    if not rows:
+        print("⚠️ No match scores found.")
+        return
+
+    # Scores grouped by match.
+    scores_by_match = {}
+    for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+        if score is None or _is_absent(score, points, absent):
+            continue
+
+        # Limit to current active PLTE players only for --active.
+        if active_only and not _is_active_plte(active, team):
+            continue
+
+        _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
+
+    if not scores_by_match:
+        print("⚠️ No match scores found.")
+        return
+
+    player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
+    entries = _build_delta_entries(player_scores, player_names, player_counts, min_matches)
+
+    if not entries:
+        if active_only:
+            print("⚠️ No active players with scored matches found.")
         else:
-            total_matches = 0
-            min_matches = 1
+            print(f"⚠️ No players with at least {min_matches} scored matches found.")
+        return
 
-        rows = _fetch_season_rows(cur, season_number)
-        if not rows:
-            print("⚠️ No match scores found.")
-            return
-
-        # Scores grouped by match.
-        scores_by_match = {}
-        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            if score is None or _is_absent(score, points, absent):
-                continue
-
-            # Limit to current active PLTE players only for --active.
-            if active_only and not _is_active_plte(active, team):
-                continue
-
-            _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
-
-        if not scores_by_match:
-            print("⚠️ No match scores found.")
-            return
-
-        player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
-        entries = _build_delta_entries(player_scores, player_names, player_counts, min_matches)
-
-        if not entries:
-            if active_only:
-                print("⚠️ No active players with scored matches found.")
-            else:
-                print(f"⚠️ No players with at least {min_matches} scored matches found.")
-            return
-
-        _print_perf_table(entries, limit=PERF_TABLE_LIMIT)
+    _print_perf_table(entries, limit=PERF_TABLE_LIMIT)
 
 # ---------------------------------------------------------------------------
 
 def show_plte_alias():
-    with connect_db() as conn:
-        cur = conn.cursor()
+    season_number = find_current_season(None)
+    if not season_number:
+        return
 
-        season_number = find_current_season(cur)
-        if not season_number:
-            return
+    rows = _fetch_season_rows(None, season_number)
+    if not rows:
+        return
 
-        rows = _fetch_season_rows(cur, season_number)
-        if not rows:
-            return
+    scores_by_match = {}
+    for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+        if team != "PLTE" or score is None or _is_absent(score, points, absent):
+            continue
+        _append_scored_match(scores_by_match, match_id, pid, alias, score, tracks)
 
-        scores_by_match = {}
-        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            if team != "PLTE" or score is None or _is_absent(score, points, absent):
-                continue
-            _append_scored_match(scores_by_match, match_id, pid, alias, score, tracks)
+    player_scores, player_alias, _player_counts = _calculate_match_deltas(scores_by_match)
 
-        player_scores, player_alias, _player_counts = _calculate_match_deltas(scores_by_match)
+    active_ids = stats_repo.list_active_plte_player_ids()
 
-        cur.execute("SELECT id FROM players WHERE active = 1 AND team = 'PLTE'")
-        active_ids = {row[0] for row in cur.fetchall()}
+    entries = []
+    for pid, deltas in player_scores.items():
+        if pid not in active_ids:
+            continue
+        avg_delta = round(sum(deltas) / len(deltas))
+        entries.append((player_alias[pid], avg_delta))
 
-        entries = []
-        for pid, deltas in player_scores.items():
-            if pid not in active_ids:
-                continue
-            avg_delta = round(sum(deltas) / len(deltas))
-            entries.append((player_alias[pid], avg_delta))
-
-        for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True):
-            print(alias)
+    for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True):
+        print(alias)
 
 # ---------------------------------------------------------------------------
 
@@ -431,54 +340,50 @@ def rank_active_plte(season_number=None):
     - No 80% filter
     - Players without scores at the end
     """
-    with connect_db() as conn:
-        cur = conn.cursor()
+    if season_number is None:
+        season_number = find_current_season(None)
+    if not season_number:
+        print("⚠️ No matching season found.")
+        return
 
-        if season_number is None:
-            season_number = find_current_season(cur)
-        if not season_number:
-            print("⚠️ No matching season found.")
-            return
+    # All active PLTE players.
+    active_players = stats_repo.list_active_plte_players()
+    if not active_players:
+        print("⚠️ No active PLTE players.")
+        return
+    id_to_name = {pid: name for pid, name in active_players}
 
-        # All active PLTE players.
-        cur.execute("SELECT id, name FROM players WHERE active = 1 AND team = 'PLTE'")
-        active_players = cur.fetchall()
-        if not active_players:
-            print("⚠️ No active PLTE players.")
-            return
-        id_to_name = {pid: name for pid, name in active_players}
+    rows = _fetch_season_rows(None, season_number)
 
-        rows = _fetch_season_rows(cur, season_number)
+    scores_by_match = {}
+    for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+        if team != "PLTE" or not active:
+            continue
+        if score is None or _is_absent(score, points, absent):
+            continue
+        _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
 
-        scores_by_match = {}
-        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            if team != "PLTE" or not active:
-                continue
-            if score is None or _is_absent(score, points, absent):
-                continue
-            _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
+    player_scores, _player_names, player_counts = _calculate_match_deltas(scores_by_match)
 
-        player_scores, _player_names, player_counts = _calculate_match_deltas(scores_by_match)
+    with_scores = []
+    without_scores = []
+    for pid, name in id_to_name.items():
+        deltas = player_scores.get(pid)
+        if deltas:
+            avg_delta = round(sum(deltas) / len(deltas))
+            count = player_counts.get(pid, 0)
+            with_scores.append((name, avg_delta, count))
+        else:
+            without_scores.append((name, None, 0))
 
-        with_scores = []
-        without_scores = []
-        for pid, name in id_to_name.items():
-            deltas = player_scores.get(pid)
-            if deltas:
-                avg_delta = round(sum(deltas) / len(deltas))
-                count = player_counts.get(pid, 0)
-                with_scores.append((name, avg_delta, count))
-            else:
-                without_scores.append((name, None, 0))
+    with_scores_sorted = sorted(with_scores, key=lambda x: x[1], reverse=True)
+    without_scores_sorted = sorted(without_scores, key=lambda x: x[0].lower())
+    entries = with_scores_sorted + without_scores_sorted
 
-        with_scores_sorted = sorted(with_scores, key=lambda x: x[1], reverse=True)
-        without_scores_sorted = sorted(without_scores, key=lambda x: x[0].lower())
-        entries = with_scores_sorted + without_scores_sorted
-
-        print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
-        print("-" * PERF_TABLE_WIDTH)
-        for i, (name, delta, count) in enumerate(entries, 1):
-            print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+    print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
+    print("-" * PERF_TABLE_WIDTH)
+    for i, (name, delta, count) in enumerate(entries, 1):
+        print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
 # ---------------------------------------------------------------------------
 # Wrapper: stats perf
@@ -570,196 +475,101 @@ def _rank_sum_metric(season_number=None, metric="score", skip=True):
     """
     assert metric in {"score", "points"}, "metric must be 'score' or 'points'"
 
-    with connect_db() as conn:
-        cur = conn.cursor()
+    if season_number is None:
+        season_number = find_current_season(None)
+    if not season_number:
+        print("⚠️ No matching season found.")
+        return
 
-        if season_number is None:
-            season_number = find_current_season(cur)
-        if not season_number:
-            print("⚠️ No matching season found.")
-            return
+    # Header metadata.
+    s_name, s_div = _get_season_meta(None, season_number)
+    title_metric = "Score" if metric == "score" else "Points"
+    header_line = f"📊{title_metric} Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
+    print(header_line)
 
-        # Header metadata.
-        s_name, s_div = _get_season_meta(cur, season_number)
-        title_metric = "Score" if metric == "score" else "Points"
-        header_line = f"📊{title_metric} Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
-        print(header_line)
+    # Active PLTE players for name lookup and the no-skip list.
+    active_players = stats_repo.list_active_plte_players()
+    if not active_players:
+        print("⚠️ No active PLTE players.")
+        return
+    id_to_name = {pid: name for pid, name in active_players}
 
-        # Active PLTE players for name lookup and the no-skip list.
-        cur.execute("SELECT id, name FROM players WHERE active = 1 AND UPPER(team) = 'PLTE'")
-        active_players = cur.fetchall()
-        if not active_players:
-            print("⚠️ No active PLTE players.")
-            return
-        id_to_name = {pid: name for pid, name in active_players}
+    rows = _fetch_season_rows(None, season_number)
+    if not rows:
+        print("⚠️ No match scores found.")
+        return
 
-        rows = _fetch_season_rows(cur, season_number)
-        if not rows:
-            print("⚠️ No match scores found.")
-            return
+    totals = {}   # pid -> sum (score/points)
+    counts = {}   # pid -> number of matches with scored participation
+    name_by_id = {}  # pid -> name (fallback)
 
-        totals = {}   # pid -> sum (score/points)
-        counts = {}   # pid -> number of matches with scored participation
-        name_by_id = {}  # pid -> name (fallback)
+    for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
+        # Include only PLTE and active players in both modes.
+        if not _is_active_plte(active, team):
+            continue
 
-        for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            # Include only PLTE and active players in both modes.
-            if not _is_active_plte(active, team):
-                continue
+        # Count participation only when not absent.
+        if _is_absent(score, points, absent):
+            continue
 
-            # Count participation only when not absent.
-            if _is_absent(score, points, absent):
-                continue
+        # Extract the selected metric.
+        if metric == "score":
+            if score is None:
+                continue  # Nothing to sum here without a score.
+            value = int(score)
+        else:  # metric == "points"
+            value = int(points or 0)
 
-            # Extract the selected metric.
-            if metric == "score":
-                if score is None:
-                    continue  # Nothing to sum here without a score.
-                value = int(score)
-            else:  # metric == "points"
-                value = int(points or 0)
+        totals[pid] = totals.get(pid, 0) + value
+        counts[pid] = counts.get(pid, 0) + 1
+        name_by_id[pid] = name
 
-            totals[pid] = totals.get(pid, 0) + value
-            counts[pid] = counts.get(pid, 0) + 1
-            name_by_id[pid] = name
+    if skip:
+        # Print only players with participation/metric, sorted by sum.
+        entries = []
+        for pid, total in totals.items():
+            pname = id_to_name.get(pid, name_by_id.get(pid, f"ID {pid}"))
+            cnt = counts.get(pid, 0)
+            entries.append((pname, total, cnt))
 
-        if skip:
-            # Print only players with participation/metric, sorted by sum.
-            entries = []
-            for pid, total in totals.items():
-                pname = id_to_name.get(pid, name_by_id.get(pid, f"ID {pid}"))
-                cnt = counts.get(pid, 0)
-                entries.append((pname, total, cnt))
+        entries.sort(key=lambda x: x[1], reverse=True)
 
-            entries.sort(key=lambda x: x[1], reverse=True)
+        stats_output.print_sum_metric_table(entries, metric=metric)
 
-            # Output.
-            col_label = "Score" if metric == "score" else "Pts"
-            print(f"{'#':>2}   {'Lady':<14} {col_label:>6} {'Mat.':>2}")
-            print("-" * PERF_TABLE_WIDTH)
-            for i, (pname, total, cnt) in enumerate(entries, 1):
-                print(f"{i:>2}.  {pname:<14} {total:>6} {cnt:>2}")
+    else:
+        # All active PLTE players, with missing values alphabetically at the bottom.
+        with_vals = []
+        without_vals = []
+        for pid, pname in id_to_name.items():
+            if pid in totals:
+                with_vals.append((pname, totals[pid], counts.get(pid, 0)))
+            else:
+                without_vals.append((pname, None, 0))
 
-        else:
-            # All active PLTE players, with missing values alphabetically at the bottom.
-            with_vals = []
-            without_vals = []
-            for pid, pname in id_to_name.items():
-                if pid in totals:
-                    with_vals.append((pname, totals[pid], counts.get(pid, 0)))
-                else:
-                    without_vals.append((pname, None, 0))
+        with_vals.sort(key=lambda x: x[1], reverse=True)
+        without_vals.sort(key=lambda x: x[0].lower())
+        entries = with_vals + without_vals
 
-            with_vals.sort(key=lambda x: x[1], reverse=True)
-            without_vals.sort(key=lambda x: x[0].lower())
-            entries = with_vals + without_vals
-
-            col_label = "Score" if metric == "score" else "Pts"
-            print(f"{'#':>2}   {'Lady':<14} {col_label:>6} {'Mat.':>2}")
-            print("-" * PERF_TABLE_WIDTH)
-            for i, (pname, total, cnt) in enumerate(entries, 1):
-                val_str = f"{total:>6}" if total is not None else f"{'-':>6}"
-                print(f"{i:>2}.  {pname:<14} {val_str} {cnt:>2}")
+        stats_output.print_sum_metric_table(entries, metric=metric)
 
 # ---------------------------------------------------------------------------
 
 def _fetch_avg_score_last_seasons(cur, last_n=20):
-    cur.execute("""
-        SELECT m.season_number,
-               AVG( ms.score * 4.0 / NULLIF(t.tracks, 0) ) AS avg_scaled
-        FROM matchscore ms
-        JOIN match     m ON m.id = ms.match_id
-        JOIN teamevent t ON t.id = m.teamevent_id
-        JOIN players   p ON p.id = ms.player_id
-        WHERE ms.score IS NOT NULL
-          AND NOT (IFNULL(ms.absent,0)=1 AND IFNULL(ms.score,0)=0)
-          AND p.team = 'PLTE'
-          AND p.active = 1
-        GROUP BY m.season_number
-        ORDER BY m.season_number DESC
-        LIMIT ?
-    """, (last_n,))
-    rows = cur.fetchall()
-    rows.reverse()
-    return rows
+    return stats_repo.fetch_avg_score_last_seasons(last_n)
 
 def _format_k(v):
     return f"{int(round(v/1000.0))}k"
 
 def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
                    title="Avg score per season (scaled)"):
-    if not rows:
-        return "```No data.```"
-    symbol = "."
-
-    def _format_k(v: float) -> str:
-        return f"{int(round(v/1000.0))}k"
-
-    seasons = [int(s) for s, _ in rows]
-    vals    = [float(v) for _, v in rows]
-    n = len(seasons)
-
-    vmin, vmax = min(vals), max(vals)
-    if vmax == vmin:
-        vmax = vmin + 1.0
-
-    gutter = 9
-    plot_cols = max(10, width - gutter)
-    col_idx = [0] * n
-    if n == 1:
-        col_idx[0] = plot_cols - 1
-    else:
-        for i in range(n):
-            col_idx[i] = round(i * (plot_cols - 1) / (n - 1))
-
-    def to_level(v: float) -> int:
-        r = (v - vmin) / (vmax - vmin)
-        return int(round(r * (height - 1)))
-    y_levels = [to_level(v) for v in vals]
-
-    lines = [f"{title} (min={int(vmin)}, max={int(vmax)})"]
-
-    for h in range(height - 1, -1, -1):
-        if h in {height - 1, (height - 1) // 2, 0}:
-            y_val = vmin + (vmax - vmin) * (h / (height - 1))
-            ylab = _format_k(y_val).rjust(6)
-            left = f"{ylab} │ "
-        else:
-            left = " " * (gutter - 2) + "│ "
-
-        row = [" "] * plot_cols
-        for ci, yl in zip(col_idx, y_levels):
-            if yl == h and 0 <= ci < plot_cols:
-                row[ci] = symbol
-        lines.append(left + "".join(row))
-
-    lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
-
-    if x_labels < 2:
-        x_labels = 2
-    label_positions = [round(j * (plot_cols - 1) / (x_labels - 1)) for j in range(x_labels)]
-    label_indices   = [round(j * (n - 1) / (x_labels - 1)) for j in range(x_labels)]
-
-    lbl_buf = [" "] * plot_cols
-    for pos, idx in zip(label_positions, label_indices):
-        lab = f"S{seasons[idx]}"
-        start = min(max(0, pos - len(lab)//2), max(0, plot_cols - len(lab)))
-        for k, ch in enumerate(lab):
-            p = start + k
-            if 0 <= p < plot_cols:
-                lbl_buf[p] = ch
-
-    lines.append(" " * gutter + "".join(lbl_buf).rstrip())
-    return "```\n" + "\n".join(lines) + "\n```"
+    return stats_output.scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol, title=title)
 
 def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
-    with connect_db() as conn:
-        cur = conn.cursor()
-        rows = _fetch_avg_score_last_seasons(cur, last_n=last_n)
-        if not rows:
-            print("⚠️ No data.")
-            return
-        print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
+    rows = _fetch_avg_score_last_seasons(None, last_n=last_n)
+    if not rows:
+        print("⚠️ No data.")
+        return
+    print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
 
 # ---------------------------------------------------------------------------
 
@@ -768,71 +578,7 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     31 rows (days 1..31, top=31). 12 months, each with 3 cells of 2 columns.
     Uses the exact emoji from players.emoji.
     """
-    assert height == 31, "height must be 31"
-    months = 12
-    gutter = 5  # "DD │ "
-
-    plot_cols = months * cols_per_month * cell_w
-    cells_per_row = plot_cols // cell_w
-
-    grid = [[" " * cell_w for _ in range(cells_per_row)] for _ in range(height)]
-    slots = {(m+1, d+1): 0 for m in range(months) for d in range(height)}
-
-    placed = skipped_format = skipped_range = skipped_empty_emoji = 0
-
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT name, birthday, COALESCE(emoji,'')
-            FROM players
-            WHERE birthday IS NOT NULL AND birthday <> ''
-        """)
-        for name, bday, emo in cur.fetchall():
-            s = (bday or "").strip()
-            m = BIRTHDAY_RE.match(s)
-            if not m:
-                skipped_format += 1
-                continue
-            a, b = int(m.group(1)), int(m.group(2))
-            if 1 <= a <= 12 and 1 <= b <= 31:
-                mm, dd = a, b
-            elif 1 <= b <= 12 and 1 <= a <= 31:
-                mm, dd = b, a
-            else:
-                skipped_range += 1
-                continue
-
-            if not (1 <= dd <= 31 and 1 <= mm <= 12):
-                skipped_range += 1
-                continue
-            sym = emo.strip()
-            if not sym:
-                skipped_empty_emoji += 1
-                continue
-
-            row = dd - 1
-            month_cell0 = (mm - 1) * cols_per_month
-            slot = slots[(mm, dd)]
-            cell_idx = month_cell0 + (slot if slot < cols_per_month else cols_per_month - 1)
-            if slot < cols_per_month:
-                slots[(mm, dd)] = slot + 1
-            grid[row][cell_idx] = sym
-            placed += 1
-
-    lines = ["Power Ladies Birthday Map"]
-    for r in range(height - 1, -1, -1):
-        lines.append(f"{r+1:02d} │ " + "".join(grid[r]))
-
-    lines.append(" " * (gutter - 2) + "└" + "─" * plot_cols)
-
-    label_cells = [" "] * cells_per_row
-    for mth in range(1, months + 1):
-        center_cell = (mth - 1) * cols_per_month + (cols_per_month // 2)
-        label_cells[center_cell] = str(mth)
-    label_line = "".join(s.center(cell_w) for s in label_cells)
-    lines.append(" " * gutter + label_line.rstrip())
-
-    print("```\n" + "\n".join(lines) + "\n```")
+    print(stats_output.birthday_plot(stats_repo.fetch_birthday_plot_rows(), width=width, height=height, cols_per_month=cols_per_month, cell_w=cell_w))
 
 # ---------------------------------------------------------------------------
 
@@ -841,163 +587,66 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
     Battle plot for two players in one season.
     Absent players are not plotted.
     """
-    import math
-    CW = max(2, int(col_width))
-
-    with connect_db() as conn:
-        cur = conn.cursor()
-
-        if season_number is None:
-            season_number = find_current_season(cur)
+    if season_number is None:
+        season_number = find_current_season(None)
         if not season_number:
             print("⚠️ No season.")
             return
 
-        cur.execute("""
-            SELECT m.id, m.start
-            FROM match m
-            WHERE m.season_number = ?
-            ORDER BY m.start ASC
-        """, (season_number,))
-        matches = cur.fetchall()
-        if not matches:
-            print("⚠️ No matches found.")
-            return
+    matches = stats_repo.fetch_season_matches(season_number)
+    if not matches:
+        print("⚠️ No matches found.")
+        return
 
-        matches = matches[-max_matches:]
-        match_ids = [mid for mid, _ in matches]
-        n = len(match_ids)
+    matches = matches[-max_matches:]
+    match_ids = [mid for mid, _ in matches]
 
-        cur.execute("SELECT id, name, COALESCE(emoji,'') FROM players WHERE id IN (?,?)",
-                    (player1_id, player2_id))
-        meta = {pid: (name, emoji or "") for pid, name, emoji in cur.fetchall()}
+    meta = stats_repo.fetch_player_meta_for_ids(player1_id, player2_id)
 
-        name1, emo1 = meta.get(player1_id, (f"ID {player1_id}", ""))
-        name2, emo2 = meta.get(player2_id, (f"ID {player2_id}", ""))
+    name1, emo1 = meta.get(player1_id, (f"ID {player1_id}", ""))
+    name2, emo2 = meta.get(player2_id, (f"ID {player2_id}", ""))
 
-        if not emo1.strip():
-            emo1 = "🅰️"
-        if not emo2.strip():
-            emo2 = "🅱️"
+    if not emo1.strip():
+        emo1 = "🅰️"
+    if not emo2.strip():
+        emo2 = "🅱️"
 
-        q = """
-            SELECT ms.match_id, ms.player_id, ms.score, ms.points, ms.absent
-            FROM matchscore ms
-            WHERE ms.match_id IN ({})
-              AND ms.player_id IN (?,?)
-        """.format(",".join("?" * len(match_ids)))
-        cur.execute(q, match_ids + [player1_id, player2_id])
-        rows = cur.fetchall()
+    rows = stats_repo.fetch_matchscores_for_matches_players(match_ids, player1_id, player2_id)
 
-        scores = {}
-        for mid, pid, score, points, absent in rows:
-            if score is None or _is_absent(score, points, absent):
-                continue
-            scores[(mid, pid)] = score
+    scores = {}
+    for mid, pid, score, points, absent in rows:
+        if score is None or _is_absent(score, points, absent):
+            continue
+        scores[(mid, pid)] = score
 
-        vals = list(scores.values())
-        if not vals:
-            print("⚠️ No scores for these players in this season.")
-            return
-
-        vmin, vmax = min(vals), max(vals)
-        if vmin == vmax:
-            vmin = max(0, vmin - 1000)
-            vmax = vmax + 1000
-        pad = max(500, int(0.05 * (vmax - vmin)))
-        vmin = max(0, (vmin - pad) // 1000 * 1000)
-        vmax = math.ceil((vmax + pad) / 1000) * 1000
-
-        def y_to_row(v: int) -> int:
-            r = (v - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-            return int(round(r * (height - 1)))
-
-        plot_w = n * CW
-        grid = [[" "] * plot_w for _ in range(height)]
-
-        def place_cell(row_idx: int, col_x: int, text: str):
-            s = (text or "")[:CW]
-            leftpad = (CW - len(s)) // 2
-            cell = (" " * leftpad) + s
-            cell = cell.ljust(CW, " ")
-            for k, ch in enumerate(cell):
-                pos = col_x + k
-                if 0 <= pos < plot_w:
-                    grid[row_idx][pos] = ch
-
-        for x, mid in enumerate(match_ids):
-            col = x * CW
-            here = []
-            sc1 = scores.get((mid, player1_id))
-            if sc1 is not None:
-                r = height - 1 - y_to_row(sc1)
-                here.append((r, emo1))
-            sc2 = scores.get((mid, player2_id))
-            if sc2 is not None:
-                r = height - 1 - y_to_row(sc2)
-                here.append((r, emo2))
-
-            if len(here) == 2 and here[0][0] == here[1][0]:
-                row_idx = here[0][0]
-                combo = (here[0][1] + here[1][1])[:CW]
-                place_cell(row_idx, col, combo)
-            else:
-                for row_idx, mark in here:
-                    place_cell(row_idx, col, mark)
-
-        tick_rows = {0, height // 4, height // 2, (3 * height) // 4, height - 1}
-
-        print(f"Battle {name1} {emo1} vs {name2} {emo2} (Season {season_number})")
-        for r in range(height):
-            if r in tick_rows:
-                val = vmax - (vmax - vmin) * (r / (height - 1))
-                label = f"{int(round(val/1000))}k".rjust(4)
-            else:
-                label = " " * 4
-            print(f"{label}│{''.join(grid[r])}")
-
-        print(" " * 4 + "└" + "─" * plot_w)
-        labels = "".join(f"{i+1:>{CW}}" for i in range(n))
-        print(" " * 5 + labels)
+    stats_output.print_battle_plot(
+        name1=name1,
+        emoji1=emo1,
+        name2=name2,
+        emoji2=emo2,
+        season_number=season_number,
+        match_ids=match_ids,
+        scores=scores,
+        player1_id=player1_id,
+        player2_id=player2_id,
+        height=height,
+        col_width=col_width,
+    )
 
 def show_absent(season_number=None):
     """
     Show unexcused absences for active PLTE players:
     (absent IS NULL or 0) AND points = 0
     """
-    with connect_db() as conn:
-        cur = conn.cursor()
+    if season_number is None:
+        season_number = find_current_season(None)
+    if not season_number:
+        print("⚠️ No matching season found.")
+        return
 
-        if season_number is None:
-            season_number = find_current_season(cur)
-        if not season_number:
-            print("⚠️ No matching season found.")
-            return
+    rows = stats_repo.fetch_unexcused_absences(season_number)
 
-        cur.execute("""
-            SELECT p.id, p.name, COUNT(ms.id) AS unexcused
-            FROM matchscore ms
-            JOIN match m   ON ms.match_id = m.id
-            JOIN players p ON ms.player_id = p.id
-            WHERE m.season_number = ?
-              AND p.active = 1
-              AND UPPER(p.team) = 'PLTE'
-              AND (ms.absent IS NULL OR ms.absent = 0)
-              AND ms.points = 0
-            GROUP BY p.id, p.name
-            ORDER BY unexcused DESC, p.name ASC
-        """, (season_number,))
-        rows = cur.fetchall()
-
-        print(f"🚫 Unexcused absences (points=0, absent=0/NULL) – Season {season_number}")
-        if not rows:
-            print("✅ No unexcused absences.")
-            return
-
-        print(f"{'Player':<16} {'Missed':>6}")
-        print("-" * 26)
-        for pid, name, cnt in rows:
-            print(f"{name:<16} {cnt:>6}")
+    stats_output.print_absent_stats(season_number, rows)
 
 # ---------------------------------------------------------------------------
 
@@ -1007,27 +656,14 @@ def _resolve_teamevent_by_offset(cur, offset: int):
     1 = previous event, 2 = event before that, etc.
     Sorted by iso_year/iso_week descending, with id as fallback.
     """
-    cur.execute("""
-        SELECT DISTINCT t.id, t.name, t.iso_year, t.iso_week
-        FROM teamevent t
-        JOIN match m ON m.teamevent_id = t.id
-        ORDER BY t.iso_year DESC, t.iso_week DESC, t.id DESC
-    """)
-    rows = cur.fetchall()
-    if not rows:
-        return None
-    if offset < 0 or offset >= len(rows):
-        return None
-    return rows[offset][0]
+    return stats_repo.resolve_teamevent_by_offset(offset)
 
 def show_teamevent_stats_user(offset: int = 0):
     """
     Wrapper for show_teamevent_stats with a relative index:
     offset 0 = current/latest team event, 1 = previous event, ...
     """
-    with connect_db() as conn:
-        cur = conn.cursor()
-        te_id = _resolve_teamevent_by_offset(cur, offset)
+    te_id = _resolve_teamevent_by_offset(None, offset)
 
     if te_id is None:
         print(f"⚠️ No team event found for offset {offset}.")
@@ -1043,74 +679,48 @@ def show_teamevent_stats(te_id):
     - Uses avg delta vs. median per match (scaled to 4 tracks), same logic as avg/rank
     - All PLTE players who have at least one score in that event (regardless of current 'active' flag)
     """
-    with connect_db() as conn:
-        cur = conn.cursor()
+    # Fetch team event metadata.
+    row = stats_repo.get_teamevent_meta(te_id)
+    if not row:
+        print(f"⚠️ No team event with id {te_id} found.")
+        return
 
-        # Fetch team event metadata.
-        cur.execute("""
-            SELECT name, iso_year, iso_week, tracks, max_score_per_track
-            FROM teamevent
-            WHERE id = ?
-        """, (te_id,))
-        row = cur.fetchone()
-        if not row:
-            print(f"⚠️ No team event with id {te_id} found.")
-            return
+    te_name, iso_year, iso_week, te_tracks, te_max = row
 
-        te_name, iso_year, iso_week, te_tracks, te_max = row
+    # Fetch all matches for this team event, including scores.
+    rows = stats_repo.fetch_teamevent_rows(te_id)
 
-        # Fetch all matches for this team event, including scores.
-        cur.execute("""
-            SELECT
-                ms.player_id,
-                p.name,
-                p.team,
-                p.active,
-                ms.score,
-                ms.points,
-                ms.absent,
-                m.id AS match_id,
-                t.tracks,
-                t.max_score_per_track
-            FROM matchscore ms
-            JOIN players   p ON ms.player_id = p.id
-            JOIN match     m ON ms.match_id = m.id
-            JOIN teamevent t ON m.teamevent_id = t.id
-            WHERE m.teamevent_id = ?
-        """, (te_id,))
-        rows = cur.fetchall()
+    if not rows:
+        print(f"⚠️ No match scores for team event {te_id}.")
+        return
 
-        if not rows:
-            print(f"⚠️ No match scores for team event {te_id}.")
-            return
+    # Scores per match: all PLTE, not absent; active is intentionally not filtered here.
+    scores_by_match = {}
+    for pid, name, team, active, score, points, absent, match_id, tracks, max_score in rows:
+        if not team or team.upper() != "PLTE":
+            continue
+        if score is None or _is_absent(score, points, absent):
+            continue
 
-        # Scores per match: all PLTE, not absent; active is intentionally not filtered here.
-        scores_by_match = {}
-        for pid, name, team, active, score, points, absent, match_id, tracks, max_score in rows:
-            if not team or team.upper() != "PLTE":
-                continue
-            if score is None or _is_absent(score, points, absent):
-                continue
+        _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
 
-            _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
+    if not scores_by_match:
+        print(f"⚠️ No valid scores for PLTE players in team event {te_id}.")
+        return
 
-        if not scores_by_match:
-            print(f"⚠️ No valid scores for PLTE players in team event {te_id}.")
-            return
+    # Deltas vs. median per match.
+    player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
 
-        # Deltas vs. median per match.
-        player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
+    if not player_scores:
+        print(f"⚠️ No data to rank for team event {te_id}.")
+        return
 
-        if not player_scores:
-            print(f"⚠️ No data to rank for team event {te_id}.")
-            return
+    # Build result entries.
+    entries = _build_delta_entries(player_scores, player_names, player_counts)
 
-        # Build result entries.
-        entries = _build_delta_entries(player_scores, player_names, player_counts)
-
-        # Header.
-        print(f"📊 Performance Team Event {te_id}: {te_name} ({iso_year}-W{iso_week})")
-        _print_perf_table(entries)
+    # Header.
+    print(f"📊 Performance Team Event {te_id}: {te_name} ({iso_year}-W{iso_week})")
+    _print_perf_table(entries)
 
 def show_player_last_matches(player_id: int, last_n: int = 15):
     """
@@ -1122,332 +732,54 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
 
     DONATION_START_DATE = "2025-11-01"
 
-    def _chunks(lst, size=900):
-        for i in range(0, len(lst), size):
-            yield lst[i:i + size]
+    player_meta = stats_repo.get_player_stats_meta(player_id)
+    if not player_meta:
+        print(f"⚠️ No player with id {player_id}.")
+        return
 
-    def _linreg_slope(y_vals):
-        n = len(y_vals)
-        if n < 2:
-            return 0.0
-        x_mean = (n - 1) / 2.0
-        y_mean = sum(y_vals) / n
-        num = den = 0.0
-        for i, y in enumerate(y_vals):
-            dx = i - x_mean
-            dy = y - y_mean
-            num += dx * dy
-            den += dx * dx
-        return num / den if den else 0.0
+    total_matches_overall = stats_repo.count_player_matchscores(player_id)
+    total_unexcused_overall = stats_repo.count_player_unexcused_absences(player_id)
 
-    def _trend_to_score(slope):
-        if slope <= -150:
-            return -3
-        if slope <= -75:
-            return -2
-        if slope <= -25:
-            return -1
-        if slope < 25:
-            return 0
-        if slope < 75:
-            return 1
-        if slope < 150:
-            return 2
-        return 3
+    last_matches = stats_repo.fetch_player_last_matches(player_id, last_n)
+    if not last_matches:
+        print(f"⚠️ No matches found for player {player_id}.")
+        return
 
-    def _trend_label(trend: int) -> str:
-        # compact arrow + number
-        if trend <= -3:
-            return "↓-3"
-        if trend == -2:
-            return "↓-2"
-        if trend == -1:
-            return "↘-1"
-        if trend == 0:
-            return "→0"
-        if trend == 1:
-            return "↗+1"
-        if trend == 2:
-            return "↑+2"
-        return "↑+3"
+    overall_matches = stats_repo.fetch_player_overall_matches(player_id)
+    overall_match_ids = [m[0] for m in overall_matches]
+    median_rows = stats_repo.fetch_match_rows_for_medians(overall_match_ids)
+    med_by_match = stats_service.calculate_match_medians(median_rows)
+    summary = stats_service.summarize_player_stats(
+        last_matches,
+        overall_matches,
+        med_by_match,
+        total_unexcused_overall=total_unexcused_overall,
+    )
 
-    def _fmt_int(v):
-        return "-" if v is None else str(int(v))
+    cutoff_date = stats_repo.get_latest_donation_date()
+    donation_matches = (
+        stats_repo.count_player_donation_matches(player_id, DONATION_START_DATE, cutoff_date)
+        if cutoff_date is not None
+        else 0
+    )
+    donation_total = (
+        stats_repo.get_player_latest_donation_total(player_id, cutoff_date)
+        if cutoff_date is not None
+        else 0
+    )
+    donations = stats_service.summarize_player_donations(
+        start_date=DONATION_START_DATE,
+        cutoff_date=cutoff_date,
+        matches=donation_matches,
+        total=donation_total,
+    )
 
-    def _fmt_k(v):
-        return "-" if v is None else format_k(int(round(v)))
-
-    def _print_summary_2col(title_left, title_right, rows, label_w=14, left_w=14, right_w=14):
-        # tighter columns
-        sep = label_w + left_w + right_w + 6
-        print("-" * sep)
-        print(f"{'':<{label_w}} | {title_left:<{left_w}} | {title_right:<{right_w}}")
-        print("-" * sep)
-        for label, lv, rv in rows:
-            print(f"{label:<{label_w}} | {lv:<{left_w}} | {rv:<{right_w}}")
-        print("-" * sep)
-
-    def _is_unexcused_absence(score, points, absent):
-        return (
-            (score is None or score == 0)
-            and (points is None or points == 0)
-            and (absent is None or absent == 0)
-        )
-
-    with connect_db() as conn:
-        cur = conn.cursor()
-
-        # Player meta (+ garage_power)
-        cur.execute(
-            """
-            SELECT name, COALESCE(emoji,''), COALESCE(team,''), active, COALESCE(garage_power, 0)
-            FROM players
-            WHERE id = ?
-            """,
-            (player_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            print(f"⚠️ No player with id {player_id}.")
-            return
-        pname, pemoji, pteam, pactive, garage_power = row
-        pemoji = (pemoji or "").strip()
-        try:
-            garage_power = int(garage_power or 0)
-        except Exception:
-            garage_power = 0
-
-        # Overall totals
-        cur.execute("SELECT COUNT(*) FROM matchscore WHERE player_id = ?", (player_id,))
-        total_matches_overall = int(cur.fetchone()[0] or 0)
-
-        # Overall unexcused absences
-        cur.execute(
-            """
-            SELECT COUNT(*)
-            FROM matchscore
-            WHERE player_id = ?
-              AND (score IS NULL OR score = 0)
-              AND (points IS NULL OR points = 0)
-              AND (absent IS NULL OR absent = 0)
-            """,
-            (player_id,),
-        )
-        total_unexcused_overall = int(cur.fetchone()[0] or 0)
-
-        # Last N matches (desc) for display
-        cur.execute(
-            """
-            SELECT
-                m.id,
-                m.start,
-                m.season_number,
-                t.name,
-                t.tracks,
-                ms.score,
-                ms.points,
-                ms.absent
-            FROM matchscore ms
-            JOIN match     m ON m.id = ms.match_id
-            JOIN teamevent t ON t.id = m.teamevent_id
-            WHERE ms.player_id = ?
-            ORDER BY m.start DESC, m.id DESC
-            LIMIT ?
-            """,
-            (player_id, last_n),
-        )
-        last_matches = cur.fetchall()
-        if not last_matches:
-            print(f"⚠️ No matches found for player {player_id}.")
-            return
-
-        # Overall matches (chronological)
-        cur.execute(
-            """
-            SELECT
-                m.id,
-                m.start,
-                t.tracks,
-                ms.score,
-                ms.points,
-                ms.absent
-            FROM matchscore ms
-            JOIN match     m ON m.id = ms.match_id
-            JOIN teamevent t ON t.id = m.teamevent_id
-            WHERE ms.player_id = ?
-            ORDER BY m.start ASC, m.id ASC
-            """,
-            (player_id,),
-        )
-        overall_matches = cur.fetchall()
-        overall_match_ids = [m[0] for m in overall_matches]
-
-        # Medians per match (PLTE, not absent, score != NULL)
-        med_by_match = {}
-        if overall_match_ids:
-            for chunk in _chunks(overall_match_ids):
-                q = f"""
-                    SELECT
-                        ms.match_id,
-                        ms.score,
-                        ms.points,
-                        ms.absent,
-                        p.team,
-                        t.tracks
-                    FROM matchscore ms
-                    JOIN players   p ON p.id = ms.player_id
-                    JOIN match     m ON m.id = ms.match_id
-                    JOIN teamevent t ON t.id = m.teamevent_id
-                    WHERE ms.match_id IN ({",".join("?" * len(chunk))})
-                """
-                cur.execute(q, chunk)
-                rows = cur.fetchall()
-
-                tmp = {}
-                for mid, score, points, absent, team, tracks in rows:
-                    if not team or team.upper() != "PLTE":
-                        continue
-                    if score is None or _is_absent(score, points, absent):
-                        continue
-                    scaled = score * 4 / tracks if tracks else score
-                    tmp.setdefault(mid, []).append(float(scaled))
-
-                for mid, vals in tmp.items():
-                    if vals:
-                        med_by_match[mid] = statistics.median(vals)
-
-        # Header (short)
-        head = f"👤 {player_id}: {pname}"
-        if pemoji:
-            head += f" {pemoji}"
-        head += f" (GP {garage_power}, {pteam or '-'}, act {int(bool(pactive))})"
-        print(head)
-
-        # Tighter table header + narrower event
-        print(f"{'#':>2} {'Date':<10} {'S':>3} {'M':>5} {'Event':<14} {'Sc':>5} {'Pt':>3} {'Pf':>6}")
-        print("-" * 56)
-
-        # Last-N aggregates
-        last_counted = 0
-        last_unexcused = 0
-        last_score_sum = 0
-        last_points_sum = 0
-        last_deltas_avg = []
-        last_deltas_desc = []
-
-        for i, (mid, start, season, te_name, tracks, score, points, absent) in enumerate(last_matches, 1):
-            start_s = (start or "")[:10]
-            te_short = (te_name or "")[:14]
-
-            if _is_unexcused_absence(score, points, absent):
-                last_unexcused += 1
-
-            perf_str = "-"
-            if score is not None and not _is_absent(score, points, absent):
-                scaled = score * 4 / tracks if tracks else score
-                med = med_by_match.get(mid)
-                if med is not None:
-                    delta = round(scaled - med)
-                    perf_str = _fmt_k(delta)
-                    last_deltas_avg.append(delta)
-                    last_deltas_desc.append(float(scaled - med))
-                else:
-                    perf_str = "n/a"
-
-                last_counted += 1
-                last_score_sum += int(score)
-                last_points_sum += int(points or 0)
-
-            score_s = "-" if score is None else str(int(score))
-            pts_s = "-" if points is None else str(int(points))
-            # Pf = shortened perf column; keep aligned
-            print(f"{i:>2} {start_s:<10} {season:>3} {mid:>5} {te_short:<14} {score_s:>5} {pts_s:>3} {perf_str:>6}")
-
-        last_deltas_trend = list(reversed(last_deltas_desc))
-
-        # Overall aggregates
-        overall_counted = 0
-        overall_score_sum = 0
-        overall_points_sum = 0
-        overall_deltas = []
-
-        for mid, _, tracks, score, points, absent in overall_matches:
-            if score is None or _is_absent(score, points, absent):
-                continue
-
-            overall_counted += 1
-            overall_score_sum += int(score)
-            overall_points_sum += int(points or 0)
-
-            med = med_by_match.get(mid)
-            if med is None:
-                continue
-            scaled = score * 4 / tracks if tracks else score
-            overall_deltas.append(float(scaled - med))
-
-        # Averages
-        avg_score_last = (last_score_sum / last_counted) if last_counted else None
-        avg_points_last = (last_points_sum / last_counted) if last_counted else None
-        avg_perf_last = (sum(last_deltas_avg) / len(last_deltas_avg)) if last_deltas_avg else None
-
-        avg_score_overall = (overall_score_sum / overall_counted) if overall_counted else None
-        avg_points_overall = (overall_points_sum / overall_counted) if overall_counted else None
-        avg_perf_overall = (sum(overall_deltas) / len(overall_deltas)) if overall_deltas else None
-
-        # Trends
-        trend_last = _trend_to_score(_linreg_slope(last_deltas_trend) if last_deltas_trend else 0.0)
-        trend_overall = _trend_to_score(_linreg_slope(overall_deltas) if overall_deltas else 0.0)
-
-        # Summary (compact labels; trend label includes meaning)
-        rows = [
-            ("Matches", _fmt_int(last_counted), _fmt_int(total_matches_overall)),
-            ("Unexcused", _fmt_int(last_unexcused), _fmt_int(total_unexcused_overall)),
-            ("Avg score", _fmt_int(round(avg_score_last)) if avg_score_last is not None else "-", _fmt_int(round(avg_score_overall)) if avg_score_overall is not None else "-"),
-            ("Avg pts", _fmt_int(round(avg_points_last)) if avg_points_last is not None else "-", _fmt_int(round(avg_points_overall)) if avg_points_overall is not None else "-"),
-            ("Avg perf", _fmt_k(avg_perf_last), _fmt_k(avg_perf_overall)),
-            ("Trend(-3..+3)", _trend_label(trend_last), _trend_label(trend_overall)),
-        ]
-        _print_summary_2col(f"last {last_n}", "overall", rows)
-
-        # Donations (header + single data line, compact)
-        cur.execute("SELECT MAX(date) FROM donation")
-        row = cur.fetchone()
-        cutoff_date = row[0] if row and row[0] is not None else None
-
-        donation_matches = 0
-        donation_total = 0
-        donation_expected = 0
-        donation_index = 0.0
-
-        if cutoff_date is not None:
-            cur.execute(
-                """
-                SELECT COUNT(DISTINCT m.id)
-                FROM match m
-                JOIN matchscore ms ON ms.match_id = m.id
-                WHERE ms.player_id = ?
-                  AND DATE(m.start) >= DATE(?)
-                  AND DATE(m.start) <= DATE(?)
-                """,
-                (player_id, DONATION_START_DATE, cutoff_date),
-            )
-            donation_matches = int(cur.fetchone()[0] or 0)
-
-            cur.execute(
-                """
-                SELECT total FROM donation
-                WHERE player_id = ?
-                  AND date <= ?
-                ORDER BY date DESC LIMIT 1
-                """,
-                (player_id, cutoff_date),
-            )
-            drow = cur.fetchone()
-            donation_total = int(drow[0]) if drow and drow[0] is not None else 0
-
-            donation_expected = donation_matches * 600
-            donation_index = (donation_total / donation_expected * 100.0) if donation_expected > 0 else 0.0
-
-        print(f"\n📦 Donations since {DONATION_START_DATE}" + (f" → {cutoff_date}" if cutoff_date else ""))
-        print(f"{'Mch':>3} {'Exp':>7} {'Tot':>7} {'Idx':>5}")
-        print(f"{donation_matches:3d} {format_k(donation_expected):>7} {format_k(donation_total):>7} {donation_index:5.1f}")
+    stats_output.print_player_detail(
+        player_id=player_id,
+        player_meta=player_meta,
+        last_n=last_n,
+        last_matches=last_matches,
+        summary=summary,
+        total_matches_overall=total_matches_overall,
+        donations=donations,
+    )

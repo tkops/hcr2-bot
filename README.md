@@ -35,6 +35,73 @@ cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2.py
 
 Then complete `./hcr2.py` or `hcr2.py` with Tab.
 
+## Tests
+
+Run the smoke test suite with the standard library test runner:
+
+```bash
+python3 -m unittest discover -v
+```
+
+The tests cover CLI help behavior and a few read-only database paths against a temporary SQLite database created from `schema.sql`.
+
+## Project Layout
+
+The incremental refactor keeps `hcr2.py` as the compatibility entry point and
+adds a package entry point that can also be run with `python3 -m hcr2`.
+
+```text
+hcr2/
+  cli/             command dispatch and future CLI implementation
+  services/        business logic services
+  repositories/    database access layer
+  models/          domain models
+  output/          shared formatting
+  integrations/    external systems such as Nextcloud or Excel
+  db/migrations/   database migrations
+```
+
+The legacy `modules/` package remains in place while behavior is moved behind
+the new package boundaries step by step.
+
+The root command dispatch is defined in `hcr2/cli/registry.py` and exposed
+through a thin Typer adapter in `hcr2/cli/app.py`. The legacy module handlers
+are still used for command behavior, but the entry points now share one
+registry-backed CLI layer. In addition to `-h` and `--help`, the CLI accepts
+`help` and `help <entity>`.
+
+Typer's generated shell completion is available with:
+
+```bash
+./hcr2.py --show-completion bash
+```
+
+The first migrated domains are `vehicle`, `season`, `teamevent` and `match`. Their legacy modules now
+act as CLI/output wrappers while data shape, SQL access and business operations
+move into `hcr2/models/`, `hcr2/repositories/` and `hcr2/services/`.
+`player` has a repository/model/service foundation for list, show, activate,
+deactivate and delete; the rest of the player migration is incremental.
+Player list/detail output for those migrated paths lives in `hcr2/output/players.py`.
+Shared table formatting for migrated domains lives in `hcr2/output/`.
+The first extracted external integration is Nextcloud/WebDAV in
+`hcr2/integrations/nextcloud.py`; `modules/sheet.py` still owns Excel parsing
+and import/export workflows but no longer owns Nextcloud URL construction or
+WebDAV operations.
+
+Database schema changes are applied through SQL migrations in
+`hcr2/db/migrations/`:
+
+```bash
+python3 migrate_db.py
+python3 migrate_db.py --db /path/to/hcr2.db
+```
+
+The legacy `create_db.py` entry point remains available and delegates to the
+same migration runner.
+Database connection configuration lives in `hcr2/db/connection.py`; legacy
+imports from `modules.common` are kept as compatibility aliases while modules
+move over incrementally.
+
 # DB Schema
 
 ```mermaid

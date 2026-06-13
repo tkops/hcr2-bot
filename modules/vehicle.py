@@ -4,15 +4,14 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
-import sqlite3
 import yaml
 
+from hcr2.output.vehicles import print_vehicles
+from hcr2.services import vehicles as vehicle_service
 from modules.common import (
-    connect_db,
     is_help_request,
     parse_int,
     print_command_help,
-    print_table_header,
     print_unknown_command,
 )
 
@@ -105,13 +104,6 @@ def _handle_drop(args: list[str]) -> None:
     drop_table()
 
 
-def _fetch_vehicle_rows() -> list[tuple[int, str, str]]:
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT id, name, shortname FROM vehicle ORDER BY id")
-        return cur.fetchall()
-
-
 def _parse_edit_fields(args: list[str]) -> tuple[Optional[int], Optional[str], Optional[str], bool]:
     vehicle_id = _extract_vehicle_id(args, USAGE_EDIT)
     if vehicle_id is None:
@@ -155,18 +147,12 @@ def _extract_vehicle_id(args: list[str], usage: str) -> Optional[int]:
 
 
 def list_vehicles() -> None:
-    rows = _fetch_vehicle_rows()
-    print_table_header(columns=[f"{'ID':<2}", f"{'Name':<18}", "SN"], width=26)
-    for vehicle_id, name, shortname in rows:
-        print(f"{vehicle_id:>2}.  {name:<18} {shortname}")
+    vehicles = vehicle_service.list_vehicles()
+    print_vehicles(vehicles)
 
 
 def add_vehicle(name: str, shortname: str) -> None:
-    with connect_db() as conn:
-        conn.execute(
-            "INSERT INTO vehicle (name, shortname) VALUES (?, ?)",
-            (name, shortname),
-        )
+    vehicle_service.add_vehicle(name, shortname)
     print(f"✅ Added vehicle '{name}' as '{shortname}'.")
 
 
@@ -179,25 +165,12 @@ def edit_vehicle(args: list[str]) -> None:
         print("⚠️  Nothing to update.")
         return
 
-    fields = []
-    values = []
-    if name:
-        fields.append("name = ?")
-        values.append(name)
-    if shortname:
-        fields.append("shortname = ?")
-        values.append(shortname)
-    values.append(vehicle_id)
-
-    with connect_db() as conn:
-        conn.execute(f"UPDATE vehicle SET {', '.join(fields)} WHERE id = ?", values)
-
+    vehicle_service.edit_vehicle(vehicle_id, name=name, shortname=shortname)
     print(f"✅ Vehicle {vehicle_id} updated.")
 
 
 def delete_vehicle(vehicle_id: int) -> None:
-    with connect_db() as conn:
-        conn.execute("DELETE FROM vehicle WHERE id = ?", (vehicle_id,))
+    vehicle_service.delete_vehicle(vehicle_id)
     print(f"🗑️  Vehicle {vehicle_id} deleted.")
 
 
@@ -209,27 +182,13 @@ def import_vehicles(file: Optional[str]) -> None:
     with open(file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or []
 
-    count = 0
-    with connect_db() as conn:
-        for vehicle in data:
-            try:
-                conn.execute(
-                    "INSERT INTO vehicle (name, shortname) VALUES (?, ?)",
-                    (vehicle["name"], vehicle["shortname"]),
-                )
-                count += 1
-            except sqlite3.IntegrityError:
-                pass
+    count = vehicle_service.import_vehicles(data)
 
     print(f"✅ Imported {count} new vehicles.")
 
 
 def export_vehicles(file: Optional[str] = None) -> None:
-    with connect_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT name, shortname FROM vehicle ORDER BY name COLLATE NOCASE")
-        data = [{"name": name, "shortname": shortname} for name, shortname in cur.fetchall()]
-
+    data = vehicle_service.export_vehicles()
     yaml_str = yaml.dump(data, sort_keys=False, allow_unicode=True)
     if file:
         output_path = Path(file)
@@ -242,8 +201,7 @@ def export_vehicles(file: Optional[str] = None) -> None:
 
 
 def drop_table() -> None:
-    with connect_db() as conn:
-        conn.execute("DROP TABLE IF EXISTS vehicle;")
+    vehicle_service.drop_vehicle_table()
     print("🗑️  Vehicle table dropped.")
 
 
