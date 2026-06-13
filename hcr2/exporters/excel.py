@@ -12,6 +12,20 @@ from openpyxl.utils import get_column_letter
 from hcr2.services.sheets import parse_k_amount, to_k
 
 
+def save_workbook(workbook: Workbook, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(path)
+    return path
+
+
+def delete_local_file(path: Path) -> bool:
+    try:
+        path.unlink()
+        return True
+    except Exception:
+        return False
+
+
 def autofit_columns(ws, min_w: int = 10, max_w: int = 60) -> None:
     for cell in ws[1]:
         cell.font = Font(bold=True)

@@ -1264,6 +1264,19 @@ class OutputFormattingTests(unittest.TestCase):
         )
         self.assertEqual([ws["A4"].value, ws["B4"].value, ws["C4"].value, ws["D4"].value], [1, "Alice", "", 12.5])
 
+    def test_excel_exporter_saves_and_deletes_workbook(self) -> None:
+        wb = excel_exporter.build_players_workbook(["id", "name"], [(1, "Alice")])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "nested" / "players.xlsx"
+
+            saved_path = excel_exporter.save_workbook(wb, path)
+
+            self.assertEqual(saved_path, path)
+            self.assertTrue(path.exists())
+            self.assertTrue(excel_exporter.delete_local_file(path))
+            self.assertFalse(path.exists())
+            self.assertFalse(excel_exporter.delete_local_file(path))
+
     def test_excel_exporter_reads_players_workbook(self) -> None:
         wb = excel_exporter.build_players_workbook(
             ["id", "name", "garage_power"],

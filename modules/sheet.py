@@ -83,7 +83,6 @@ def generate_excel(match, players, output_path):
     filepath = sheet_service.match_sheet_local_path(output_path, season, filename)
     folder = filepath.parent
 
-    folder.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
     ws = wb.active
     ws.title = "Match Info"
@@ -132,15 +131,12 @@ def generate_excel(match, players, output_path):
         for cell in row:
             cell.alignment = align_center
 
-    wb.save(filepath)
+    excel_exporter.save_workbook(wb, filepath)
 
     remote_path = sheet_service.match_sheet_remote_path_for_filename(season, filename)
     upload_to_nextcloud(filepath, remote_path)  # No overwrite for match sheets.
 
-    try:
-        filepath.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(filepath)
 
     web_url = sheet_service.scores_web_url(season)
     return f"[{filename}]({web_url})", True
@@ -180,10 +176,7 @@ def import_excel_to_matchscore(match_id):
         score_opponent=oppscore if oppscore is not None else 0,
     )
 
-    try:
-        local_path.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(local_path)
 
     web_url = sheet_service.scores_web_url(season)
     status = "Changed" if result.changed > 0 else "Unchanged"
@@ -211,15 +204,11 @@ def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOC
         print("❌ players table not found")
         return
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     wb = excel_exporter.build_players_workbook(export_data.columns, export_data.rows)
-    wb.save(out_path)
+    excel_exporter.save_workbook(wb, out_path)
 
     url, created = _upload_players_xlsx(out_path)
-    try:
-        out_path.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(out_path)
 
     web_url = sheet_service.scores_web_url()
     print(f"✅ [Power-Ladys-Scores/{PLAYERS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
@@ -243,10 +232,7 @@ def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path]
     )
 
     # Delete local copy on a best-effort basis.
-    try:
-        local.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(local)
 
     # Delete only the players Excel file in Nextcloud; leave match sheets untouched.
     deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
@@ -271,16 +257,12 @@ def _upload_donations_xlsx(local_path: Path):
 
 def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS_LOCAL_TMP):
     rows = sheet_service.get_donation_export_rows(db_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     today_str = date.today().isoformat()
     wb = excel_exporter.build_donations_workbook(rows, today_str)
-    wb.save(out_path)
+    excel_exporter.save_workbook(wb, out_path)
 
     url, created = _upload_donations_xlsx(out_path)
-    try:
-        out_path.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(out_path)
 
     web_url = sheet_service.scores_web_url()
     print(f"✅ [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
@@ -304,10 +286,7 @@ def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Pat
     )
 
     # Delete local copy.
-    try:
-        local.unlink()
-    except Exception:
-        pass
+    excel_exporter.delete_local_file(local)
 
     # Delete the donations Excel file in Nextcloud, same as players.
     deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
