@@ -1,11 +1,11 @@
-# Bash completion for hcr2.py.
+# Bash completion for hcr2.
 #
 # Usage for the current shell:
 #   source completions/hcr2.bash
 #
 # Persistent user install:
 #   mkdir -p ~/.local/share/bash-completion/completions
-#   cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2.py
+#   cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2
 
 _hcr2_comp_words()
 {
@@ -157,4 +157,4 @@ _hcr2()
     COMPREPLY=()
 }
 
-complete -F _hcr2 hcr2.py ./hcr2.py
+complete -F _hcr2 hcr2 hcr2.py ./hcr2.py

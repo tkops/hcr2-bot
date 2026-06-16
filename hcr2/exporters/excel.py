@@ -6,6 +6,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
@@ -81,6 +82,65 @@ def build_donations_workbook(rows: list[tuple[int, str, int]], today: str) -> Wo
     ws.column_dimensions["B"].width = 26
     ws.column_dimensions["C"].width = 12
     ws.column_dimensions["D"].width = 12
+    return wb
+
+
+def build_match_sheet_workbook(
+    match: tuple[int, str, int, str, str],
+    players: list[tuple[int, str, str | None, str | None]],
+    *,
+    is_absent_on,
+) -> Workbook:
+    match_id, match_date_str, season, opponent, event = match
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Match Info"
+
+    ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
+
+    ws.insert_rows(2, amount=1)
+    ws["A2"] = "Result"
+    ws["B2"] = "Power Ladies -->"
+    ws["C2"] = ""
+    ws["D2"] = ""
+    ws["E2"] = f"<-- {opponent}"
+
+    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Notes"])
+
+    for row in ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=7):
+        for cell in row:
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.column_dimensions["A"].width = 15
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 26
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 8
+    ws.column_dimensions["G"].width = 9
+    ws.column_dimensions["H"].width = 130
+
+    ws["H3"] = (
+        "H1: Did not drive: enter Score=0 and Points=0.\n"
+        "H2: Set Absent to true when a player is excused (vacation etc.).\n"
+        "H3: Set Checkin to true when a player logged into the match but did not drive.\n"
+        "H4: If a player left the team but is still listed, delete the row.\n"
+        "H5: If a player is missing, add them with the correct ID.\n"
+        "H6: If a missing player has not been created yet, enter 'a' for add in column B instead of the ID. The player is created during import.\n"
+        "H7: Enter the match results in cell C2 (Ladies) and D2 (opponent)."
+    )
+    ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
+
+    for pid, name, away_from, away_until in players:
+        absent_flag = is_absent_on(match_date_str, away_from, away_until)
+        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
+
+    align_center = Alignment(horizontal="center", vertical="center")
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
+        for cell in row:
+            cell.alignment = align_center
+
     return wb
 
 

@@ -5,9 +5,9 @@ from datetime import datetime
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from hcr2.integrations.nextcloud import NEXTCLOUD_BASE
+from hcr2.integrations.nextcloud import NEXTCLOUD_BASE, delete_file, download_file, upload_file
 from hcr2.repositories import matches as match_repo
 from hcr2.services import matchscores as matchscore_service
 from hcr2.services import players as player_service
@@ -53,6 +53,55 @@ class MatchExportData:
     players: list[tuple[int, str, str | None, str | None]]
 
 
+@dataclass(frozen=True)
+class PlayerWorkbookImportOutcome:
+    status: str
+    result: PlayerImportResult | None = None
+    cleanup_status: str | None = None
+
+
+@dataclass(frozen=True)
+class DonationWorkbookImportOutcome:
+    status: str
+    result: DonationImportResult | None = None
+    cleanup_status: str | None = None
+
+
+@dataclass(frozen=True)
+class MatchSheetImportOutcome:
+    status: str
+    filename: str | None = None
+    web_url: str | None = None
+    result: MatchSheetApplyResult | None = None
+    validation_errors: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class WorkbookExportOutcome:
+    status: str
+    label: str | None = None
+    web_url: str | None = None
+    markdown_link: str | None = None
+    created: bool = False
+
+
+PlayerWorkbookReader = Callable[[Path], Any]
+DonationWorkbookReader = Callable[[Path], Any]
+MatchSheetWorkbookReader = Callable[[Path], Any]
+WorkbookBuilder = Callable[..., Any]
+WorkbookSaver = Callable[[Any, Path], Path]
+AbsentChecker = Callable[..., bool]
+
+
+PLAYERS_XLSX_NAME = "Ladys.xlsx"
+PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
+PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
+
+DONATIONS_XLSX_NAME = "Donations.xlsx"
+DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
+DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
+
+
 def sanitize_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "", value.replace(" ", "_"))
 
@@ -69,9 +118,252 @@ def match_sheet_remote_path_for_filename(season: int, filename: str) -> Path:
     return NEXTCLOUD_BASE / f"S{season}" / filename
 
 
+def match_sheet_tmp_path(filename: str) -> Path:
+    return Path("tmp") / filename
+
+
 def scores_web_url(season: int | None = None) -> str:
     path = "/Scores" if season is None else f"/Scores/S{season}"
     return f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path={path}"
+
+
+def upload_match_sheet(local_path: Path, season: int, filename: str) -> tuple[Optional[str], bool]:
+    return upload_file(local_path, match_sheet_remote_path_for_filename(season, filename), overwrite=False)
+
+
+def download_match_sheet(season: int, filename: str, local_path: Path | None = None) -> Optional[Path]:
+    local_path = local_path or match_sheet_tmp_path(filename)
+    return download_file(match_sheet_remote_path_for_filename(season, filename), local_path)
+
+
+def upload_players_workbook(local_path: Path = PLAYERS_LOCAL_TMP) -> tuple[Optional[str], bool]:
+    return upload_file(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
+
+
+def download_players_workbook(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Path]:
+    return download_file(PLAYERS_REMOTE_PATH, local_path)
+
+
+def upload_donations_workbook(local_path: Path = DONATIONS_LOCAL_TMP) -> tuple[Optional[str], bool]:
+    return upload_file(local_path, DONATIONS_REMOTE_PATH, overwrite=True)
+
+
+def download_donations_workbook(local_path: Path = DONATIONS_LOCAL_TMP) -> Optional[Path]:
+    return download_file(DONATIONS_REMOTE_PATH, local_path)
+
+
+def delete_local_file(path: Path) -> bool:
+    try:
+        path.unlink()
+        return True
+    except Exception:
+        return False
+
+
+def delete_remote_file(remote_path: Path) -> bool:
+    return delete_file(remote_path)
+
+
+def cleanup_imported_workbook(local_path: Path, remote_path: Path) -> str:
+    delete_local_file(local_path)
+    deleted = delete_remote_file(remote_path)
+    return "deleted" if deleted else "delete failed"
+
+
+def export_players_workbook(
+    db_path: str | Path,
+    *,
+    workbook_builder: WorkbookBuilder,
+    workbook_saver: WorkbookSaver,
+    excluded_columns: set[str],
+    out_path: Path = PLAYERS_LOCAL_TMP,
+) -> WorkbookExportOutcome:
+    export_data = get_player_export_data(db_path, excluded_columns=excluded_columns)
+    if export_data is None:
+        return WorkbookExportOutcome(status="TABLE_MISSING")
+
+    workbook = workbook_builder(export_data.columns, export_data.rows)
+    workbook_saver(workbook, out_path)
+
+    _, created = upload_players_workbook(out_path)
+    delete_local_file(out_path)
+
+    return WorkbookExportOutcome(
+        status="EXPORTED",
+        label=f"{NEXTCLOUD_BASE}/{PLAYERS_XLSX_NAME}",
+        web_url=scores_web_url(),
+        created=created,
+    )
+
+
+def export_donations_workbook(
+    db_path: str | Path,
+    *,
+    workbook_builder: WorkbookBuilder,
+    workbook_saver: WorkbookSaver,
+    today: str,
+    out_path: Path = DONATIONS_LOCAL_TMP,
+) -> WorkbookExportOutcome:
+    rows = get_donation_export_rows(db_path)
+    workbook = workbook_builder(rows, today)
+    workbook_saver(workbook, out_path)
+
+    _, created = upload_donations_workbook(out_path)
+    delete_local_file(out_path)
+
+    return WorkbookExportOutcome(
+        status="EXPORTED",
+        label=f"{NEXTCLOUD_BASE}/{DONATIONS_XLSX_NAME}",
+        web_url=scores_web_url(),
+        created=created,
+    )
+
+
+def export_match_sheet_from_data(
+    match: tuple[int, str, int, str, str],
+    players: list[tuple[int, str, str | None, str | None]],
+    *,
+    output_path: Path,
+    workbook_builder: WorkbookBuilder,
+    workbook_saver: WorkbookSaver,
+    absent_checker: AbsentChecker,
+) -> WorkbookExportOutcome:
+    match_id, _, season, opponent, event = match
+    filename = match_sheet_filename(match_id, event, opponent)
+    local_path = match_sheet_local_path(output_path, season, filename)
+
+    workbook = workbook_builder(match, players, is_absent_on=absent_checker)
+    workbook_saver(workbook, local_path)
+
+    _, created = upload_match_sheet(local_path, season, filename)
+    delete_local_file(local_path)
+
+    web_url = scores_web_url(season)
+    return WorkbookExportOutcome(
+        status="EXPORTED",
+        markdown_link=f"[{filename}]({web_url})",
+        web_url=web_url,
+        created=created,
+    )
+
+
+def export_match_sheet(
+    db_path: str | Path,
+    match_id: int,
+    *,
+    output_path: Path,
+    workbook_builder: WorkbookBuilder,
+    workbook_saver: WorkbookSaver,
+    absent_checker: AbsentChecker,
+) -> WorkbookExportOutcome:
+    export_data = get_match_export_data(db_path, match_id)
+    if export_data is None:
+        return WorkbookExportOutcome(status="NO_MATCH")
+    return export_match_sheet_from_data(
+        export_data.match,
+        export_data.players,
+        output_path=output_path,
+        workbook_builder=workbook_builder,
+        workbook_saver=workbook_saver,
+        absent_checker=absent_checker,
+    )
+
+
+def import_players_workbook(
+    db_path: str | Path,
+    *,
+    workbook_reader: PlayerWorkbookReader,
+    excluded_columns: set[str],
+    local_xlsx: Optional[Path] = None,
+) -> PlayerWorkbookImportOutcome:
+    local = local_xlsx or download_players_workbook()
+    if not local or not local.exists():
+        return PlayerWorkbookImportOutcome(status="NOT_FOUND")
+
+    header, workbook_rows = workbook_reader(local)
+    if header is None or workbook_rows is None:
+        delete_local_file(local)
+        return PlayerWorkbookImportOutcome(status="INVALID_HEADER")
+
+    result = import_player_rows(db_path, workbook_rows, excluded_columns=excluded_columns)
+    cleanup_status = cleanup_imported_workbook(local, PLAYERS_REMOTE_PATH)
+    return PlayerWorkbookImportOutcome(status="IMPORTED", result=result, cleanup_status=cleanup_status)
+
+
+def import_donations_workbook(
+    db_path: str | Path,
+    *,
+    workbook_reader: DonationWorkbookReader,
+    local_xlsx: Optional[Path] = None,
+) -> DonationWorkbookImportOutcome:
+    local = local_xlsx or download_donations_workbook()
+    if not local or not local.exists():
+        return DonationWorkbookImportOutcome(status="NOT_FOUND")
+
+    date_str, donation_entries, errors = workbook_reader(local)
+    if date_str is None:
+        delete_local_file(local)
+        return DonationWorkbookImportOutcome(status="INVALID_DATE")
+
+    result = import_donation_entries(
+        db_path,
+        date_str,
+        donation_entries,
+        initial_errors=errors,
+    )
+    cleanup_status = cleanup_imported_workbook(local, DONATIONS_REMOTE_PATH)
+    return DonationWorkbookImportOutcome(status="IMPORTED", result=result, cleanup_status=cleanup_status)
+
+
+def import_match_sheet(
+    db_path: str | Path,
+    match_id: int,
+    *,
+    workbook_reader: MatchSheetWorkbookReader,
+) -> MatchSheetImportOutcome:
+    export_data = get_match_export_data(db_path, match_id)
+    if export_data is None:
+        return MatchSheetImportOutcome(status="NO_MATCH")
+
+    match = export_data.match
+    match_id, _, season, opponent, event = match
+    filename = match_sheet_filename(match_id, event, opponent)
+    local_path = match_sheet_tmp_path(filename)
+
+    downloaded = download_match_sheet(season, filename, local_path)
+    if not downloaded or not downloaded.exists():
+        return MatchSheetImportOutcome(status="NOT_FOUND", filename=filename, web_url=scores_web_url(season))
+
+    ladyscore, oppscore, rows = workbook_reader(downloaded)
+    validation = validate_match_sheet_rows(
+        lady_score=ladyscore,
+        opponent_score=oppscore,
+        rows=rows,
+    )
+
+    if validation.errors:
+        delete_local_file(downloaded)
+        return MatchSheetImportOutcome(
+            status="VALIDATION_ERRORS",
+            filename=filename,
+            web_url=scores_web_url(season),
+            validation_errors=validation.errors,
+        )
+
+    result = apply_match_sheet_entries(
+        match_id=match_id,
+        entries=validation.entries,
+        score_ladys=ladyscore if ladyscore is not None else 0,
+        score_opponent=oppscore if oppscore is not None else 0,
+    )
+
+    delete_local_file(downloaded)
+    return MatchSheetImportOutcome(
+        status="IMPORTED",
+        filename=filename,
+        web_url=scores_web_url(season),
+        result=result,
+    )
 
 
 def to_k(value: Optional[int]) -> float:

@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
 from typing import Optional
-from openpyxl import Workbook
-from openpyxl.styles import Alignment
 from pathlib import Path
 from datetime import date
 from hcr2.exporters import excel as excel_exporter
-from hcr2.integrations.nextcloud import (
-    NEXTCLOUD_BASE,
-    delete_file,
-    download_file,
-    match_sheet_remote_path,
-    upload_file,
-)
+from hcr2.output import sheets as sheet_output
 from hcr2.services import sheets as sheet_service
 from modules.common import (
     DB_PATH,
@@ -38,15 +30,9 @@ EXCLUDED_PLAYER_COLS = {
     "last_modified",
 }
 
-# --- Player export/import targets ---
-PLAYERS_XLSX_NAME = "Ladys.xlsx"
-PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
-PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
+PLAYERS_LOCAL_TMP = sheet_service.PLAYERS_LOCAL_TMP
 
-# --- Donations export/import targets ---
-DONATIONS_XLSX_NAME = "Donations.xlsx"
-DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
-DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
+DONATIONS_LOCAL_TMP = sheet_service.DONATIONS_LOCAL_TMP
 
 
 def sanitize_filename(s):
@@ -57,16 +43,9 @@ def _is_absent_on(match_day: date, frm: Optional[str], until: Optional[str]) -> 
     return is_absent_on(match_day, frm, until)
 
 
-def upload_to_nextcloud(local_path, remote_path, *, overwrite: bool = False):
-    return upload_file(local_path, remote_path, overwrite=overwrite)
-
-
-def delete_from_nextcloud(remote_path) -> bool:
-    return delete_file(remote_path)
-
-
-def download_from_nextcloud(season, filename, local_path):
-    return download_file(match_sheet_remote_path(season, filename), Path(local_path))
+def _is_absent_on_match_day(match_day_str: str, frm: Optional[str], until: Optional[str]) -> bool:
+    match_day = parse_date_or_none(match_day_str) or date(1970, 1, 1)
+    return _is_absent_on(match_day, frm, until)
 
 
 # -------------------- Excel Generation & Import (Match Sheet) --------------------
@@ -75,224 +54,96 @@ def generate_excel(match, players, output_path):
     """
     Match sheet. Unchanged except for standard formatting.
     """
-    match_id, match_date_str, season, opponent, event = match
-
-    md = parse_date_or_none(match_date_str) or date(1970, 1, 1)
-
-    filename = sheet_service.match_sheet_filename(match_id, event, opponent)
-    filepath = sheet_service.match_sheet_local_path(output_path, season, filename)
-    folder = filepath.parent
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Match Info"
-
-    ws.append([f"Match ID: {match_id}", f"Date: {match_date_str}", f"Season: {season}", f"Opponent: {opponent}", f"Event: {event}"])
-
-    ws.insert_rows(2, amount=1)
-    ws["A2"] = "Result"
-    ws["B2"] = "Power Ladies -->"
-    ws["C2"] = ""
-    ws["D2"] = ""
-    ws["E2"] = f"<-- {opponent}"
-
-    ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin", "Notes"])
-
-    for row in ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=7):
-        for cell in row:
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    ws.column_dimensions["A"].width = 15
-    ws.column_dimensions["B"].width = 20
-    ws.column_dimensions["C"].width = 26
-    ws.column_dimensions["D"].width = 20
-    ws.column_dimensions["E"].width = 20
-    ws.column_dimensions["F"].width = 8
-    ws.column_dimensions["G"].width = 9
-    ws.column_dimensions["H"].width = 130
-
-    ws["H3"] = (
-        "H1: Did not drive: enter Score=0 and Points=0.\n"
-        "H2: Set Absent to true when a player is excused (vacation etc.).\n"
-        "H3: Set Checkin to true when a player logged into the match but did not drive.\n"
-        "H4: If a player left the team but is still listed, delete the row.\n"
-        "H5: If a player is missing, add them with the correct ID.\n"
-        "H6: If a missing player has not been created yet, enter 'a' for add in column B instead of the ID. The player is created during import.\n"
-        "H7: Enter the match results in cell C2 (Ladies) and D2 (opponent)."
+    outcome = sheet_service.export_match_sheet_from_data(
+        match,
+        players,
+        output_path=output_path,
+        workbook_builder=excel_exporter.build_match_sheet_workbook,
+        workbook_saver=excel_exporter.save_workbook,
+        absent_checker=_is_absent_on_match_day,
     )
-    ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
-
-    for pid, name, a_from, a_until in players:
-        absent_flag = _is_absent_on(md, a_from, a_until)
-        ws.append([match_id, pid, name, "", "", "true" if absent_flag else "false", "", ""])
-
-    align_center = Alignment(horizontal="center", vertical="center")
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
-        for cell in row:
-            cell.alignment = align_center
-
-    excel_exporter.save_workbook(wb, filepath)
-
-    remote_path = sheet_service.match_sheet_remote_path_for_filename(season, filename)
-    upload_to_nextcloud(filepath, remote_path)  # No overwrite for match sheets.
-
-    excel_exporter.delete_local_file(filepath)
-
-    web_url = sheet_service.scores_web_url(season)
-    return f"[{filename}]({web_url})", True
+    return outcome.markdown_link, outcome.created
 
 
 def import_excel_to_matchscore(match_id):
-    export_data = sheet_service.get_match_export_data(DB_PATH, match_id)
-    if export_data is None:
-        print("❌ No match found.")
+    outcome = sheet_service.import_match_sheet(
+        DB_PATH,
+        match_id,
+        workbook_reader=excel_exporter.read_match_sheet_workbook,
+    )
+    if outcome.status == "NO_MATCH":
+        sheet_output.print_no_match_found()
+        return
+    if outcome.status == "NOT_FOUND":
+        sheet_output.print_match_excel_not_found()
+        return
+    if outcome.status == "VALIDATION_ERRORS":
+        sheet_output.print_validation_errors(outcome.validation_errors or [])
         return
 
-    match = export_data.match
-    match_id, _, season, opponent, event = match
-    filename = sheet_service.match_sheet_filename(match_id, event, opponent)
-    local_path = Path("tmp") / filename
-
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    download_from_nextcloud(season, filename, local_path)
-
-    ladyscore, oppscore, rows = excel_exporter.read_match_sheet_workbook(local_path)
-    validation = sheet_service.validate_match_sheet_rows(
-        lady_score=ladyscore,
-        opponent_score=oppscore,
-        rows=rows,
-    )
-
-    if validation.errors:
-        print("❌ Import aborted due to validation errors:")
-        for msg in validation.errors:
-            print(" -", msg)
-        return
-
-    result = sheet_service.apply_match_sheet_entries(
-        match_id=match_id,
-        entries=validation.entries,
-        score_ladys=ladyscore if ladyscore is not None else 0,
-        score_opponent=oppscore if oppscore is not None else 0,
-    )
-
-    excel_exporter.delete_local_file(local_path)
-
-    web_url = sheet_service.scores_web_url(season)
-    status = "Changed" if result.changed > 0 else "Unchanged"
-    score_status = "Score updated" if result.score_updated else "Score update failed"
-    print(
-        f"✅ [{filename}]({web_url}) "
-        f"({status}, {result.imported} imported, {result.changed} changed; {score_status})"
-    )
+    sheet_output.print_match_import_result(outcome.filename or "", outcome.web_url or "", outcome.result)
 
 
 # ===================== Players: Export/Import (active PLTE, excludes, formatting) =====================
 
-def _download_players_xlsx(local_path: Path = PLAYERS_LOCAL_TMP) -> Optional[Path]:
-    return download_file(PLAYERS_REMOTE_PATH, local_path)
-
-
-def _upload_players_xlsx(local_path: Path):
-    # Only the players workbook may be overwritten.
-    return upload_to_nextcloud(local_path, PLAYERS_REMOTE_PATH, overwrite=True)
-
-
 def export_players_to_excel(db_path: str = DB_PATH, out_path: Path = PLAYERS_LOCAL_TMP):
-    export_data = sheet_service.get_player_export_data(db_path, excluded_columns=EXCLUDED_PLAYER_COLS)
-    if export_data is None:
-        print("❌ players table not found")
+    outcome = sheet_service.export_players_workbook(
+        db_path,
+        workbook_builder=excel_exporter.build_players_workbook,
+        workbook_saver=excel_exporter.save_workbook,
+        excluded_columns=EXCLUDED_PLAYER_COLS,
+        out_path=out_path,
+    )
+    if outcome.status == "TABLE_MISSING":
+        sheet_output.print_players_table_not_found()
         return
 
-    wb = excel_exporter.build_players_workbook(export_data.columns, export_data.rows)
-    excel_exporter.save_workbook(wb, out_path)
-
-    url, created = _upload_players_xlsx(out_path)
-    excel_exporter.delete_local_file(out_path)
-
-    web_url = sheet_service.scores_web_url()
-    print(f"✅ [Power-Ladys-Scores/{PLAYERS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+    sheet_output.print_exported_workbook(outcome.label or "", outcome.web_url or "", outcome.created)
 
 
 def import_players_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
-    local = local_xlsx or _download_players_xlsx()
-    if not local or not local.exists():
-        print("❌ players Excel not found on Nextcloud")
-        return
-
-    header, workbook_rows = excel_exporter.read_players_workbook(local)
-    if header is None or workbook_rows is None:
-        print("❌ First row must contain column names including 'id'")
-        return
-
-    result = sheet_service.import_player_rows(
+    outcome = sheet_service.import_players_workbook(
         db_path,
-        workbook_rows,
+        workbook_reader=excel_exporter.read_players_workbook,
         excluded_columns=EXCLUDED_PLAYER_COLS,
+        local_xlsx=local_xlsx,
     )
+    if outcome.status == "NOT_FOUND":
+        sheet_output.print_players_excel_not_found()
+        return
+    if outcome.status == "INVALID_HEADER":
+        sheet_output.print_invalid_players_header()
+        return
 
-    # Delete local copy on a best-effort basis.
-    excel_exporter.delete_local_file(local)
-
-    # Delete only the players Excel file in Nextcloud; leave match sheets untouched.
-    deleted = delete_from_nextcloud(PLAYERS_REMOTE_PATH)
-    status = "deleted" if deleted else "delete failed"
-
-    print(
-        f"✅ players import: {result.updated} updated, {result.inserted} inserted, "
-        f"{result.skipped} skipped, {result.errors} errors ({status} in Nextcloud)"
-    )
+    sheet_output.print_player_import_result(outcome.result, outcome.cleanup_status or "delete failed")
 
 
 # ===================== Donations: Export/Import =====================
 
-def _download_donations_xlsx(local_path: Path = DONATIONS_LOCAL_TMP) -> Optional[Path]:
-    return download_file(DONATIONS_REMOTE_PATH, local_path)
-
-
-def _upload_donations_xlsx(local_path: Path):
-    # Donations.xlsx may be overwritten.
-    return upload_to_nextcloud(local_path, DONATIONS_REMOTE_PATH, overwrite=True)
-
-
 def export_donations_to_excel(db_path: str = DB_PATH, out_path: Path = DONATIONS_LOCAL_TMP):
-    rows = sheet_service.get_donation_export_rows(db_path)
-    today_str = date.today().isoformat()
-    wb = excel_exporter.build_donations_workbook(rows, today_str)
-    excel_exporter.save_workbook(wb, out_path)
-
-    url, created = _upload_donations_xlsx(out_path)
-    excel_exporter.delete_local_file(out_path)
-
-    web_url = sheet_service.scores_web_url()
-    print(f"✅ [Power-Ladys-Scores/{DONATIONS_XLSX_NAME}]({web_url}) ({'Created' if created else 'Updated'})")
+    outcome = sheet_service.export_donations_workbook(
+        db_path,
+        workbook_builder=excel_exporter.build_donations_workbook,
+        workbook_saver=excel_exporter.save_workbook,
+        today=date.today().isoformat(),
+        out_path=out_path,
+    )
+    sheet_output.print_exported_workbook(outcome.label or "", outcome.web_url or "", outcome.created)
 
 def import_donations_from_excel(db_path: str = DB_PATH, local_xlsx: Optional[Path] = None):
-    local = local_xlsx or _download_donations_xlsx()
-    if not local or not local.exists():
-        print("❌ donations Excel not found on Nextcloud")
-        return
-
-    date_str, donation_entries, errors = excel_exporter.read_donations_workbook(local)
-    if date_str is None:
-        print("❌ No valid date in cell A2")
-        return
-
-    result = sheet_service.import_donation_entries(
+    outcome = sheet_service.import_donations_workbook(
         db_path,
-        date_str,
-        donation_entries,
-        initial_errors=errors,
+        workbook_reader=excel_exporter.read_donations_workbook,
+        local_xlsx=local_xlsx,
     )
+    if outcome.status == "NOT_FOUND":
+        sheet_output.print_donations_excel_not_found()
+        return
+    if outcome.status == "INVALID_DATE":
+        sheet_output.print_invalid_donations_date()
+        return
 
-    # Delete local copy.
-    excel_exporter.delete_local_file(local)
-
-    # Delete the donations Excel file in Nextcloud, same as players.
-    deleted = delete_from_nextcloud(DONATIONS_REMOTE_PATH)
-    status = "deleted" if deleted else "delete failed"
-
-    print(f"✅ donations import: {result.added} added, {result.errors} errors ({status} in Nextcloud)")
+    sheet_output.print_donation_import_result(outcome.result, outcome.cleanup_status or "delete failed")
 
 
 # ===================== CLI =====================
@@ -341,7 +192,7 @@ def _parse_match_id_arg(args, usage: str):
         return None
     match_id = parse_int(args[0], default=None)
     if match_id is None:
-        print("❌ Match ID must be an integer.")
+        sheet_output.print_invalid_match_id()
         return None
     return match_id
 
@@ -351,13 +202,19 @@ def _handle_create(args):
     if match_id is None:
         return
 
-    export_data = sheet_service.get_match_export_data(DB_PATH, match_id)
-    if export_data is None:
-        print("❌ No match found.")
+    outcome = sheet_service.export_match_sheet(
+        DB_PATH,
+        match_id,
+        output_path=sheet_service.NEXTCLOUD_BASE,
+        workbook_builder=excel_exporter.build_match_sheet_workbook,
+        workbook_saver=excel_exporter.save_workbook,
+        absent_checker=_is_absent_on_match_day,
+    )
+    if outcome.status == "NO_MATCH":
+        sheet_output.print_no_match_found()
         return
 
-    url, uploaded = generate_excel(export_data.match, export_data.players, output_path=NEXTCLOUD_BASE)
-    print(f"✅ {url} ({'Created' if uploaded else 'Already existed'})")
+    sheet_output.print_match_sheet_link_created(outcome.markdown_link or "", outcome.created)
 
 
 def _handle_import(args):

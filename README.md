@@ -12,11 +12,14 @@ The project now follows a preferred CLI style. Older positional forms still work
 Examples:
 
 ```bash
-python hcr2.py player show --id 1
-python hcr2.py match list --season 62
-python hcr2.py donations add --player 1 --date 2026-06-04 --total 12345
-python hcr2.py teamevent add --name "Teamcup" --week 2026/W23 --tracks 4 --score 15000
+python3 -m hcr2 player show --id 1
+python3 -m hcr2 match list --season 62
+python3 -m hcr2 donations add --player 1 --date 2026-06-04 --total 12345
+python3 -m hcr2 teamevent add --name "Teamcup" --week 2026/W23 --tracks 4 --score 15000
 ```
+
+The legacy `python3 hcr2.py ...` form remains available as a compatibility
+entry point.
 
 ## Bash Completion
 
@@ -30,20 +33,36 @@ For a persistent per-user install:
 
 ```bash
 mkdir -p ~/.local/share/bash-completion/completions
-cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2.py
+cp completions/hcr2.bash ~/.local/share/bash-completion/completions/hcr2
 ```
 
-Then complete `./hcr2.py` or `hcr2.py` with Tab.
+Then complete `hcr2`, `./hcr2.py` or `hcr2.py` with Tab, depending on how you
+invoke the command.
 
 ## Tests
 
-Run the smoke test suite with the standard library test runner:
+Run the full test suite with the standard library test runner:
 
 ```bash
 python3 -m unittest discover -v
 ```
 
-The tests cover CLI help behavior and a few read-only database paths against a temporary SQLite database created from `schema.sql`.
+The tests use temporary SQLite databases created through the migration runner.
+They are split by area:
+
+```text
+tests/support.py             shared temporary database fixture
+tests/test_cli_help.py       CLI help, version and dispatch behavior
+tests/test_core_domains.py   vehicle, season, match and team event basics
+tests/test_donations.py      donations CLI smoke behavior
+tests/test_matchscores.py    matchscore repository and service behavior
+tests/test_players.py        player repository and service behavior
+tests/test_sheets.py         sheet import/export services and workflows
+tests/test_stats.py          stats repository, service and CLI smoke behavior
+tests/test_output.py         formatting and workbook output helpers
+tests/test_migrations.py     migration runner behavior
+tests/test_nextcloud.py      Nextcloud path helpers
+```
 
 ## Project Layout
 
@@ -53,11 +72,12 @@ adds a package entry point that can also be run with `python3 -m hcr2`.
 ```text
 hcr2/
   cli/             command dispatch and future CLI implementation
+  exporters/       workbook creation, reading and file export helpers
   services/        business logic services
   repositories/    database access layer
   models/          domain models
   output/          shared formatting
-  integrations/    external systems such as Nextcloud or Excel
+  integrations/    external systems such as Nextcloud
   db/migrations/   database migrations
 ```
 
@@ -73,20 +93,19 @@ registry-backed CLI layer. In addition to `-h` and `--help`, the CLI accepts
 Typer's generated shell completion is available with:
 
 ```bash
-./hcr2.py --show-completion bash
+python3 hcr2.py --show-completion
 ```
 
-The first migrated domains are `vehicle`, `season`, `teamevent` and `match`. Their legacy modules now
-act as CLI/output wrappers while data shape, SQL access and business operations
-move into `hcr2/models/`, `hcr2/repositories/` and `hcr2/services/`.
-`player` has a repository/model/service foundation for list, show, activate,
-deactivate and delete; the rest of the player migration is incremental.
-Player list/detail output for those migrated paths lives in `hcr2/output/players.py`.
-Shared table formatting for migrated domains lives in `hcr2/output/`.
-The first extracted external integration is Nextcloud/WebDAV in
-`hcr2/integrations/nextcloud.py`; `modules/sheet.py` still owns Excel parsing
-and import/export workflows but no longer owns Nextcloud URL construction or
-WebDAV operations.
+The migrated domains include `vehicle`, `season`, `teamevent`, `match`,
+`player`, `matchscore`, `donations`, `stats` and sheet import/export slices.
+Legacy modules under `modules/` remain as compatibility CLI adapters; SQL
+access, business logic and output formatting live under `hcr2/repositories/`,
+`hcr2/services/` and `hcr2/output/`.
+
+Sheet workflows are split across `hcr2/services/sheets.py`,
+`hcr2/exporters/excel.py`, `hcr2/output/sheets.py` and
+`hcr2/integrations/nextcloud.py`. Sheet imports no longer shell out to
+`python hcr2.py ...` subcommands during tests or service workflows.
 
 Database schema changes are applied through SQL migrations in
 `hcr2/db/migrations/`:

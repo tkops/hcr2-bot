@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from hcr2.models.matchscore import MatchScoreDetail, MatchScoreListRow
+from hcr2.services.matchscores import AddScoreResult, DeleteScoreResult, EditScoreResult
 
 
 MatchResultLoader = Callable[[int], tuple[int, int]]
@@ -86,6 +87,13 @@ def print_deleted_score(row: MatchScoreDetail) -> None:
     )
 
 
+def print_delete_result(result: DeleteScoreResult) -> None:
+    if not result.row:
+        print("⚠️ Not found.")
+        return
+    print_deleted_score(result.row)
+
+
 def print_updated_score(row: MatchScoreDetail | None) -> None:
     if not row:
         print("OK UPDATED")
@@ -100,3 +108,57 @@ def print_updated_score(row: MatchScoreDetail | None) -> None:
         f"{int(row.absent or 0):>3} {int(row.checkin or 0):>3}"
     )
     print()
+
+
+def print_add_result(result: AddScoreResult, player_input: str) -> None:
+    if result.status == "INVALID_RANGE":
+        print("❌ Score or points out of valid range.")
+        return
+    if result.status == "PLAYER_NOT_FOUND":
+        print(f"❌ No player found matching: {player_input}")
+        return
+    if result.status == "PLAYER_AMBIGUOUS":
+        print(f"⚠️ Multiple players found for '{player_input}':")
+        for player in result.player_resolution.matches:
+            print(f"  ID {player.id}: {player.name} (alias: {player.alias})")
+        return
+    print(result.status)
+
+
+def print_no_scores_found() -> None:
+    print("⚠️ No scores found.")
+
+
+def print_invalid_score_or_points() -> None:
+    print("❌ Score or points out of valid range.")
+
+
+def print_pid_requires_numeric() -> None:
+    print("❌ --pid requires a numeric player_id.")
+
+
+def print_edit_result(result: EditScoreResult) -> None:
+    if result.status == "NOTHING_TO_UPDATE":
+        print("⚠️ Nothing to update.")
+        return
+    if result.status == "NOT_FOUND":
+        print("⚠️ Not found.")
+        return
+    if result.status == "PLAYER_NOT_FOUND":
+        print(f"❌ Player id {result.player_id} does not exist.")
+        return
+    if result.status == "PLAYER_CLASH":
+        print(
+            f"❌ Cannot change player: entry already exists for match {result.match_id} and player {result.player_id} "
+            f"(matchscore.id={result.clash_id})."
+        )
+        print("   Tip: delete or edit the existing entry first.")
+        return
+    if result.status == "SCORE_OUT_OF_RANGE":
+        print("❌ Score out of range.")
+        return
+    if result.status == "POINTS_OUT_OF_RANGE":
+        print("❌ Points out of range.")
+        return
+
+    print_updated_score(result.row)

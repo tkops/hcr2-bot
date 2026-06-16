@@ -1,6 +1,6 @@
 # HCR2 Bot Refactor - Next Steps
 
-Stand: 2026-06-13
+Stand: 2026-06-16
 
 ## Kurzfassung fuer die naechste Codex-Session
 
@@ -20,8 +20,8 @@ Aktueller Stand:
   - `hcr2/db/migrations.py`
   - `hcr2/db/migrations/0001_initial_schema.sql`
 - Nextcloud/WebDAV ist aus `modules/sheet.py` nach `hcr2/integrations/nextcloud.py` extrahiert.
-- Tests liegen in `tests/test_cli_smoke.py`.
-- Letzter Teststand: `python3 -m unittest discover -v` lief mit `88 tests` erfolgreich.
+- Tests liegen aktuell in `tests/test_cli_help.py`, `tests/test_core_domains.py`, `tests/test_donations.py`, `tests/test_matchscores.py`, `tests/test_players.py`, `tests/test_sheets.py`, `tests/test_stats.py`, `tests/test_output.py`, `tests/test_migrations.py` und `tests/test_nextcloud.py`; gemeinsame DB-Test-Fixture liegt in `tests/support.py`.
+- Letzter Teststand: `python3 -m unittest discover -v` lief mit `113 tests` erfolgreich.
 
 Bereits migrierte Domains:
 
@@ -45,7 +45,7 @@ Bereits migrierte Domains:
 - `player`
   - Repository fuer list/show/activate/deactivate/delete/add/edit/bday/search/leader/away
   - Service fuer list/show/activate/deactivate/delete/add/edit/bday/search/leader/away
-  - Output fuer list/detail/search/leader/absent/away
+  - Output fuer list/detail/search/leader/absent/away/add/edit/birthday/activation/explicit resolution
 - `matchscore`
   - Model
   - Repository
@@ -55,17 +55,17 @@ Bereits migrierte Domains:
   - Model
   - Repository
   - Service
-  - Output
+  - Output inklusive Add-/Edit-/Delete-Statusausgaben und weiteren Status-/Fehlerausgaben
 - `stats`
   - Repository-Slice fuer Season-/Performance-/TeamEvent-/Scatter-/Birthday-/Battle-/Player-Detail-Basisabfragen
   - Service-Slice fuer Performance-Deltas, Player-Trend/Medians und Player-Summary-/Donation-Aggregation
-  - Output-Slice fuer Performance-/Score-/Points-/Absent-Tabellen, Scatter-/Birthday-/Battle-Plot und Player-Detailausgabe
+  - Output-Slice fuer Performance-/Score-/Points-/Absent-Tabellen, Score-/Points-/Perf-/Team-Event-Header, Scatter-/Birthday-/Battle-Plot, Player-Detailausgabe, Standard-/Team-Event-Statusausgaben und Alias-Liste
 
 ## Wichtig fuer morgen
 
-Noch uebrige Top-Level-Steps: 5 (`4. Sheet Import/Export` bis `8. Abschluss-Cleanup`).
+Noch uebrige Top-Level-Steps: 0.
 
-Der naechste konkrete Einstieg ist Step 4 (`Sheet Import/Export weiter entkoppeln`):
+Der naechste konkrete Einstieg ist Review/Commit der Arbeitskopie:
 
 - Step 1 ist inhaltlich erledigt: `modules/stats.py` enthaelt keine direkten SQL-Aufrufe mehr und `stats player` hat Summary/Donation-Aggregation im Service sowie Detailausgabe im Output.
 - Step 2 ist fuer den dokumentierten Umfang erledigt:
@@ -75,7 +75,7 @@ Der naechste konkrete Einstieg ist Step 4 (`Sheet Import/Export weiter entkoppel
   - `edit_score(...)`: Score-/Points-Grenzen und Abwesenheits-Recompute
 - Step 3 ist vorbereitet: `modules/donations.py` wurde analysiert und Smoke-Tests fuer Add/Upsert/Edit/List/Show/Index wurden ergaenzt.
 - Step 3 ist migriert: `modules/donations.py` enthaelt keine direkten SQL-Aufrufe mehr und nutzt `hcr2/models|repositories|services|output/donations.py`.
-- Step 4 erste Slices sind erledigt:
+- Step 4 ist fuer den dokumentierten Umfang erledigt:
   - Sheet-Dateinamen/Remote-Pfade/Web-URLs und Donation-k-Parsing liegen in `hcr2/services/sheets.py`.
   - Player-/Donation-Workbook-Erzeugung und Import-Reading liegen in `hcr2/exporters/excel.py`.
   - Player-Import-Diff/Update und Donation-Import-Upserts liegen in `hcr2/services/sheets.py`.
@@ -86,13 +86,61 @@ Der naechste konkrete Einstieg ist Step 4 (`Sheet Import/Export weiter entkoppel
   - Player-/Donation-Exportdaten werden in `hcr2/services/sheets.py` vorbereitet.
   - Match-Exportdaten und Ranking werden in `hcr2/services/sheets.py` vorbereitet.
   - Workbook-Speichern und lokales Datei-Cleanup liegen in `hcr2/exporters/excel.py`.
-  - Tests fuer Pfade, netzwerkfreien Match-Sheet-Export, Workbook-Strukturen, Workbook-Reading, Import-Services, Exportdaten und Match-Sheet-Validierung sind ergaenzt.
-- Naechster sinnvoller Einstieg: lokale Datei-/Upload-Orchestrierung in `modules/sheet.py` weiter ausduennen, besonders Upload/Download-Wrapper und verbliebene Import-Cleanup-Pfade.
+  - Match-Sheet-Workbook-Erzeugung liegt in `hcr2/exporters/excel.py`.
+  - Upload-/Download-/Remote-Pfad-Orchestrierung fuer Sheet-Dateien liegt in `hcr2/services/sheets.py`.
+  - Import-Cleanup fuer erfolgreich importierte Player-/Donation-Workbooks liegt in `hcr2/services/sheets.py`.
+  - Sheet-Statusausgaben fuer Export, Import-Ergebnisse und Validierungsfehler liegen in `hcr2/output/sheets.py`.
+  - Import-Ablaufsteuerung fuer Player-, Donation- und Match-Sheets liegt in `hcr2/services/sheets.py`.
+  - Export-Ablaufsteuerung fuer Player-, Donation- und Match-Sheets liegt in `hcr2/services/sheets.py`.
+  - Tests fuer Pfade, Datei-Orchestrierung, netzwerkfreien Match-Sheet-Export, Workbook-Strukturen, Workbook-Reading, Import-Services, Import-/Export-Workflows, Exportdaten, Output und Match-Sheet-Validierung sind ergaenzt.
+- Step 5 ist fuer den aktuellen Umfang erledigt:
+  - `modules/matchscore.py` nutzt fuer Add-/Edit-/Delete-/List-Statusausgaben `hcr2/output/matchscores.py`.
+  - `modules/matchscore.py` nutzt fuer Add-/Edit-Parsing-Fehlerstatusausgaben `hcr2/output/matchscores.py`; direkte Prints dort sind nur noch Usage-Ausgaben.
+  - Output-Tests fuer Add-/Edit-/Delete-/List-Statusausgaben und Add-/Edit-Parsing-Fehlerstatusausgaben sind ergaenzt.
+  - `modules/player.py` nutzt fuer Add-/Edit-Result-Ausgaben `hcr2/output/players.py`.
+  - `modules/player.py` nutzt fuer Grep-/Fuzzy-Resolve-/Leader-Statusausgaben `hcr2/output/players.py`.
+  - `modules/player.py` nutzt fuer Birthday- und Activate-/Deactivate-/Delete-Statusausgaben `hcr2/output/players.py`.
+  - `modules/player.py` nutzt fuer explizite Away-Flag-Resolve-Statusausgaben `hcr2/output/players.py`.
+  - `modules/player.py` nutzt fuer CLI-Validierungs-/Not-found-/Away-Dauer-Statusausgaben `hcr2/output/players.py`; direkte Prints dort sind nur noch Usage-Ausgaben.
+  - `modules/stats.py` nutzt fuer Perf-/Rank-/Score-/Points-/Team-Event-Header, Perf-/Score-/Points-/Plot-/Team-Event-/Player-Warnungen, Scatter-/Birthday-Plot-Ausgabe und Alias-Listen `hcr2/output/stats.py`; direkte Prints dort sind nur noch Usage-Ausgaben.
+  - `modules/donations.py` nutzt fuer Add-/Edit-/Delete-, Show-/Index-/List-Statusausgaben und generische Fehlerausgaben `hcr2/output/donations.py`; direkte Prints dort sind nur noch Usage-Ausgaben.
+  - `modules/sheet.py` nutzt fuer Sheet-Fehlerstatusausgaben `hcr2/output/sheets.py`; direkte Prints dort sind nur noch Usage-Ausgaben.
+  - Output-Tests fuer Player-Add-/Edit-Result-Ausgaben, Grep-/Resolve-/Leader-Statusausgaben, explizite Resolve-Statusausgaben sowie Birthday-/Mutation-Statusausgaben sind ergaenzt.
+  - Output-Tests fuer Player-CLI-Validierungs-/Not-found-/Away-Dauer-Statusausgaben sind ergaenzt.
+  - Output-Tests fuer Stats-Perf-/Score-/Points-/Plot-/Team-Event-/Player-Statusausgaben und Alias-Listen sind ergaenzt.
+  - Output-Tests fuer Donations-Add-/Edit-/Delete-, Show-/Index-/List-Statusausgaben sind ergaenzt.
+  - Output-Tests fuer Sheet-Fehlerstatusausgaben sind ergaenzt.
+  - Abschlusspruefung: direkte Prints in `modules/matchscore.py`, `modules/player.py`, `modules/stats.py`, `modules/donations.py` und `modules/sheet.py` sind nur noch Usage-Ausgaben.
+  - Kleine tote Import-/Wrapper-Reste in `modules/player.py` und `modules/stats.py` wurden entfernt.
+- Step 6 ist fuer den aktuellen Umfang erledigt:
+  - CLI-Help-Smoke-Tests wurden aus `tests/test_cli_smoke.py` nach `tests/test_cli_help.py` verschoben.
+  - Output-Formatting-Tests wurden aus `tests/test_cli_smoke.py` nach `tests/test_output.py` verschoben.
+  - Migration-Tests wurden aus `tests/test_cli_smoke.py` nach `tests/test_migrations.py` verschoben.
+  - Nextcloud-Integrationstests wurden aus `tests/test_cli_smoke.py` nach `tests/test_nextcloud.py` verschoben.
+  - Gemeinsame Temporary-DB-Fixture wurde aus `tests/test_cli_smoke.py` nach `tests/support.py` verschoben.
+  - Vehicle-/Season-/Match-Basis-Domain-Tests wurden nach `tests/test_core_domains.py` verschoben.
+  - Donation-CLI-Smoke-Tests wurden nach `tests/test_donations.py` verschoben.
+  - Matchscore-Repository-/Service-Tests wurden nach `tests/test_matchscores.py` verschoben.
+  - Player-Repository-/Service-Tests wurden nach `tests/test_players.py` verschoben.
+  - Sheet-Service-/Workflow-Tests wurden nach `tests/test_sheets.py` verschoben.
+  - Stats-Repository-/Service-/CLI-Smoke-Tests wurden nach `tests/test_stats.py` verschoben.
+  - `tests/test_cli_smoke.py` wurde entfernt.
+- Step 7 ist fuer den aktuellen Umfang erledigt:
+  - README beschreibt bevorzugt `python3 -m hcr2`, `hcr2.py` als Compatibility-Entrypoint, aktuelle Testdateien und die neue Paketstruktur.
+  - Bash Completion unter `completions/hcr2.bash` wurde auf `hcr2`, `hcr2.py` und `./hcr2.py` registriert.
+  - Help-Ausgaben fuer alle Entities wurden geprueft.
+- Step 8 ist fuer den aktuellen Umfang erledigt:
+  - `modules/donations.py` von ungenutzten Compatibility-Wrappern bereinigt.
+  - Leeren DB-Open-Block aus `tests/support.py` entfernt.
+  - `python3 -m compileall -q modules hcr2 tests` ist gruen.
+  - Bash Completion Syntax und Entity-Help-Ausgaben sind geprueft.
+  - `python3 -m unittest discover -v` ist mit 113 Tests gruen.
+- Naechster sinnvoller Einstieg: Arbeitskopie reviewen, ggf. committen.
 
 Bitte mit folgendem Prompt weitermachen:
 
 ```text
-Wir machen im hcr2-bot weiter. Noch uebrig: 5 Top-Level-Steps. Stand: Stats Step 1, der dokumentierte Matchscore-Teil aus Step 2 und Donations Step 3 sind erledigt. Step 4 hat erste Slices: `hcr2/services/sheets.py` fuer Sheet-Dateinamen/Remote-Pfade/Web-URLs, Donation-k-Parsing, Player-Import-Diff/Update, Donation-Import-Upserts, Match-Sheet-Anwendung ohne Selbstaufrufe, Match-Sheet-Import-Validierung und Player-/Donation-/Match-Exportdaten inklusive Ranking; `hcr2/exporters/excel.py` fuer Player-/Donation-Workbook-Erzeugung, Player-/Donation-/Match-Sheet-Workbook-Reading, Workbook-Speichern und lokales Cleanup. `python3 -m unittest discover -v` ist mit 88 Tests gruen. Bitte mach als naechstes in Step 4 weiter: lokale Datei-/Upload-Orchestrierung in `modules/sheet.py` weiter ausduennen, besonders Upload/Download-Wrapper und verbliebene Import-Cleanup-Pfade.
+Wir machen im hcr2-bot weiter. Die dokumentierten Top-Level-Steps 1-8 sind fuer den aktuellen Umfang erledigt. Sheet-Workflows liegen in `hcr2/services/sheets.py`, Workbook-Erzeugung/-Reading in `hcr2/exporters/excel.py` und Sheet-Ausgaben in `hcr2/output/sheets.py`. Direkte Prints in `modules/matchscore.py`, `modules/player.py`, `modules/stats.py`, `modules/donations.py` und `modules/sheet.py` sind nur noch Usage-Ausgaben. Die alte Sammeldatei `tests/test_cli_smoke.py` wurde entfernt; Tests liegen nach Bereichen in `tests/test_cli_help.py`, `tests/test_core_domains.py`, `tests/test_donations.py`, `tests/test_matchscores.py`, `tests/test_players.py`, `tests/test_sheets.py`, `tests/test_stats.py`, `tests/test_output.py`, `tests/test_migrations.py` und `tests/test_nextcloud.py`; gemeinsame DB-Fixture liegt in `tests/support.py`. README und Bash Completion sind aktualisiert; Entity-Help-Ausgaben wurden geprueft. Abschluss-Cleanup ist erledigt. `python3 -m compileall -q modules hcr2 tests` und `python3 -m unittest discover -v` sind gruen; letzter Teststand: 113 Tests. Bitte als naechstes die Arbeitskopie reviewen und ggf. committen.
 ```
 
 ## Naechste Schritte
@@ -166,7 +214,7 @@ Erledigt:
 Weitere Kandidaten fuer spaeter:
 
 - CLI-Ausgaben fuer Matchscore-Fehlerfaelle noch direkter testen, falls am Adapter weiter gearbeitet wird.
-- Service-Tests in eigene Datei aus `tests/test_cli_smoke.py` herausziehen.
+- Weitere Matchscore-Service-Grenzfaelle bei zukuenftigen Adapter-Aenderungen in `tests/test_matchscores.py` ergaenzen.
 
 Wichtig:
 
@@ -176,7 +224,7 @@ Wichtig:
 Pruefen:
 
 ```bash
-python3 -m py_compile modules/matchscore.py hcr2/services/matchscores.py tests/test_cli_smoke.py
+python3 -m py_compile modules/matchscore.py hcr2/services/matchscores.py tests/test_matchscores.py
 python3 -m py_compile hcr2/output/matchscores.py
 python3 -m unittest discover -v
 ```
@@ -209,11 +257,18 @@ Wichtig:
 Bereits erledigt:
 
 - Nextcloud/WebDAV in `hcr2/integrations/nextcloud.py`.
+- Sheet-Dateinamen, Remote-Pfade, Web-URLs, Datei-Upload/-Download und Import-Cleanup in `hcr2/services/sheets.py`.
+- Player-/Donation-/Match-Workbook-Erzeugung und Workbook-Reading in `hcr2/exporters/excel.py`.
+- Sheet-Statusausgaben in `hcr2/output/sheets.py`.
+- Player-/Donation-/Match-Import-Ablaufsteuerung in `hcr2/services/sheets.py`.
+- Player-/Donation-/Match-Export-Ablaufsteuerung in `hcr2/services/sheets.py`.
+- Player-/Donation-/Match-Import nutzt keine CLI-Selbstaufrufe mehr.
+- Player-/Donation-/Match-Exportdaten werden in `hcr2/services/sheets.py` vorbereitet.
 
 Noch offen:
 
-- Excel-/OpenPyXL-Logik aus `modules/sheet.py` extrahieren.
-- Lokale Datei-Erzeugung, Remote-Pfade und Uploads weiter trennen.
+- Keine offenen Punkte fuer den definierten Step-4-Abschluss.
+- Sheet-bezogene Tests liegen in `tests/test_sheets.py`.
 
 Moegliche Zielstruktur:
 
@@ -227,7 +282,7 @@ Wichtig:
 - Nextcloud-Funktionen mocken.
 - Export-Dateinamen und Remote-Pfade sind fuer Match-Sheets getestet.
 - Donation-k-Parsing ist getestet.
-- Player-/Donation-Workbook-Erzeugung und Workbook-Reading sind extrahiert und getestet.
+- Player-/Donation-/Match-Workbook-Erzeugung und Workbook-Reading sind extrahiert und getestet.
 
 ### 5. CLI Adapter weiter ausduennen
 
@@ -252,16 +307,24 @@ Prioritaet:
 
 Aktuell:
 
-- Eine zentrale Smoke-Datei: `tests/test_cli_smoke.py`.
+- Alte Sammeldatei `tests/test_cli_smoke.py` wurde entfernt.
+- Gemeinsame DB-Fixture liegt in `tests/support.py`.
+- Tests sind nach Bereichen aufgeteilt:
+  - `tests/test_migrations.py`
+  - `tests/test_nextcloud.py`
+  - `tests/test_cli_help.py`
+  - `tests/test_core_domains.py`
+  - `tests/test_donations.py`
+  - `tests/test_matchscores.py`
+  - `tests/test_players.py`
+  - `tests/test_sheets.py`
+  - `tests/test_stats.py`
+  - `tests/test_output.py`
 
 Spaeter sinnvoll:
 
-- Tests nach Bereichen aufteilen:
-  - `tests/test_cli_help.py`
-  - `tests/test_repositories.py`
-  - `tests/test_services.py`
-  - `tests/test_output.py`
-  - `tests/test_migrations.py`
+- Optional `tests/test_output.py` weiter nach Output-Domains aufteilen, falls die Datei bei zukuenftigen Output-Aenderungen zu gross wird.
+- Bei neuen Domain-Tests die bestehende Bereichsstruktur verwenden statt wieder eine Sammeldatei anzulegen.
 
 Kurzfristig:
 

@@ -29,6 +29,43 @@ def print_perf_table(entries: list[tuple[str, int | None, int]], *, limit: int |
         print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
 
 
+def print_no_matching_season() -> None:
+    print("⚠️ No matching season found.")
+
+
+def print_perf_header(season_number: int, season_name: str, division: str) -> None:
+    print(f"📈Performance Season {season_number} ({season_name}) DIV: {division}".rstrip())
+
+
+def print_required_matches(total_matches: int, min_matches: int) -> None:
+    print(f"ℹ️ Required matches: {min_matches}/{total_matches} (20%)")
+
+
+def print_no_match_scores() -> None:
+    print("⚠️ No match scores found.")
+
+
+def print_no_active_plte_players() -> None:
+    print("⚠️ No active PLTE players.")
+
+
+def print_no_perf_entries(*, active_only: bool, min_matches: int) -> None:
+    if active_only:
+        print("⚠️ No active players with scored matches found.")
+        return
+    print(f"⚠️ No players with at least {min_matches} scored matches found.")
+
+
+def print_aliases(aliases: list[str]) -> None:
+    for alias in aliases:
+        print(alias)
+
+
+def print_sum_metric_header(metric: str, season_number: int, season_name: str, division: str) -> None:
+    title_metric = "Score" if metric == "score" else "Points"
+    print(f"📊{title_metric} Season {season_number} ({season_name}) DIV: {division}".rstrip())
+
+
 def print_sum_metric_table(entries: list[tuple[str, int | None, int]], *, metric: str) -> None:
     col_label = "Score" if metric == "score" else "Pts"
     print(f"{'#':>2}   {'Lady':<14} {col_label:>6} {'Mat.':>2}")
@@ -36,6 +73,58 @@ def print_sum_metric_table(entries: list[tuple[str, int | None, int]], *, metric
     for i, (name, total, count) in enumerate(entries, 1):
         value = f"{total:>6}" if total is not None else f"{'-':>6}"
         print(f"{i:>2}.  {name:<14} {value} {count:>2}")
+
+
+def print_no_data() -> None:
+    print("⚠️ No data.")
+
+
+def print_scatter_plot(plot: str) -> None:
+    print(plot)
+
+
+def print_birthday_plot(plot: str) -> None:
+    print(plot)
+
+
+def print_no_season() -> None:
+    print("⚠️ No season.")
+
+
+def print_no_matches_found() -> None:
+    print("⚠️ No matches found.")
+
+
+def print_no_teamevent_for_offset(offset: int) -> None:
+    print(f"⚠️ No team event found for offset {offset}.")
+
+
+def print_no_teamevent(te_id: int) -> None:
+    print(f"⚠️ No team event with id {te_id} found.")
+
+
+def print_no_teamevent_scores(te_id: int) -> None:
+    print(f"⚠️ No match scores for team event {te_id}.")
+
+
+def print_no_valid_teamevent_scores(te_id: int) -> None:
+    print(f"⚠️ No valid scores for PLTE players in team event {te_id}.")
+
+
+def print_no_teamevent_rank_data(te_id: int) -> None:
+    print(f"⚠️ No data to rank for team event {te_id}.")
+
+
+def print_teamevent_perf_header(te_id: int, name: str, iso_year: int, iso_week: int) -> None:
+    print(f"📊 Performance Team Event {te_id}: {name} ({iso_year}-W{iso_week})")
+
+
+def print_no_player(player_id: int) -> None:
+    print(f"⚠️ No player with id {player_id}.")
+
+
+def print_no_player_matches(player_id: int) -> None:
+    print(f"⚠️ No matches found for player {player_id}.")
 
 
 def print_absent_stats(season_number: int, rows: list[tuple[int, str, int]]) -> None:

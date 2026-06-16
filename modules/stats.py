@@ -6,7 +6,6 @@ from hcr2.repositories import stats as stats_repo
 from hcr2.services import stats as stats_service
 from modules.common import is_help_request, parse_int, print_command_help, print_unknown_command
 
-PERF_TABLE_WIDTH = 31
 PERF_TABLE_LIMIT = 50
 
 # ---------------------------------------------------------------------------
@@ -187,9 +186,6 @@ def print_help():
 
 # ---------------------------------------------------------------------------
 
-def format_k(value):
-    return stats_output.format_k(value)
-
 def find_current_season(cur):
     return stats_repo.find_current_season()
 
@@ -253,23 +249,22 @@ def show_average(season_number=None, active_only=False):
     if season_number is None:
         season_number = find_current_season(None)
     if not season_number:
-        print("⚠️ No matching season found.")
+        stats_output.print_no_matching_season()
         return
 
     s_name, s_div = _get_season_meta(None, season_number)
-    header_line = f"📈Performance Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
-    print(header_line)
+    stats_output.print_perf_header(season_number, s_name, s_div)
 
     if not active_only:
         total_matches, min_matches = _get_min_required_matches(None, season_number, ratio=0.20)
-        print(f"ℹ️ Required matches: {min_matches}/{total_matches} (20%)")
+        stats_output.print_required_matches(total_matches, min_matches)
     else:
         total_matches = 0
         min_matches = 1
 
     rows = _fetch_season_rows(None, season_number)
     if not rows:
-        print("⚠️ No match scores found.")
+        stats_output.print_no_match_scores()
         return
 
     # Scores grouped by match.
@@ -285,17 +280,14 @@ def show_average(season_number=None, active_only=False):
         _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
 
     if not scores_by_match:
-        print("⚠️ No match scores found.")
+        stats_output.print_no_match_scores()
         return
 
     player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
     entries = _build_delta_entries(player_scores, player_names, player_counts, min_matches)
 
     if not entries:
-        if active_only:
-            print("⚠️ No active players with scored matches found.")
-        else:
-            print(f"⚠️ No players with at least {min_matches} scored matches found.")
+        stats_output.print_no_perf_entries(active_only=active_only, min_matches=min_matches)
         return
 
     _print_perf_table(entries, limit=PERF_TABLE_LIMIT)
@@ -328,8 +320,7 @@ def show_plte_alias():
         avg_delta = round(sum(deltas) / len(deltas))
         entries.append((player_alias[pid], avg_delta))
 
-    for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True):
-        print(alias)
+    stats_output.print_aliases([alias for alias, _ in sorted(entries, key=lambda x: x[1], reverse=True)])
 
 # ---------------------------------------------------------------------------
 
@@ -343,13 +334,13 @@ def rank_active_plte(season_number=None):
     if season_number is None:
         season_number = find_current_season(None)
     if not season_number:
-        print("⚠️ No matching season found.")
+        stats_output.print_no_matching_season()
         return
 
     # All active PLTE players.
     active_players = stats_repo.list_active_plte_players()
     if not active_players:
-        print("⚠️ No active PLTE players.")
+        stats_output.print_no_active_plte_players()
         return
     id_to_name = {pid: name for pid, name in active_players}
 
@@ -380,10 +371,7 @@ def rank_active_plte(season_number=None):
     without_scores_sorted = sorted(without_scores, key=lambda x: x[0].lower())
     entries = with_scores_sorted + without_scores_sorted
 
-    print(f"{'#':>2}   {'Lady':<14} {'Perf':>6} {'Mat.':<2}")
-    print("-" * PERF_TABLE_WIDTH)
-    for i, (name, delta, count) in enumerate(entries, 1):
-        print(f"{i:>2}.  {name:<14} {format_k(delta):>6} {count:>2}")
+    stats_output.print_perf_table(entries)
 
 # ---------------------------------------------------------------------------
 # Wrapper: stats perf
@@ -478,25 +466,23 @@ def _rank_sum_metric(season_number=None, metric="score", skip=True):
     if season_number is None:
         season_number = find_current_season(None)
     if not season_number:
-        print("⚠️ No matching season found.")
+        stats_output.print_no_matching_season()
         return
 
     # Header metadata.
     s_name, s_div = _get_season_meta(None, season_number)
-    title_metric = "Score" if metric == "score" else "Points"
-    header_line = f"📊{title_metric} Season {season_number} ({s_name}) DIV: {s_div}".rstrip()
-    print(header_line)
+    stats_output.print_sum_metric_header(metric, season_number, s_name, s_div)
 
     # Active PLTE players for name lookup and the no-skip list.
     active_players = stats_repo.list_active_plte_players()
     if not active_players:
-        print("⚠️ No active PLTE players.")
+        stats_output.print_no_active_plte_players()
         return
     id_to_name = {pid: name for pid, name in active_players}
 
     rows = _fetch_season_rows(None, season_number)
     if not rows:
-        print("⚠️ No match scores found.")
+        stats_output.print_no_match_scores()
         return
 
     totals = {}   # pid -> sum (score/points)
@@ -557,9 +543,6 @@ def _rank_sum_metric(season_number=None, metric="score", skip=True):
 def _fetch_avg_score_last_seasons(cur, last_n=20):
     return stats_repo.fetch_avg_score_last_seasons(last_n)
 
-def _format_k(v):
-    return f"{int(round(v/1000.0))}k"
-
 def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
                    title="Avg score per season (scaled)"):
     return stats_output.scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol, title=title)
@@ -567,9 +550,9 @@ def _scatter_fixed(rows, width=70, height=35, x_labels=6, symbol=None,
 def show_season_score_scatter(last_n=20, height=35, width=70, x_labels=6, symbol="."):
     rows = _fetch_avg_score_last_seasons(None, last_n=last_n)
     if not rows:
-        print("⚠️ No data.")
+        stats_output.print_no_data()
         return
-    print(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
+    stats_output.print_scatter_plot(_scatter_fixed(rows, width=width, height=height, x_labels=x_labels, symbol=symbol))
 
 # ---------------------------------------------------------------------------
 
@@ -578,7 +561,15 @@ def show_birthday_plot(width=77, height=31, cols_per_month=2, cell_w=2):
     31 rows (days 1..31, top=31). 12 months, each with 3 cells of 2 columns.
     Uses the exact emoji from players.emoji.
     """
-    print(stats_output.birthday_plot(stats_repo.fetch_birthday_plot_rows(), width=width, height=height, cols_per_month=cols_per_month, cell_w=cell_w))
+    stats_output.print_birthday_plot(
+        stats_output.birthday_plot(
+            stats_repo.fetch_birthday_plot_rows(),
+            width=width,
+            height=height,
+            cols_per_month=cols_per_month,
+            cell_w=cell_w,
+        )
+    )
 
 # ---------------------------------------------------------------------------
 
@@ -590,12 +581,12 @@ def show_battle(player1_id, player2_id, season_number=None, height=30, max_match
     if season_number is None:
         season_number = find_current_season(None)
         if not season_number:
-            print("⚠️ No season.")
+            stats_output.print_no_season()
             return
 
     matches = stats_repo.fetch_season_matches(season_number)
     if not matches:
-        print("⚠️ No matches found.")
+        stats_output.print_no_matches_found()
         return
 
     matches = matches[-max_matches:]
@@ -641,7 +632,7 @@ def show_absent(season_number=None):
     if season_number is None:
         season_number = find_current_season(None)
     if not season_number:
-        print("⚠️ No matching season found.")
+        stats_output.print_no_matching_season()
         return
 
     rows = stats_repo.fetch_unexcused_absences(season_number)
@@ -666,7 +657,7 @@ def show_teamevent_stats_user(offset: int = 0):
     te_id = _resolve_teamevent_by_offset(None, offset)
 
     if te_id is None:
-        print(f"⚠️ No team event found for offset {offset}.")
+        stats_output.print_no_teamevent_for_offset(offset)
         return
 
     show_teamevent_stats(te_id)
@@ -682,7 +673,7 @@ def show_teamevent_stats(te_id):
     # Fetch team event metadata.
     row = stats_repo.get_teamevent_meta(te_id)
     if not row:
-        print(f"⚠️ No team event with id {te_id} found.")
+        stats_output.print_no_teamevent(te_id)
         return
 
     te_name, iso_year, iso_week, te_tracks, te_max = row
@@ -691,7 +682,7 @@ def show_teamevent_stats(te_id):
     rows = stats_repo.fetch_teamevent_rows(te_id)
 
     if not rows:
-        print(f"⚠️ No match scores for team event {te_id}.")
+        stats_output.print_no_teamevent_scores(te_id)
         return
 
     # Scores per match: all PLTE, not absent; active is intentionally not filtered here.
@@ -705,21 +696,20 @@ def show_teamevent_stats(te_id):
         _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
 
     if not scores_by_match:
-        print(f"⚠️ No valid scores for PLTE players in team event {te_id}.")
+        stats_output.print_no_valid_teamevent_scores(te_id)
         return
 
     # Deltas vs. median per match.
     player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
 
     if not player_scores:
-        print(f"⚠️ No data to rank for team event {te_id}.")
+        stats_output.print_no_teamevent_rank_data(te_id)
         return
 
     # Build result entries.
     entries = _build_delta_entries(player_scores, player_names, player_counts)
 
-    # Header.
-    print(f"📊 Performance Team Event {te_id}: {te_name} ({iso_year}-W{iso_week})")
+    stats_output.print_teamevent_perf_header(te_id, te_name, iso_year, iso_week)
     _print_perf_table(entries)
 
 def show_player_last_matches(player_id: int, last_n: int = 15):
@@ -734,7 +724,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
 
     player_meta = stats_repo.get_player_stats_meta(player_id)
     if not player_meta:
-        print(f"⚠️ No player with id {player_id}.")
+        stats_output.print_no_player(player_id)
         return
 
     total_matches_overall = stats_repo.count_player_matchscores(player_id)
@@ -742,7 +732,7 @@ def show_player_last_matches(player_id: int, last_n: int = 15):
 
     last_matches = stats_repo.fetch_player_last_matches(player_id, last_n)
     if not last_matches:
-        print(f"⚠️ No matches found for player {player_id}.")
+        stats_output.print_no_player_matches(player_id)
         return
 
     overall_matches = stats_repo.fetch_player_overall_matches(player_id)

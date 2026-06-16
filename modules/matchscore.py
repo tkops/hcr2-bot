@@ -119,10 +119,10 @@ def add_score(args):
     score = _parse_int(args[2], None)
     points = _parse_int(args[3], None)
     if match_id is None or score is None or points is None:
-        print("❌ Score or points out of valid range.")
+        matchscore_output.print_invalid_score_or_points()
         return
     if not (0 <= score <= 75000 and 0 <= points <= 300):
-        print("❌ Score or points out of valid range.")
+        matchscore_output.print_invalid_score_or_points()
         return
 
     player_input = args[1]
@@ -137,27 +137,12 @@ def add_score(args):
         absent_override=absent_override,
         checkin_override=checkin_override,
     )
-    if result.status == "INVALID_RANGE":
-        print("❌ Score or points out of valid range.")
-        return
-    if result.status == "PLAYER_NOT_FOUND":
-        print(f"❌ No player found matching: {player_input}")
-        return
-    if result.status == "PLAYER_AMBIGUOUS":
-        print(f"⚠️ Multiple players found for '{player_input}':")
-        for player in result.player_resolution.matches:
-            print(f"  ID {player.id}: {player.name} (alias: {player.alias})")
-        return
-    print(result.status)
+    matchscore_output.print_add_result(result, player_input)
 
 
 def delete_score(score_id):
     result = matchscore_service.delete_score(score_id)
-    row = result.row
-    if not row:
-        print("⚠️ Not found.")
-        return
-    matchscore_output.print_deleted_score(row)
+    matchscore_output.print_delete_result(result)
 
 
 def list_scores(*args):
@@ -168,7 +153,7 @@ def list_scores(*args):
         match_filter=match_filter,
     ).rows
     if not rows:
-        print("⚠️ No scores found.")
+        matchscore_output.print_no_scores_found()
         return
     matchscore_output.print_grouped_rows(
         rows,
@@ -187,7 +172,7 @@ def list_scores_short(*args):
         match_filter=match_filter,
     ).rows
     if not rows:
-        print("⚠️ No scores found.")
+        matchscore_output.print_no_scores_found()
         return
     matchscore_output.print_grouped_rows(
         rows,
@@ -223,7 +208,7 @@ def edit_score(args):
         try:
             new_player_id = int(pid_raw)
         except Exception:
-            print("❌ --pid requires a numeric player_id.")
+            matchscore_output.print_pid_requires_numeric()
             return
     if "absent" in flags:
         value = flags.get("absent", "").strip().lower()
@@ -249,30 +234,7 @@ def edit_score(args):
         toggle_checkin=toggle_checkin,
     )
 
-    if result.status == "NOTHING_TO_UPDATE":
-        print("⚠️ Nothing to update.")
-        return
-    if result.status == "NOT_FOUND":
-        print("⚠️ Not found.")
-        return
-    if result.status == "PLAYER_NOT_FOUND":
-        print(f"❌ Player id {result.player_id} does not exist.")
-        return
-    if result.status == "PLAYER_CLASH":
-        print(
-            f"❌ Cannot change player: entry already exists for match {result.match_id} and player {result.player_id} "
-            f"(matchscore.id={result.clash_id})."
-        )
-        print("   Tip: delete or edit the existing entry first.")
-        return
-    if result.status == "SCORE_OUT_OF_RANGE":
-        print("❌ Score out of range.")
-        return
-    if result.status == "POINTS_OUT_OF_RANGE":
-        print("❌ Points out of range.")
-        return
-
-    matchscore_output.print_updated_score(result.row)
+    matchscore_output.print_edit_result(result)
 
 
 def _extract_score_id(args):

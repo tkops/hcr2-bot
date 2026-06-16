@@ -1,12 +1,34 @@
 from hcr2.output.players import (
-    format_birthday,
     print_absent_players,
     print_away_cleared,
     print_away_set,
+    print_add_player_result,
+    print_edit_player_result,
+    print_explicit_player_resolution_result,
+    print_grep_result,
+    print_active_requires_bool,
+    print_birthday_ids,
+    print_birthday_list,
+    print_away_selector_required,
+    print_gp_requires_integer,
+    print_invalid_birthday_format,
+    print_invalid_id,
+    print_invalid_team_name,
+    print_invalid_team_value,
+    print_leader_requires_bool,
+    print_name_required,
+    print_no_matching_player,
+    print_num_requires_integer,
+    print_player_id_not_found,
+    print_single_selector_required,
+    print_value_error,
     print_player_detail,
+    print_player_activated,
+    print_player_deactivated,
+    print_player_deleted,
     print_player_leaders,
     print_player_list,
-    print_player_search_rows,
+    print_player_resolution_result,
 )
 from hcr2.services import players as player_service
 from modules.common import (
@@ -134,7 +156,7 @@ def _handle_bday(args):
         try:
             num = int(num_val) if num_val is not None else None
         except ValueError:
-            print("❌ --num expects an integer")
+            print_num_requires_integer()
             return
         bday_list(active_only=active_only, num=num)
         return
@@ -158,7 +180,7 @@ def _handle_show(args):
             pid = int(args[0])
             show_player(pid)
         except ValueError:
-            print("❌ Invalid ID.")
+            print_invalid_id()
         return
 
     selectors = [x for x in (pid_flag, pname_flag, dname_flag) if x is not None]
@@ -166,12 +188,12 @@ def _handle_show(args):
         print(USAGE_SHOW)
         return
     if len(selectors) > 1:
-        print("❌ Provide exactly one of --id, --name or --discord.")
+        print_single_selector_required()
         return
 
     pid = _resolve_player_id(player_id=pid_flag, player_name=pname_flag, discord_name=dname_flag)
     if pid is None:
-        print("❌ No matching player found.")
+        print_no_matching_player()
         return
 
     show_player(pid)
@@ -200,7 +222,7 @@ def _handle_add(args):
             try:
                 gp = int(gp_token) if gp_token is not None else 0
             except ValueError:
-                print("❌ --gp expects an integer.")
+                print_gp_requires_integer()
                 return
             active = parse_bool(active_token, default=True)
         else:
@@ -213,16 +235,16 @@ def _handle_add(args):
             discord_name = args[6] if len(args) > 6 else None
 
         if not name:
-            print("❌ Name is required.")
+            print_name_required()
             return
 
         if not is_valid_team(team_raw):
-            print("❌ Invalid team name. Allowed: PLTE or PL1–PL9")
+            print_invalid_team_name()
             return
 
         birthday = parse_birthday(birthday_raw) if birthday_raw else None
         if birthday_raw and not birthday:
-            print(f"❌ Invalid birthday format: {birthday_raw} (use DD.MM.)")
+            print_invalid_birthday_format(birthday_raw)
             return
 
         add_player(name=name, alias=alias, gp=gp, active=active,
@@ -314,21 +336,12 @@ def resolve_player_id_fuzzy(term: str, *, print_when_ambiguous=True):
     result = player_service.resolve_player_id_fuzzy(term)
     if result.status == "FOUND":
         return result.player_id
-    if result.status == "NOT_FOUND":
-        print(f"❌ No players found matching '{term}'")
-        return None
-
-    if print_when_ambiguous:
-        print(f"⚠️  Term '{term}' is not unique. Matching players:")
-        print_player_search_rows(result.matches or [])
+    print_player_resolution_result(result, term, print_when_ambiguous=print_when_ambiguous)
     return None
 
 def grep_players(term):
     rows = player_service.search_players(term)
-    if not rows:
-        print(f"❌ No players found matching '{term}'")
-        return
-    print_player_search_rows(rows)
+    print_grep_result(term, rows)
 
 def list_absent():
     print_absent_players(player_service.list_absent())
@@ -343,18 +356,12 @@ def show_players(active_only=False, sort_by="gp", team_filter=None):
 
 def list_leaders():
     """List all players with is_leader = 1, regardless of active state."""
-    rows = player_service.list_leaders()
-    if not rows:
-        print("❌ No leaders found.")
-        return
-    print_player_leaders(rows)
+    print_player_leaders(player_service.list_leaders())
 
 
 def bday_today():
     """Print 'BIRTHDAY_IDS: 12,45,78' for today as one line."""
-    ids = [str(player_id) for player_id in player_service.birthday_ids_for_today()]
-    if ids:
-        print("BIRTHDAY_IDS: " + ",".join(ids))
+    print_birthday_ids(player_service.birthday_ids_for_today())
 
 # Legacy alias for old code.
 def birthday_command():
@@ -363,21 +370,13 @@ def birthday_command():
 def bday_list(*, active_only=False, num=None):
     """List birthdays (ID, name, birthday, emoji), sorted by next occurrence."""
     result = player_service.list_birthdays(active_only=active_only, num=num)
-    items = result.rows
-
-    print(f"{'ID':<4} {'Name':<20} {'Birthday':<10} {'Emoji'}")
-    print("-" * 43)
-    for du, r in items:
-        print(f"{r.id:<4} {r.name:<20} {format_birthday(r.birthday):<10} {r.emoji}")
-    print("-" * 43)
-    scope = "(active only)" if active_only else "(all)"
-    print(f"Count: {len(items)} {scope}")
+    print_birthday_list(result)
 
 def show_player(pid: int):
     r = player_service.get_player_detail(pid)
 
     if not r:
-        print(f"❌ Player ID {pid} not found.")
+        print_player_id_not_found(pid)
         return
 
     print_player_detail(r)
@@ -400,19 +399,7 @@ def add_player(name, alias=None, gp=0, active=True, birthday=None, team=None, di
         discord_name=discord_name,
     )
 
-    if result.status == "INVALID_TEAM":
-        print("❌ Invalid team name. Allowed: PLTE or PL1–PL9")
-        return
-    if result.status == "ALIAS_GENERATION_FAILED":
-        print(f"❌ Could not generate unique alias for base '{result.alias_base}' (1..9 all taken).")
-        return
-    if result.status == "ALIAS_CONFLICT":
-        print(f"❌ Alias conflict in PLTE: '{result.alias}' already exists.")
-        return
-
-    alias_info = f" | Alias: {result.alias}" if result.alias else ""
-    gen_info = " (generated)" if result.alias_generated else ""
-    print(f"✅ Player '{name}' added. ID: {result.player_id}{alias_info}{gen_info} | Team: {result.team}")
+    print_add_player_result(result, name)
 
 
 def edit_player(args):
@@ -453,24 +440,24 @@ def edit_player(args):
             i += 1
             val = args[i].lower()
             if val not in ("true", "false", "1", "0"):
-                print("❌ --active expects true|false"); return
+                print_active_requires_bool(); return
             active = (val in ("true", "1"))
         elif args[i] == "--leader":
             i += 1
             val = args[i].lower()
             if val not in ("true", "false", "1", "0"):
-                print("❌ --leader expects true|false"); return
+                print_leader_requires_bool(); return
             leader = (val in ("true", "1"))
         elif args[i] == "--birthday":
             i += 1
             raw = args[i]; birthday = parse_birthday(raw)
             if not birthday:
-                print(f"❌ Invalid birthday format: {raw} (use DD.MM.)"); return
+                print_invalid_birthday_format(raw); return
         elif args[i] == "--team":
             i += 1
             team = args[i].upper()
             if not is_valid_team(team):
-                print(f"❌ Invalid team name: {team} (allowed: PLTE or PL1–PL9)"); return
+                print_invalid_team_value(team); return
         elif args[i] == "--discord":
             i += 1; discord = args[i]
         elif args[i] == "--about":
@@ -504,33 +491,20 @@ def edit_player(args):
         language=language,
         emoji=emoji,
     )
-    if result.status == "NOT_FOUND":
-        print(f"❌ Player ID {pid} not found.")
-        return
-    if result.status == "ALIAS_REQUIRED":
-        print("❌ Alias is required for team PLTE.")
-        return
-    if result.status == "ALIAS_CONFLICT":
-        print(f"❌ Alias conflict: '{result.alias}' vs '{result.conflict_alias}' (ID {result.conflict_player_id})")
-        return
-    if result.status == "NOTHING_TO_UPDATE":
-        print("⚠️  Nothing to update.")
-        return
-
-    print(f"✅ Player {pid} updated.")
-    show_player(pid)
+    if print_edit_player_result(result, pid):
+        show_player(pid)
 
 def deactivate_player(pid):
     player_service.deactivate_player(pid)
-    print(f"🟡 Player {pid} deactivated.")
+    print_player_deactivated(pid)
 
 def delete_player(pid):
     player_service.delete_player(pid)
-    print(f"🗑️  Player {pid} deleted.")
+    print_player_deleted(pid)
 
 def activate_player(pid):
     player_service.activate_player(pid)
-    print(f"🟢 Player {pid} activated.")
+    print_player_activated(pid)
 
 # =====================[ Away / Back ]======================
 def _parse_weeks_token(token):
@@ -541,7 +515,7 @@ def _parse_weeks_token_or_default(token):
     try:
         return _parse_weeks_token(token)
     except ValueError as e:
-        print(f"❌ {e}")
+        print_value_error(e)
         return None
 
 def away_set_fuzzy(term, dur_token):
@@ -563,7 +537,7 @@ def away_set_generic(player_id=None, player_name=None, discord_name=None, dur_to
         if pid is None:
             return
     else:
-        print("❌ Provide one of --id, --name, --discord or use the short form with a term.")
+        print_away_selector_required()
         return
 
     days = _parse_weeks_token_or_default(dur_token)
@@ -587,20 +561,7 @@ def _resolve_player_id(player_id=None, player_name=None, discord_name=None):
     )
     if result.status == "FOUND":
         return result.player_id
-    if result.status == "INVALID_ID":
-        print("❌ Invalid --id value")
-    elif result.status == "DISCORD_NOT_FOUND":
-        print(f"❌ No player found for discord_name='{discord_name}'")
-    elif result.status == "DISCORD_AMBIGUOUS":
-        _ = search_players_like(discord_name)
-        print(f"⚠️ Multiple players match '{discord_name}'.")
-    elif result.status == "NAME_AMBIGUOUS":
-        _ = search_players_like(player_name)
-        print(f"⚠️ Multiple players match '{player_name}'.")
-    elif result.status == "NOT_FOUND":
-        print(f"❌ No players found matching '{player_name}'")
-    else:
-        print("❌ Provide one of --id, --name, or --discord")
+    print_explicit_player_resolution_result(result, player_name=player_name, discord_name=discord_name)
     return None
 
 # =====================[ Hilfe ]============================

@@ -150,27 +150,25 @@ def add_donation(player_id, date, total):
         total_int = donation_service.validate_total(total)
         _ = donation_service.parse_date(date)
         donation_repo.upsert_donation(int(player_id), date, total_int)
-        print(
-            f"✅ Donation snapshot added for player {player_id} on {date} (total: {total_int})"
-        )
+        donation_output.print_donation_added(player_id, date, total_int)
     except ValueError as e:
         if str(e) == "total must be >= 0":
-            print("❌ total must be >= 0")
+            donation_output.print_total_must_be_non_negative()
         else:
-            print(f"❌ Error: {e}")
+            donation_output.print_error(e)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 def delete_donation(donation_id):
     try:
         rowcount = donation_repo.delete_donation(int(donation_id))
         if rowcount == 0:
-            print(f"ℹ️ No donation with id {donation_id} found.")
+            donation_output.print_no_donation(donation_id)
         else:
-            print(f"✅ Donation {donation_id} deleted")
+            donation_output.print_donation_deleted(donation_id)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 def edit_donation(donation_id, new_total):
@@ -181,24 +179,21 @@ def edit_donation(donation_id, new_total):
         total_int = donation_service.validate_total(new_total)
         row = donation_repo.get_donation(int(donation_id))
         if not row:
-            print(f"ℹ️ No donation with id {donation_id} found.")
+            donation_output.print_no_donation(donation_id)
             return
 
         player_id, date, old_total = row
         donation_repo.update_total(int(donation_id), total_int)
 
-        print(
-            f"✅ Donation {donation_id} updated for player {player_id} on {date}: "
-            f"{old_total} -> {total_int}"
-        )
+        donation_output.print_donation_updated(donation_id, player_id, date, old_total, total_int)
 
     except ValueError as e:
         if str(e) == "total must be >= 0":
-            print("❌ total must be >= 0")
+            donation_output.print_total_must_be_non_negative()
         else:
-            print("❌ total must be an integer")
+            donation_output.print_total_must_be_integer()
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 # ---------------- Show for One Player ---------------- #
@@ -209,19 +204,19 @@ def show_player_donations(player_id):
         pid = int(player_id)
         player_name = donation_repo.get_player_name(pid)
         if not player_name:
-            print("❌ Player not found.")
+            donation_output.print_player_not_found()
             return
 
         snapshots = donation_repo.list_player_donations(pid)
         if not snapshots:
-            print(f"ℹ️ No donations found for {player_name}.")
+            donation_output.print_no_player_donations(player_name)
             return
 
         stats = donation_service.calculate_stats(snapshots)
         donation_output.print_player_donations(pid, player_name, stats)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 # ---------------- Show All Players (Donation-Only-Stats) ---------------- #
@@ -231,7 +226,7 @@ def show_all_stats():
     try:
         players = donation_repo.list_active_players()
         if not players:
-            print("ℹ️ No active players.")
+            donation_output.print_no_active_players()
             return
 
         rows = []
@@ -241,7 +236,7 @@ def show_all_stats():
         donation_output.print_all_stats(rows)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 # -------- Shared calculation for donation index -------- #
@@ -287,11 +282,11 @@ def show_donation_index():
     cutoff_date, results = _compute_donation_index_results()
 
     if cutoff_date is None:
-        print("ℹ️ No donations found in database.")
+        donation_output.print_no_donations_in_database()
         return
 
     if not results:
-        print("ℹ️ No active players in team PLTE.")
+        donation_output.print_no_active_plte_players()
         return
 
     # Sort by descending index, with lower values at the bottom.
@@ -310,14 +305,14 @@ def show_donation_index_under():
     cutoff_date, results = _compute_donation_index_results()
 
     if cutoff_date is None:
-        print("ℹ️ No donations found in database.")
+        donation_output.print_no_donations_in_database()
         return
 
     # Filter: index < 100 only.
     results = [row for row in results if row.index < 100.0]
 
     if not results:
-        print("ℹ️ No players with donation index below 100 in team PLTE.")
+        donation_output.print_no_under_index_players()
         return
 
     # Sort by ascending index, worst first.
@@ -336,13 +331,13 @@ def list_donation_dates():
         rows = donation_repo.list_donation_dates()
 
         if not rows:
-            print("ℹ️ No donations found.")
+            donation_output.print_no_donations_found()
             return
 
         donation_output.print_donation_dates(rows)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 def list_donations_for_date(date_str: str):
@@ -353,20 +348,20 @@ def list_donations_for_date(date_str: str):
     try:
         _ = donation_service.parse_date(date_str)
     except Exception:
-        print("❌ Invalid date format. Use YYYY-MM-DD or ISO 8601.")
+        donation_output.print_invalid_date_format()
         return
 
     try:
         rows = donation_repo.list_donations_for_date(date_str)
 
         if not rows:
-            print(f"ℹ️ No donations found for date {date_str}.")
+            donation_output.print_no_donations_for_date(date_str)
             return
 
         donation_output.print_donations_for_date(date_str, rows)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        donation_output.print_error(e)
 
 
 # ---------------- Helper ---------------- #
@@ -404,10 +399,3 @@ def calculate_stats(snapshots):
         "avg_monthly_increment": stats.avg_monthly_increment,
     }
 
-
-def _parse_date(ds: str):
-    return donation_service.parse_date(ds)
-
-
-def format_k(value):
-    return donation_output.format_k(value)

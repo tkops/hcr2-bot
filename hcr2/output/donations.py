@@ -12,6 +12,70 @@ def format_k(value):
         return str(value)
 
 
+def print_donation_added(player_id: int | str, date: str, total: int) -> None:
+    print(f"✅ Donation snapshot added for player {player_id} on {date} (total: {total})")
+
+
+def print_donation_deleted(donation_id: int | str) -> None:
+    print(f"✅ Donation {donation_id} deleted")
+
+
+def print_donation_updated(donation_id: int | str, player_id: int, date: str, old_total: int, new_total: int) -> None:
+    print(f"✅ Donation {donation_id} updated for player {player_id} on {date}: {old_total} -> {new_total}")
+
+
+def print_no_donation(donation_id: int | str) -> None:
+    print(f"ℹ️ No donation with id {donation_id} found.")
+
+
+def print_total_must_be_non_negative() -> None:
+    print("❌ total must be >= 0")
+
+
+def print_total_must_be_integer() -> None:
+    print("❌ total must be an integer")
+
+
+def print_error(error: Exception) -> None:
+    print(f"❌ Error: {error}")
+
+
+def print_player_not_found() -> None:
+    print("❌ Player not found.")
+
+
+def print_no_player_donations(player_name: str) -> None:
+    print(f"ℹ️ No donations found for {player_name}.")
+
+
+def print_no_active_players() -> None:
+    print("ℹ️ No active players.")
+
+
+def print_no_donations_in_database() -> None:
+    print("ℹ️ No donations found in database.")
+
+
+def print_no_active_plte_players() -> None:
+    print("ℹ️ No active players in team PLTE.")
+
+
+def print_no_under_index_players() -> None:
+    print("ℹ️ No players with donation index below 100 in team PLTE.")
+
+
+def print_no_donations_found() -> None:
+    print("ℹ️ No donations found.")
+
+
+def print_invalid_date_format() -> None:
+    print("❌ Invalid date format. Use YYYY-MM-DD or ISO 8601.")
+
+
+def print_no_donations_for_date(date: str) -> None:
+    print(f"ℹ️ No donations found for date {date}.")
+
+
 def print_player_donations(player_id: int, player_name: str, stats: DonationStats) -> None:
     print(f"\n📌 Donations for {player_name} (ID {player_id}):")
     print_table_header(columns=[f"{'ID':4}", f"{'Date':12}", f"{'Total':>8}", f"{'Delta':>8}"], width=36)
