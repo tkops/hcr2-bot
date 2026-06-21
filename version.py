@@ -1,6 +1,9 @@
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 
 HISTORY = [
+    ("1.0.3", "2026-06-21", "Add deploy workflow"),
+    ("1.0.2", "2026-06-21", "Add version bump helper"),
+    ("1.0.1", "2026-06-21", "Tighten add command argument parsing"),
     ("1.0.0", "2026-06-04", "Codex refactor"),
     ("0.7.1", "2026-04-07", "Fix seasons stats"),
     ("0.7.0", "2026-04-04", "Stats showing all members with more than 3 matches for seasons stats"),
@@ -35,4 +38,3 @@ def get_version():
 def get_history(limit=5):
     """Return version history as list of tuples (version, date, change)."""
     return HISTORY[:limit]
-

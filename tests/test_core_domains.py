@@ -4,7 +4,7 @@ from hcr2.repositories import matches as match_repo
 from hcr2.repositories import seasons as season_repo
 from hcr2.repositories import teamevents as teamevent_repo
 from hcr2.services import vehicles as vehicle_service
-from modules import season, vehicle
+from modules import season, teamevent, vehicle
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -132,3 +132,37 @@ class CoreDomainTests(TemporaryDatabaseTestCase):
 
         teamevent_repo.delete_teamevent(teamevent_id)
         self.assertIsNone(teamevent_repo.get_teamevent(teamevent_id))
+
+    def test_teamevent_add_cli_accepts_name_only_positional_form(self) -> None:
+        output = self.capture_stdout(teamevent.handle_command, "add", ["New Cup"])
+        self.assertIn("✅ Team event added:", output)
+
+        detail = teamevent_repo.get_teamevent(2)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail.name, "New Cup")
+        self.assertEqual(detail.iso_year, 2021)
+        self.assertEqual(detail.iso_week, 22)
+        self.assertEqual(detail.tracks, 4)
+        self.assertEqual(detail.max_score_per_track, 15000)
+
+    def test_teamevent_add_cli_rejects_old_multi_positional_form(self) -> None:
+        output = self.capture_stdout(teamevent.handle_command, "add", ["New Cup", "2021/W22", "hc", "5", "12000"])
+        self.assertIn('Usage: teamevent add "<name>"', output)
+        self.assertIsNone(teamevent_repo.get_teamevent(2))
+
+    def test_teamevent_add_cli_accepts_flag_form_for_optional_values(self) -> None:
+        output = self.capture_stdout(
+            teamevent.handle_command,
+            "add",
+            ["--name", "New Cup", "--week", "2021/W22", "--vehicles", "hc,rc", "--tracks", "5", "--score", "12000"],
+        )
+        self.assertIn("✅ Team event added:", output)
+
+        detail = teamevent_repo.get_teamevent(2)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail.name, "New Cup")
+        self.assertEqual(detail.iso_year, 2021)
+        self.assertEqual(detail.iso_week, 22)
+        self.assertEqual(detail.tracks, 5)
+        self.assertEqual(detail.max_score_per_track, 12000)
+        self.assertEqual([vehicle.id for vehicle in teamevent_repo.list_event_vehicles(2)], [1, 2])

@@ -4,6 +4,7 @@ from unittest import mock
 
 from hcr2.repositories import players as player_repo
 from hcr2.services import players as player_service
+from modules import player
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -90,6 +91,31 @@ class PlayerTests(TemporaryDatabaseTestCase):
         self.assertIsNotNone(detail)
         self.assertEqual(detail.name, "Clara Driver")
         self.assertEqual(detail.alias, "claradriver1")
+
+    def test_player_add_cli_defaults_team_to_plte(self) -> None:
+        output = self.capture_stdout(player.handle_command, "add", ["--name", "Clara Driver"])
+        self.assertIn("Clara Driver", output)
+
+        detail = player_repo.get_player_detail(3)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail.name, "Clara Driver")
+        self.assertEqual(detail.team, "PLTE")
+        self.assertEqual(detail.alias, "claradriver1")
+
+    def test_player_add_cli_accepts_name_only_positional_form(self) -> None:
+        output = self.capture_stdout(player.handle_command, "add", ["Clara Driver"])
+        self.assertIn("Clara Driver", output)
+
+        detail = player_repo.get_player_detail(3)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail.name, "Clara Driver")
+        self.assertEqual(detail.team, "PLTE")
+        self.assertEqual(detail.garage_power, 0)
+
+    def test_player_add_cli_rejects_old_multi_positional_form(self) -> None:
+        output = self.capture_stdout(player.handle_command, "add", ["PLTE", "Clara Driver", "clara"])
+        self.assertIn("Usage: player add <name>", output)
+        self.assertIsNone(player_repo.get_player_detail(3))
 
     def test_player_service_rejects_plte_alias_conflict(self) -> None:
         result = player_service.add_player(name="Alice Clone", alias="alice", team="PLTE")

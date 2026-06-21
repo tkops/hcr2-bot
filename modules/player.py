@@ -44,8 +44,8 @@ USAGE_ACTIVATE = "Usage: player activate <id> | --id <id>"
 USAGE_DEACTIVATE = "Usage: player deactivate <id> | --id <id>"
 USAGE_DELETE = "Usage: player delete <id> | --id <id>"
 USAGE_ADD = (
-    "Usage: player add <team> <name> [alias] [gp] [active] [birthday: dd.mm.] [discord_name] "
-    "| --team <team> --name <name> [--alias <alias>] [--gp <gp>] [--active true|false] "
+    "Usage: player add <name> "
+    "| [--team <team>] --name <name> [--alias <alias>] [--gp <gp>] [--active true|false] "
     "[--birthday <dd.mm.>] [--discord <name>]"
 )
 USAGE_EDIT = (
@@ -214,11 +214,11 @@ def _handle_add(args):
             birthday_raw = get_arg_value(args, "--birthday")
             discord_name = get_arg_value(args, "--discord")
 
-            if not team_token or not name:
+            if not name:
                 print(USAGE_ADD)
                 return
 
-            team_raw = team_token.upper()
+            team_raw = (team_token or "PLTE").upper()
             try:
                 gp = int(gp_token) if gp_token is not None else 0
             except ValueError:
@@ -226,13 +226,16 @@ def _handle_add(args):
                 return
             active = parse_bool(active_token, default=True)
         else:
-            team_raw = args[0].upper()
-            name = args[1] if len(args) > 1 else None
-            alias = args[2] if len(args) > 2 else None
-            gp = int(args[3]) if len(args) > 3 else 0
-            active = args[4].lower() != "false" if len(args) > 4 else True
-            birthday_raw = args[5] if len(args) > 5 else None
-            discord_name = args[6] if len(args) > 6 else None
+            if len(args) != 1:
+                print(USAGE_ADD)
+                return
+            team_raw = "PLTE"
+            name = args[0]
+            alias = None
+            gp = 0
+            active = True
+            birthday_raw = None
+            discord_name = None
 
         if not name:
             print_name_required()
@@ -576,7 +579,7 @@ def print_help():
             ("list-absent", "Show currently absent players"),
             ("bday today", "Print birthday IDs for today"),
             ("bday list [--active true|false] [--num N]", "List birthdays by next upcoming date"),
-            ("add --team TEAM --name NAME [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--discord NAME]", "Add one player"),
+            ("add NAME | add [--team TEAM] --name NAME [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--discord NAME]", "Add one player; TEAM defaults to PLTE"),
             ("edit --id <id> [--name NAME] [--alias ALIAS] [--gp GP] [--active true|false] [--birthday DD.MM.] [--team TEAM] [--discord NAME]", "Edit one player"),
             ("activate --id <id>", "Set one player active"),
             ("deactivate --id <id>", "Set one player inactive"),

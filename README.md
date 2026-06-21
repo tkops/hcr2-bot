@@ -21,6 +21,18 @@ python3 -m hcr2 teamevent add --name "Teamcup" --week 2026/W23 --tracks 4 --scor
 The legacy `python3 hcr2.py ...` form remains available as a compatibility
 entry point.
 
+## Version Bumps
+
+Use the helper script to update `version.py` and prepend a history entry:
+
+```bash
+python3 scripts/bump_version.py patch "Short changelog text"
+```
+
+Use `minor` or `major` instead of `patch` when the change warrants it. Commit
+the resulting `version.py` change with the feature or as a follow-up release
+bump.
+
 ## Bash Completion
 
 For the current shell:

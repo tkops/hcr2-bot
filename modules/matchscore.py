@@ -17,8 +17,7 @@ from modules.common import (
 
 
 USAGE_ADD = (
-    "Usage: matchscore add <match_id> <player_id|name> <score> <points> [<absent01>] [<checkin01>] "
-    "| --match <match_id> --player <player_id|name> --score <score> --points <points> "
+    "Usage: matchscore add --match <match_id> --player <player_id|name> --score <score> --points <points> "
     "[--absent true|false|1|0] [--checkin true|false|1|0]"
 )
 USAGE_DELETE = "Usage: matchscore delete <id> | --id <id>"
@@ -89,48 +88,35 @@ def print_help():
             ("delete --id <id>", "Delete one match score"),
             ("edit --id <id> [--score <0..75000>] [--points <0..300>] [--pid <player_id>] [--absent true|false|toggle] [--checkin true|false|toggle]", "Edit one match score"),
         ],
-        notes=["Legacy positional aliases are still accepted for add, edit and delete."],
+        notes=["Legacy positional aliases are still accepted for edit and delete."],
     )
 
 
 def add_score(args):
-    if args and args[0].startswith("--"):
-        flags = parse_flag_map(args)
-        match_id = flags.get("match")
-        player = flags.get("player")
-        score = flags.get("score")
-        points = flags.get("points")
-        if not match_id or not player or score is None or points is None:
-            print(USAGE_ADD)
-            return
-        args = [match_id, player, score, points]
-        if "absent" in flags:
-            args.append(flags["absent"])
-        if "checkin" in flags:
-            if len(args) == 4:
-                args.append("0")
-            args.append(flags["checkin"])
-
-    if len(args) not in (4, 5, 6):
+    flags = parse_flag_map(args)
+    match_id = flags.get("match")
+    player_input = flags.get("player")
+    score_token = flags.get("score")
+    points_token = flags.get("points")
+    if not match_id or not player_input or score_token is None or points_token is None:
         print(USAGE_ADD)
         return
 
-    match_id = _parse_int(args[0], None)
-    score = _parse_int(args[2], None)
-    points = _parse_int(args[3], None)
-    if match_id is None or score is None or points is None:
+    score = _parse_int(score_token, None)
+    points = _parse_int(points_token, None)
+    match_id_int = _parse_int(match_id, None)
+    if match_id_int is None or score is None or points is None:
         matchscore_output.print_invalid_score_or_points()
         return
     if not (0 <= score <= 75000 and 0 <= points <= 300):
         matchscore_output.print_invalid_score_or_points()
         return
 
-    player_input = args[1]
-    absent_override = _to_bool01(args[4]) if len(args) >= 5 else None
-    checkin_override = _to_bool01(args[5]) if len(args) == 6 else None
+    absent_override = _to_bool01(flags["absent"]) if "absent" in flags else None
+    checkin_override = _to_bool01(flags["checkin"]) if "checkin" in flags else None
 
     result = matchscore_service.add_score(
-        match_id=match_id,
+        match_id=match_id_int,
         player_input=player_input,
         score=score,
         points=points,

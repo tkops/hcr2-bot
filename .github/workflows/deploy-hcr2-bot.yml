@@ -1,0 +1,28 @@
+name: Deploy HCR2 Bot
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hcr2-bot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Update homelab repository
+        working-directory: /home/tobias/sources/homelab
+        run: |
+          git fetch origin
+          git checkout main
+          git pull --ff-only origin main
+
+      - name: Run hcr2 bot playbook
+        working-directory: /home/tobias/sources/homelab
+        run: |
+          ansible-playbook playbooks/setup-hcr2.yml -t bot

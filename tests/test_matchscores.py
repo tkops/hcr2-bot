@@ -5,6 +5,7 @@ import sqlite3
 from hcr2.repositories import matches as match_repo
 from hcr2.repositories import matchscores as matchscore_repo
 from hcr2.services import matchscores as matchscore_service
+from modules import matchscore
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -78,6 +79,25 @@ class MatchscoreTests(TemporaryDatabaseTestCase):
         deleted = matchscore_service.delete_score(inserted.id)
         self.assertIsNotNone(deleted.row)
         self.assertEqual(deleted.row.player_name, "Betty")
+        self.assertIsNone(matchscore_repo.fetch_by_match_player(1, 2))
+
+    def test_matchscore_add_cli_accepts_flag_form(self) -> None:
+        output = self.capture_stdout(
+            matchscore.handle_command,
+            "add",
+            ["--match", "1", "--player", "Betty", "--score", "30000", "--points", "100", "--checkin", "1"],
+        )
+        self.assertIn("CHANGED", output)
+
+        inserted = matchscore_repo.fetch_by_match_player(1, 2)
+        self.assertIsNotNone(inserted)
+        self.assertEqual(inserted.score, 30000)
+        self.assertEqual(inserted.points, 100)
+        self.assertEqual(inserted.checkin, 1)
+
+    def test_matchscore_add_cli_rejects_old_positional_form(self) -> None:
+        output = self.capture_stdout(matchscore.handle_command, "add", ["1", "Betty", "30000", "100"])
+        self.assertIn("Usage: matchscore add --match", output)
         self.assertIsNone(matchscore_repo.fetch_by_match_player(1, 2))
 
     def test_matchscore_service_rejects_ambiguous_player_name_and_missing_delete(self) -> None:
