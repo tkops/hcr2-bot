@@ -143,9 +143,9 @@ def parse_teamevent_add_args(args):
     for i, val in enumerate(args):
         if re.match(r"^\d{4}[/\-]\d{1,2}$", val):
             name = " ".join(args[:i])
-            rest = args[i:]
-            return [name] + rest
-    return [" ".join(args)] if args else args
+            week = val.replace("-", "/")
+            return ["--name", name, "--week", week]
+    return ["--name", " ".join(args)] if args else args
 
 def parse_match_add_args(args):
     """
@@ -827,7 +827,10 @@ async def on_message(message):
             team = tokens[1].upper()
             rest = tokens[2:]
 
-        call = ["player", "add", team, name] + rest
+        call = ["player", "add", "--team", team, "--name", name]
+        optional_flags = ["--alias", "--gp", "--active", "--birthday", "--discord"]
+        for flag, value in zip(optional_flags, rest):
+            call += [flag, value]
         output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return
@@ -1451,7 +1454,9 @@ async def on_message(message):
             failed_lines.append(line)
             continue
         match_id, player_name, score, points = map(str.strip, parts)
-        output = await run_hcr2(["matchscore", "add", match_id, player_name, score, points])
+        output = await run_hcr2(
+            ["matchscore", "add", "--match", match_id, "--player", player_name, "--score", score, "--points", points]
+        )
         if not output or "✅" not in output:
             failed_lines.append(line)
 

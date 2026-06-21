@@ -20,8 +20,8 @@ from modules.common import (
 
 
 USAGE_ADD = (
-    'Usage: teamevent add "<name>" [<year>/W<week>] [vehicle_ids|vehicle_shortnames] [track-count] [max-score] '
-    '| --name <name> [--week <year>/W<week>] [--vehicles 1,2,3|codes] [--tracks <num>] [--score <num>]'
+    'Usage: teamevent add "<name>" | --name <name> [--week <year>/W<week>] '
+    '[--vehicles 1,2,3|codes] [--tracks <num>] [--score <num>]'
 )
 USAGE_DELETE = "Usage: teamevent delete <id> | --id <id>"
 USAGE_SHOW = "Usage: teamevent show all | <id> | --all | --id <id>"
@@ -52,7 +52,8 @@ def print_help() -> None:
     print_command_help(
         usage="hcr2.py teamevent <command> [options]",
         commands=[
-            ("add --name <name> [--week <year>/W<week>] [--vehicles <ids|codes>] [--tracks <num>] [--score <num>]", "Add one team event"),
+            ("add <name>", "Add one team event with defaults"),
+            ("add --name <name> [--week <year>/W<week>] [--vehicles <ids|codes>] [--tracks <num>] [--score <num>]", "Add one team event with options"),
             ("list", "Show the latest 10 team events"),
             ("list --all", "Show all team events"),
             ("show --all", "Show all team events with summary fields"),
@@ -62,9 +63,11 @@ def print_help() -> None:
         ],
         notes=[
             "Default week for add is the next free ISO week.",
-            "Legacy positional aliases are still accepted for add, show, edit and delete.",
+            "Optional add values must use flags.",
+            "Legacy positional aliases are still accepted for show, edit and delete.",
         ],
         examples=[
+            'teamevent add "Teamcup"',
             'teamevent add --name "Teamcup" --week 2025/W38',
             'teamevent add --name "Teamcup" --week 2025/W38 --vehicles be,ro,sm,sc,hc --tracks 5 --score 15000',
         ],
@@ -201,6 +204,9 @@ def add_teamevent(args: list[str]) -> None:
         if "score" in flags:
             tail.append(flags["score"])
         args.extend(tail)
+    elif len(args) > 1:
+        print(USAGE_ADD)
+        return
 
     if not args:
         print(USAGE_ADD)
