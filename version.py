@@ -1,6 +1,7 @@
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 HISTORY = [
+    ("1.0.2", "2026-06-21", "Add version bump helper"),
     ("1.0.1", "2026-06-21", "Tighten add command argument parsing"),
     ("1.0.0", "2026-06-04", "Codex refactor"),
     ("0.7.1", "2026-04-07", "Fix seasons stats"),
