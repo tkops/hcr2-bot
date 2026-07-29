@@ -90,7 +90,7 @@ class CliHelpSmokeTests(unittest.TestCase):
             "player": "list-active",
             "teamevent": "show --id <id>",
             "season": "list --all",
-            "match": "add --opponent NAME",
+            "match": "add <opponent>",
             "matchscore": "list-short",
             "stats": "perf",
             "sheet": "player export",

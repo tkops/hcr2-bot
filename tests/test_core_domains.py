@@ -4,7 +4,7 @@ from hcr2.repositories import matches as match_repo
 from hcr2.repositories import seasons as season_repo
 from hcr2.repositories import teamevents as teamevent_repo
 from hcr2.services import vehicles as vehicle_service
-from modules import season, teamevent, vehicle
+from modules import match, season, teamevent, vehicle
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -92,6 +92,47 @@ class CoreDomainTests(TemporaryDatabaseTestCase):
 
         match_repo.delete_match(added[0].id)
         self.assertIsNone(match_repo.get_match(added[0].id))
+
+    def test_match_add_cli_accepts_positional_opponent(self) -> None:
+        output = self.capture_stdout(
+            match.handle_command,
+            "add",
+            ["Challengers", "--season", "2", "--start", "2021-06-07"],
+        )
+        self.assertIn("✅ Match added:", output)
+        self.assertIn("vs Challengers", output)
+
+        added = [match for match in match_repo.list_matches(season_number=2) if match.opponent == "Challengers"]
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0].start, "2021-06-07")
+
+    def test_match_add_cli_still_accepts_flag_opponent_with_optional_values(self) -> None:
+        output = self.capture_stdout(
+            match.handle_command,
+            "add",
+            [
+                "--opponent",
+                "Challengers",
+                "--teamevent",
+                "1",
+                "--season",
+                "2",
+                "--start",
+                "2021-06-07",
+                "--score",
+                "200",
+                "--scoreopp",
+                "199",
+            ],
+        )
+        self.assertIn("✅ Match added:", output)
+
+        added = [match for match in match_repo.list_matches(season_number=2) if match.opponent == "Challengers"]
+        self.assertEqual(len(added), 1)
+        detail = match_repo.get_match(added[0].id)
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail.score_ladys, 200)
+        self.assertEqual(detail.score_opponent, 199)
 
     def test_teamevent_repository_lists_and_loads_models(self) -> None:
         events = teamevent_repo.list_latest()

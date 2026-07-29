@@ -18,7 +18,9 @@ from modules.common import (
 
 
 USAGE_ADD = (
-    "Usage: match add --opponent NAME [--teamevent ID] [--season NUM] "
+    "Usage: match add <opponent> [--teamevent ID] [--season NUM] "
+    "[--start YYYY-MM-DD] [--score N] [--scoreopp N]\n"
+    "   or: match add --opponent NAME [--teamevent ID] [--season NUM] "
     "[--start YYYY-MM-DD] [--score N] [--scoreopp N]"
 )
 USAGE_EDIT = (
@@ -53,14 +55,14 @@ def print_help() -> None:
     print_command_help(
         usage="hcr2.py match <command> [options]",
         commands=[
-            ("add --opponent NAME [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]", "Add one match"),
+            ("add <opponent> [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]", "Add one match"),
             ("edit --id ID [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--opponent NAME] [--score N] [--scoreopp N]", "Edit one match"),
             ("show --id <id>", "Show one match"),
             ("list [--season <n>|--all]", "List matches"),
             ("delete --id <id>", "Delete one match"),
         ],
         notes=[
-            "For add, --opponent is required.",
+            "For add, the opponent can be positional or passed with --opponent.",
             "Default --teamevent is the latest team event by ISO year/week.",
             "Default --season is the current season.",
             "Default --start is the last match date + 2 days, or the first day of the current month.",
@@ -127,6 +129,28 @@ def _parse_flags(args: list[str]) -> dict[str, str]:
     return parse_flag_map(args)
 
 
+def _positional_values(args: list[str]) -> list[str]:
+    values: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if not token.startswith("--"):
+            values.append(token)
+            i += 1
+            continue
+
+        if "=" in token:
+            i += 1
+            continue
+
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            i += 2
+            continue
+
+        i += 1
+    return values
+
+
 def _require_int(flags: dict[str, str], key: str) -> Optional[int]:
     value = parse_int(flags.get(key))
     if value is None:
@@ -158,10 +182,10 @@ def _get_default_start(cur) -> str:
 def add_match(args: list[str]) -> None:
     flags = _parse_flags(args)
 
-    opponent = flags.get("opponent")
+    opponent = flags.get("opponent") or " ".join(_positional_values(args)).strip()
     if not opponent:
         print(USAGE_ADD)
-        print("Missing: --opponent")
+        print("Missing: opponent")
         return
 
     score_ladys = parse_int(flags.get("score", "0"))
