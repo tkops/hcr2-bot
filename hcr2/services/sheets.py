@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from hcr2 import timestamps
 from hcr2.db import connection as db_connection
 from hcr2.integrations.nextcloud import NEXTCLOUD_BASE, delete_file, download_file, upload_file
 from hcr2.repositories import matches as match_repo
@@ -21,12 +21,14 @@ class PlayerImportResult:
     inserted: int
     skipped: int
     errors: int
+    messages: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class DonationImportResult:
     added: int
     errors: int
+    messages: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -163,7 +165,7 @@ def delete_local_file(path: Path) -> bool:
     try:
         path.unlink()
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -377,7 +379,7 @@ def import_match_sheet(
 def to_k(value: Optional[int]) -> float:
     try:
         return round((int(value or 0)) / 1000.0, 1)
-    except Exception:
+    except (TypeError, ValueError):
         return 0.0
 
 
@@ -429,6 +431,7 @@ def import_player_rows(
         inserted = 0
         skipped = 0
         errors = 0
+        messages: list[str] = []
 
         for row_map_full in workbook_rows:
             row_map = {k: v for k, v in row_map_full.items() if k in allowed_import_cols}
@@ -460,7 +463,7 @@ def import_player_rows(
                         skipped += 1
                         continue
 
-                    now = datetime.now().isoformat(timespec="seconds")
+                    now = timestamps.utc_now()
                     placeholders = ", ".join([f"{c}=?" for c in changed_cols] + ["last_modified=?"])
                     values = [row_map[c] for c in changed_cols] + [now, rid_int]
                     cur.execute(f"UPDATE players SET {placeholders} WHERE id = ?", values)
@@ -478,7 +481,7 @@ def import_player_rows(
                         skipped += 1
                         continue
 
-                    now = datetime.now().isoformat(timespec="seconds")
+                    now = timestamps.utc_now()
                     insert_cols.append("last_modified")
                     placeholders = ", ".join(["?"] * len(insert_cols))
                     values = [row_map[c] for c in insert_cols if c != "last_modified"] + [now]
@@ -487,12 +490,15 @@ def import_player_rows(
                         values,
                     )
                     inserted += 1
-            except Exception:
+            except (sqlite3.Error, ValueError, TypeError) as e:
                 errors += 1
+                messages.append(_import_failure("player", rid_int, e))
 
         conn.commit()
 
-    return PlayerImportResult(updated=updated, inserted=inserted, skipped=skipped, errors=errors)
+    return PlayerImportResult(
+        updated=updated, inserted=inserted, skipped=skipped, errors=errors, messages=messages
+    )
 
 
 def get_player_export_data(db_path: str | Path, *, excluded_columns: set[str]) -> PlayerExportData | None:
@@ -554,6 +560,9 @@ def import_donation_entries(
 ) -> DonationImportResult:
     added = 0
     errors = initial_errors
+    messages: list[str] = []
+    if initial_errors:
+        messages.append(f"{initial_errors} row(s) skipped while reading the workbook")
 
     with db_connection.connect_path(db_path) as conn:
         for player_id, total in donation_entries:
@@ -567,10 +576,16 @@ def import_donation_entries(
                     (player_id, date_str, total),
                 )
                 added += 1
-            except Exception:
+            except (sqlite3.Error, ValueError, TypeError) as e:
                 errors += 1
+                messages.append(_import_failure("donation for player", player_id, e))
 
-    return DonationImportResult(added=added, errors=errors)
+    return DonationImportResult(added=added, errors=errors, messages=messages)
+
+
+def _import_failure(what: str, key, error: Exception) -> str:
+    """One line per failed row - "4 errors" alone is not diagnosable."""
+    return f"{what} {key if key is not None else '?'}: {type(error).__name__}: {error}"
 
 
 def add_plte_player_from_sheet(name: str) -> int | None:

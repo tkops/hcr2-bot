@@ -8,7 +8,7 @@ from hcr2.output.teamevents import (
     print_teamevent_list,
     print_teamevent_summary_list,
 )
-from hcr2.output.deletions import print_delete_blocked
+from hcr2.output.deletions import print_delete_blocked, print_delete_not_found
 from hcr2.repositories import teamevents as teamevent_repo
 from hcr2.services import deletions as deletions_service
 from modules.common import (
@@ -328,6 +328,9 @@ def edit_teamevent(args: list[str]) -> None:
 
 def delete_teamevent(teamevent_id: int) -> None:
     outcome = deletions_service.delete_teamevent(teamevent_id)
+    if outcome.status == "NOT_FOUND":
+        print_delete_not_found(outcome)
+        return
     if outcome.status == "BLOCKED":
         print_delete_blocked(outcome)
         return

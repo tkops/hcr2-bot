@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,17 @@ from secrets_config import NEXTCLOUD_AUTH
 
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
+
+
+def _report(what: str, error: Exception | None) -> None:
+    """Send the reason to stderr, where journalctl keeps it.
+
+    Only the exception type is included: request exceptions carry the full URL,
+    which contains the Nextcloud account name, and this text can end up in
+    Discord via bot.py's stderr passthrough.
+    """
+    reason = f": {type(error).__name__}" if error is not None else ""
+    print(f"nextcloud: {what}{reason}", file=sys.stderr)
 
 
 def remote_url(remote_path) -> str:
@@ -31,7 +43,8 @@ def upload_file(local_path, remote_path, *, overwrite: bool = False) -> tuple[Op
     try:
         head = requests.head(url, auth=(user, password))
         exists = head.status_code == 200
-    except Exception:
+    except requests.RequestException as e:
+        _report(f"HEAD failed for {remote_path}", e)
         exists = False
 
     if exists and not overwrite:
@@ -51,9 +64,10 @@ def delete_file(remote_path) -> bool:
     user, password = NEXTCLOUD_AUTH
     try:
         r = requests.delete(remote_url(remote_path), auth=(user, password))
-        return r.status_code in (200, 204)
-    except Exception:
+    except requests.RequestException as e:
+        _report(f"DELETE failed for {remote_path}", e)
         return False
+    return r.status_code in (200, 204)
 
 
 def download_file(remote_path, local_path: Path) -> Optional[Path]:
@@ -65,10 +79,12 @@ def download_file(remote_path, local_path: Path) -> Optional[Path]:
             auth=(user, password),
             headers={"Cache-Control": "no-cache"},
         )
-    except Exception:
+    except requests.RequestException as e:
+        _report(f"GET failed for {remote_path}", e)
         return None
 
     if response.status_code != 200:
+        _report(f"GET returned HTTP {response.status_code} for {remote_path}", None)
         return None
 
     local_path.write_bytes(response.content)

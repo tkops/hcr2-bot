@@ -20,6 +20,14 @@ from hcr2.repositories import seasons as season_repo
 from hcr2.repositories import teamevents as teamevent_repo
 
 
+# kind -> (table, primary key column) of the row being deleted
+TARGETS: dict[str, tuple[str, str]] = {
+    "player": ("players", "id"),
+    "match": ("match", "id"),
+    "season": ("season", "number"),
+    "teamevent": ("teamevent", "id"),
+}
+
 # kind -> ((table, column, singular, plural), ...)
 DEPENDENCIES: dict[str, tuple[tuple[str, str, str, str], ...]] = {
     "player": (
@@ -40,7 +48,7 @@ DEPENDENCIES: dict[str, tuple[tuple[str, str, str, str], ...]] = {
 
 @dataclass(frozen=True)
 class DeleteOutcome:
-    status: str  # "DELETED" | "BLOCKED"
+    status: str  # "DELETED" | "BLOCKED" | "NOT_FOUND"
     kind: str = ""
     key: int = 0
     blocks: list[tuple[str, int]] = field(default_factory=list)
@@ -55,7 +63,16 @@ def blocking_dependents(kind: str, key: int) -> list[tuple[str, int]]:
     return blocks
 
 
+def exists(kind: str, key: int) -> bool:
+    table, primary_key = TARGETS[kind]
+    return integrity_repo.count_referencing_rows(table, primary_key, key) > 0
+
+
 def _guarded_delete(kind: str, key: int, deleter) -> DeleteOutcome:
+    # Without this check a delete of an unknown id reported success and exit 0.
+    if not exists(kind, key):
+        return DeleteOutcome(status="NOT_FOUND", kind=kind, key=key)
+
     blocks = blocking_dependents(kind, key)
     if blocks:
         return DeleteOutcome(status="BLOCKED", kind=kind, key=key, blocks=blocks)

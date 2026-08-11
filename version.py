@@ -1,6 +1,7 @@
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 HISTORY = [
+    ("1.3.0", "2026-08-11", "CLI exit codes, bot contract tests, UTC timestamps, error causes"),
     ("1.2.0", "2026-08-11", "Block deletes that would orphan result data"),
     ("1.1.0", "2026-08-11", "Apply player name changes from match sheet import"),
     ("1.0.3", "2026-06-21", "Add deploy workflow"),

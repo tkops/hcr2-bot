@@ -23,7 +23,7 @@ def delete_local_file(path: Path) -> bool:
     try:
         path.unlink()
         return True
-    except Exception:
+    except OSError:
         return False
 
 

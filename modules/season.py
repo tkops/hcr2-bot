@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
-from hcr2.output.deletions import print_delete_blocked
+from hcr2.output.deletions import print_delete_blocked, print_delete_not_found
 from hcr2.output.seasons import print_seasons
 from hcr2.repositories import seasons as season_repo
 from hcr2.services import deletions as deletions_service
@@ -146,11 +146,10 @@ def delete_season(args: list[str]) -> None:
     if number is None:
         return
 
-    if not season_repo.season_exists(number):
-        print(f"⚠️ Season {number} does not exist.")
-        return
-
     outcome = deletions_service.delete_season(number)
+    if outcome.status == "NOT_FOUND":
+        print_delete_not_found(outcome)
+        return
     if outcome.status == "BLOCKED":
         print_delete_blocked(outcome)
         return

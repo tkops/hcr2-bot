@@ -171,7 +171,7 @@ def print_player_detail(
     pemoji = (pemoji or "").strip()
     try:
         garage_power = int(garage_power or 0)
-    except Exception:
+    except (TypeError, ValueError):
         garage_power = 0
 
     head = f"👤 {player_id}: {pname}"

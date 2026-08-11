@@ -63,12 +63,26 @@ def print_invalid_match_id() -> None:
     print("❌ Match ID must be an integer.")
 
 
+MAX_REPORTED_MESSAGES = 10
+
+
 def print_player_import_result(result: PlayerImportResult, cleanup_status: str) -> None:
     print(
         f"✅ players import: {result.updated} updated, {result.inserted} inserted, "
         f"{result.skipped} skipped, {result.errors} errors ({cleanup_status} in Nextcloud)"
     )
+    _print_import_messages(result.messages)
 
 
 def print_donation_import_result(result: DonationImportResult, cleanup_status: str) -> None:
     print(f"✅ donations import: {result.added} added, {result.errors} errors ({cleanup_status} in Nextcloud)")
+    _print_import_messages(result.messages)
+
+
+def _print_import_messages(messages: list[str]) -> None:
+    """An error count without a reason cannot be acted on."""
+    for message in messages[:MAX_REPORTED_MESSAGES]:
+        print(f"⚠️ {message}")
+    remaining = len(messages) - MAX_REPORTED_MESSAGES
+    if remaining > 0:
+        print(f"⚠️ ... and {remaining} more")

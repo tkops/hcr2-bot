@@ -347,7 +347,7 @@ def list_donations_for_date(date_str: str):
     # Validate date format, but use the original string for the query.
     try:
         _ = donation_service.parse_date(date_str)
-    except Exception:
+    except (TypeError, ValueError):
         donation_output.print_invalid_date_format()
         return
 
