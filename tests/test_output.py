@@ -736,6 +736,26 @@ class OutputFormattingTests(unittest.TestCase):
         self.assertIn("✅ players import: 1 updated, 2 inserted, 3 skipped, 4 errors (deleted in Nextcloud)", output)
         self.assertIn("✅ donations import: 5 added, 6 errors (delete failed in Nextcloud)", output)
 
+    def test_sheet_output_prints_match_import_renames(self) -> None:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            sheet_output.print_match_import_result(
+                "7_Event_Opp.xlsx",
+                "https://example.test/S62",
+                sheet_service.MatchSheetApplyResult(
+                    imported=2,
+                    changed=1,
+                    score_updated=True,
+                    renamed=[(1, "Alice", "Alice Cooper")],
+                    rename_errors=["Row 9: kept stored name for player 4 (rename rejected: ALIAS_CONFLICT)"],
+                ),
+            )
+
+        output = buffer.getvalue()
+        self.assertIn("(Changed, 2 imported, 1 changed; 1 renamed; Score updated)", output)
+        self.assertIn("✏️ Player 1: 'Alice' → 'Alice Cooper'", output)
+        self.assertIn("⚠️ Row 9: kept stored name for player 4 (rename rejected: ALIAS_CONFLICT)", output)
+
     def test_sheet_output_prints_validation_errors(self) -> None:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):

@@ -14,10 +14,15 @@ def print_match_sheet_link_created(markdown_link: str, created: bool) -> None:
 def print_match_import_result(filename: str, web_url: str, result: MatchSheetApplyResult) -> None:
     status = "Changed" if result.changed > 0 else "Unchanged"
     score_status = "Score updated" if result.score_updated else "Score update failed"
+    renamed_status = f"; {len(result.renamed)} renamed" if result.renamed else ""
     print(
         f"✅ [{filename}]({web_url}) "
-        f"({status}, {result.imported} imported, {result.changed} changed; {score_status})"
+        f"({status}, {result.imported} imported, {result.changed} changed{renamed_status}; {score_status})"
     )
+    for player_id, old_name, new_name in result.renamed:
+        print(f"✏️ Player {player_id}: '{old_name}' → '{new_name}'")
+    for message in result.rename_errors:
+        print(f"⚠️ {message}")
 
 
 def print_validation_errors(errors: list[str]) -> None:
