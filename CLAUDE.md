@@ -82,7 +82,20 @@ Invariants the refactor established and that new code should preserve:
   `mock.patch.object(connection, "DB_PATH", ...)` — see `tests/support.py`.
 - Schema changes go in `hcr2/db/migrations/NNNN_*.sql`; the runner (`hcr2/db/migrations.py`) tracks
   applied files in `schema_migrations` and runs with `PRAGMA foreign_keys=OFF`. Migrations must be
-  idempotent-friendly (`CREATE TABLE IF NOT EXISTS` style).
+  idempotent-friendly (`CREATE TABLE IF NOT EXISTS` style). A migration that rewrites tables must
+  wrap itself in `BEGIN; … COMMIT;` — `executescript` otherwise runs each statement in autocommit
+  and a mid-script failure leaves the DB half migrated.
+- **Deletes are guarded, not cascading.** `donation`, `match` and `matchscore` use
+  `ON DELETE RESTRICT` (migration `0002`): a row holding result data cannot be deleted while
+  dependents exist — move them first (`matchscore edit <id> --player <id>`). `teamevent_vehicle`
+  keeps `CASCADE`, it is only a mapping. Enforcement needs both halves: `connect_path()` sets
+  `PRAGMA foreign_keys=ON` per connection (SQLite defaults it to OFF, which made the clauses
+  decorative), and `hcr2/services/deletions.py` checks dependents beforehand so the user gets a
+  readable message instead of an `IntegrityError`. Add new delete paths to its `DEPENDENCIES` map.
+- The runner was never applied to the live databases (`schema_migrations` is absent there), so the
+  first `migrate_db.py` run applies `0001` too — harmless, it is all `IF NOT EXISTS`.
+- Pre-existing FK violations survive the switch; enforcement only covers new changes. Check with
+  `sqlite3 <db> 'PRAGMA foreign_key_check'`.
 - Root `schema.sql` is a **generated dump** of the live DB (`backup_schema.py`), not the source of
   truth — never edit it by hand to change schema.
 - `create_db.py` is a thin wrapper around the same runner.

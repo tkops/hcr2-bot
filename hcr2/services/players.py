@@ -15,6 +15,7 @@ from hcr2.models.player import (
     PlayerSearchRow,
 )
 from hcr2.repositories import players as player_repo
+from hcr2.services import deletions as deletions_service
 
 
 TEAM_RE = re.compile(r"^(PLTE|PL[1-9])$")
@@ -224,8 +225,9 @@ def deactivate_player(player_id: int) -> None:
     player_repo.set_active(player_id, False)
 
 
-def delete_player(player_id: int) -> None:
-    player_repo.delete_player(player_id)
+def delete_player(player_id: int):
+    """Blocked while match scores or donations still reference the player."""
+    return deletions_service.delete_player(player_id)
 
 
 def edit_player(

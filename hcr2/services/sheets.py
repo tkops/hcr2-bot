@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from hcr2.db import connection as db_connection
 from hcr2.integrations.nextcloud import NEXTCLOUD_BASE, delete_file, download_file, upload_file
 from hcr2.repositories import matches as match_repo
 from hcr2.repositories import players as player_repo
@@ -409,7 +410,7 @@ def import_player_rows(
     *,
     excluded_columns: set[str],
 ) -> PlayerImportResult:
-    with sqlite3.connect(db_path) as conn:
+    with db_connection.connect_path(db_path) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -495,7 +496,7 @@ def import_player_rows(
 
 
 def get_player_export_data(db_path: str | Path, *, excluded_columns: set[str]) -> PlayerExportData | None:
-    with sqlite3.connect(db_path) as conn:
+    with db_connection.connect_path(db_path) as conn:
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(players)")
         cols_info = cur.fetchall()
@@ -514,7 +515,7 @@ def get_player_export_data(db_path: str | Path, *, excluded_columns: set[str]) -
 
 
 def get_donation_export_rows(db_path: str | Path) -> list[tuple[int, str, int]]:
-    with sqlite3.connect(db_path) as conn:
+    with db_connection.connect_path(db_path) as conn:
         cur = conn.cursor()
         cur.execute("""
             SELECT id, name
@@ -534,7 +535,7 @@ def get_donation_export_rows(db_path: str | Path) -> list[tuple[int, str, int]]:
 
 
 def get_match_export_data(db_path: str | Path, match_id: int) -> MatchExportData | None:
-    with sqlite3.connect(db_path) as conn:
+    with db_connection.connect_path(db_path) as conn:
         match = _get_match_info(conn, match_id)
         if match is None:
             return None
@@ -554,7 +555,7 @@ def import_donation_entries(
     added = 0
     errors = initial_errors
 
-    with sqlite3.connect(db_path) as conn:
+    with db_connection.connect_path(db_path) as conn:
         for player_id, total in donation_entries:
             try:
                 conn.execute(

@@ -1,6 +1,7 @@
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 HISTORY = [
+    ("1.2.0", "2026-08-11", "Block deletes that would orphan result data"),
     ("1.1.0", "2026-08-11", "Apply player name changes from match sheet import"),
     ("1.0.3", "2026-06-21", "Add deploy workflow"),
     ("1.0.2", "2026-06-21", "Add version bump helper"),

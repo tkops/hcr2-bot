@@ -5,8 +5,10 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
+from hcr2.output.deletions import print_delete_blocked
 from hcr2.output.matches import print_match_detail, print_match_list
 from hcr2.repositories import matches as match_repo
+from hcr2.services import deletions as deletions_service
 from modules.common import (
     get_arg_value,
     is_help_request,
@@ -327,5 +329,8 @@ def warn_if_unusual_match_count(season_number: int, actual_count: int) -> None:
 
 
 def delete_match(match_id: int) -> None:
-    match_repo.delete_match(match_id)
+    outcome = deletions_service.delete_match(match_id)
+    if outcome.status == "BLOCKED":
+        print_delete_blocked(outcome)
+        return
     print(f"🗑️  Match {match_id} deleted.")

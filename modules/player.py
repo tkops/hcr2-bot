@@ -30,6 +30,7 @@ from hcr2.output.players import (
     print_player_list,
     print_player_resolution_result,
 )
+from hcr2.output.deletions import print_delete_blocked
 from hcr2.services import players as player_service
 from modules.common import (
     get_arg_value,
@@ -502,7 +503,10 @@ def deactivate_player(pid):
     print_player_deactivated(pid)
 
 def delete_player(pid):
-    player_service.delete_player(pid)
+    outcome = player_service.delete_player(pid)
+    if outcome.status == "BLOCKED":
+        print_delete_blocked(outcome)
+        return
     print_player_deleted(pid)
 
 def activate_player(pid):
