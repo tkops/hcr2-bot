@@ -30,8 +30,12 @@ Three consumers sit on top of one SQLite database:
 1. **CLI** — `hcr2.py` / `python3 -m hcr2` → `hcr2/cli/app.py`.
 2. **Discord bot** — `bot.py` does *not* import the package. It shells out with
    `subprocess.run(["python3", "hcr2.py", ...])` and parses the CLI's stdout with regexes
-   (`ID_LINE_RE`, `NAME_LINE_RE`, `BIRTHDAY_IDS_RE`). **Changing CLI output format can break the bot.**
-   Bot commands are dot-prefixed (`.p`, `.m`, `.stats`); `PUBLIC_COMMANDS` gates what non-leaders may run.
+   (`ID_LINE_RE`, `NAME_LINE_RE`, `BIRTHDAY_IDS_RE`). **Changing CLI output format can break the bot** —
+   `tests/test_bot_contract.py` pins the formats those regexes depend on, so run it after touching
+   `hcr2/output/`. Bot commands are dot-prefixed (`.p`, `.m`, `.stats`); `PUBLIC_COMMANDS` gates what
+   non-leaders may run. `run_hcr2` returns a `CliResult` — a `str` subclass carrying `ok` from the
+   exit code — so the 52 call sites keep working unchanged while `_output_is_error` can trust the
+   exit code instead of searching the text for words like "invalid".
 3. **One-off maintenance scripts** at the root (`import_match.py`, `import_teamevent.py`,
    `import_player.py`, `import_matchscores.py`, `import_flags.py`, `find_teamevent.py`,
    `backup_schema.py`, `catxls.py`). These predate the package: they hardcode
@@ -64,6 +68,22 @@ hcr2/integrations/      Nextcloud/WebDAV
 hcr2/db/                connection + migration runner
 ```
 
+Cross-cutting conventions:
+
+- **Errors are the ❌ prefix, and the exit code follows from it.** `main()` watches stdout and exits
+  1 when any line starts with ❌ (`hcr2/output/status.py`); code failing without printing can call
+  `status.mark_failure()`. So a new error path only needs to print like the others.
+- **Timestamps have two conventions** (`hcr2/timestamps.py`): `created_at`, `last_modified` and
+  `active_modified` are UTC, written by SQLite's `CURRENT_TIMESTAMP` via column default and the
+  `players` triggers — display them through `to_local()`, write them with `utc_now()`. The
+  `update_players_last_modified` trigger has no `WHEN` clause, so it overwrites whatever Python
+  wrote on any update. `away_from` / `away_until` are local time and are compared against local
+  time in the absence logic — leave those alone.
+- **Report why something failed.** Import paths collect a message per failed row
+  (`PlayerImportResult.messages`, `DonationImportResult.messages`, capped in the output);
+  `integrations/nextcloud.py` reports the exception *type* to stderr, deliberately not the message,
+  because request exceptions carry the URL including the Nextcloud account name.
+
 Invariants the refactor established and that new code should preserve:
 
 - `modules/*` contains **no SQL** and **no prints except Usage text** — everything else goes through
@@ -91,7 +111,9 @@ Invariants the refactor established and that new code should preserve:
   keeps `CASCADE`, it is only a mapping. Enforcement needs both halves: `connect_path()` sets
   `PRAGMA foreign_keys=ON` per connection (SQLite defaults it to OFF, which made the clauses
   decorative), and `hcr2/services/deletions.py` checks dependents beforehand so the user gets a
-  readable message instead of an `IntegrityError`. Add new delete paths to its `DEPENDENCIES` map.
+  readable message instead of an `IntegrityError`. Add new delete paths to its `DEPENDENCIES` and
+  `TARGETS` maps — `TARGETS` also makes a delete of an unknown id report `NOT_FOUND` rather than
+  claiming success.
 - The runner was never applied to the live databases (`schema_migrations` is absent there), so the
   first `migrate_db.py` run applies `0001` too — harmless, it is all `IF NOT EXISTS`.
 - Pre-existing FK violations survive the switch; enforcement only covers new changes. Check with

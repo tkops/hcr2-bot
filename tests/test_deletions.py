@@ -66,6 +66,31 @@ class DeletionGuardTests(TemporaryDatabaseTestCase):
         output = self.capture_stdout(season.delete_season, ["--number", "2"])
         self.assertIn("❌ Season 2 still has 1 match –", output)
 
+    def test_unknown_ids_report_not_found_instead_of_success(self) -> None:
+        for kind, func in (
+            ("player", deletions_service.delete_player),
+            ("match", deletions_service.delete_match),
+            ("season", deletions_service.delete_season),
+            ("teamevent", deletions_service.delete_teamevent),
+        ):
+            with self.subTest(kind=kind):
+                outcome = func(999999)
+                self.assertEqual(outcome.status, "NOT_FOUND")
+                self.assertEqual(outcome.kind, kind)
+
+    def test_cli_delete_of_unknown_id_prints_an_error(self) -> None:
+        output = self.capture_stdout(match.delete_match, 999999)
+
+        self.assertIn("❌ Match 999999 does not exist", output)
+        self.assertNotIn("deleted.", output.replace("nothing was deleted", ""))
+
+    def test_exists_covers_the_primary_key_of_every_kind(self) -> None:
+        self.assertTrue(deletions_service.exists("player", 1))
+        self.assertTrue(deletions_service.exists("match", 1))
+        self.assertTrue(deletions_service.exists("season", 2))  # PK ist "number"
+        self.assertTrue(deletions_service.exists("teamevent", 1))
+        self.assertFalse(deletions_service.exists("season", 9999))
+
     def test_blocked_output_lists_every_blocker_with_a_hint(self) -> None:
         outcome = deletions_service.DeleteOutcome(
             status="BLOCKED",

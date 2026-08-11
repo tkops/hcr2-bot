@@ -18,6 +18,11 @@ HINTS = {
 }
 
 
+def print_delete_not_found(outcome: DeleteOutcome) -> None:
+    label = KIND_LABELS.get(outcome.kind, outcome.kind.capitalize())
+    print(f"❌ {label} {outcome.key} does not exist – nothing was deleted.")
+
+
 def print_delete_blocked(outcome: DeleteOutcome) -> None:
     label = KIND_LABELS.get(outcome.kind, outcome.kind.capitalize())
     blockers = ", ".join(f"{count} {name}" for name, count in outcome.blocks)

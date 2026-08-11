@@ -210,7 +210,7 @@ def list_absent() -> PlayerAbsentListResult:
         try:
             until_dt = datetime.strptime(row.away_until[:19], "%Y-%m-%d %H:%M:%S")
             days = max(0, (until_dt.date() - today).days)
-        except Exception:
+        except (TypeError, ValueError):
             days = 0
         items.append((days, row))
     items.sort(key=lambda item: item[0], reverse=True)
@@ -367,7 +367,7 @@ def today_mm_dd() -> str:
 def days_until_mmdd(mmdd: str) -> int | None:
     try:
         month, day = map(int, mmdd.split("-"))
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return None
 
     today = date.today()

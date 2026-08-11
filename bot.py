@@ -84,20 +84,42 @@ client = MyClient()
 
 # ===================== hcr2 Helper (nicht-blockierend) ======================
 
+class CliResult(str):
+    """stdout of an hcr2 call. Behaves like the str it always was, plus `ok`,
+    which mirrors the process exit code (see hcr2/output/status.py)."""
+
+    ok: bool = True
+
+    def __new__(cls, text: str, ok: bool = True):
+        result = super().__new__(cls, text)
+        result.ok = ok
+        return result
+
+
 def run_hcr2_sync(args):
     try:
         result = subprocess.run(
             ["python3", "hcr2.py"] + args,
             capture_output=True,
             text=True,
-            check=True
+            check=False,
         )
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error while running: hcr2.py {' '.join(args)}")
+    except OSError as e:
+        print(f"❌ Could not run: hcr2.py {' '.join(args)}")
         print(e)
-        print(e.stderr)
         return None
+
+    if result.returncode != 0 and not result.stdout.strip():
+        # Crashed without a status line of its own - nothing useful to show.
+        print(f"❌ Error while running: hcr2.py {' '.join(args)} (exit {result.returncode})")
+        print(result.stderr)
+        return None
+
+    if result.stderr.strip():
+        print(f"⚠️ stderr from: hcr2.py {' '.join(args)}")
+        print(result.stderr)
+
+    return CliResult(result.stdout, ok=result.returncode == 0)
 
 async def run_hcr2(args):
     loop = asyncio.get_running_loop()
@@ -242,9 +264,17 @@ def _clean_status_text(text: str) -> str:
             return text[len(prefix):].strip()
     return text
 
-def _output_is_error(text: str) -> bool:
-    normalized = (text or "").strip().lower()
-    return normalized.startswith("❌") or "not found" in normalized or "invalid" in normalized
+def _output_is_error(text) -> bool:
+    """Prefer the CLI's exit code; fall back to its ❌ status prefix.
+
+    Deliberately no substring search for words like "invalid" or "not found" -
+    those appear in player names, opponents and notes and turned successful
+    commands red.
+    """
+    ok = getattr(text, "ok", None)
+    if ok is not None:
+        return not ok
+    return (text or "").strip().startswith("❌")
 
 async def send_status(channel, title: str, description: str = "", *, color: int = COLOR_INFO):
     embed = discord.Embed(title=title, description=description or None, color=color)
@@ -1473,4 +1503,7 @@ async def respond(message, output):
 
 # ===================== Start =================================================
 
-client.run(TOKEN)
+# Guarded so the module can be imported (tests/test_bot_contract.py) without
+# connecting to Discord - an unguarded import would start a second bot instance.
+if __name__ == "__main__":
+    client.run(TOKEN)

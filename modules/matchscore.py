@@ -193,7 +193,7 @@ def edit_score(args):
         pid_raw = flags.get("pid")
         try:
             new_player_id = int(pid_raw)
-        except Exception:
+        except (TypeError, ValueError):
             matchscore_output.print_pid_requires_numeric()
             return
     if "absent" in flags:

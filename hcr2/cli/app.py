@@ -6,6 +6,7 @@ import typer
 from modules.common import is_help_request, print_command_help, print_unknown_entity
 
 from hcr2.cli.registry import ENTITY_REGISTRY, ENTITY_SPECS, EntitySpec, root_commands
+from hcr2.output import status
 
 
 TYPER_ROOT_OPTIONS = {"--install-completion", "--show-completion"}
@@ -104,8 +105,27 @@ class CliApp:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run one command and exit non-zero if it reported an error.
+
+    See hcr2/output/status.py for why the exit code is derived from the output.
+    """
     argv = sys.argv[1:] if argv is None else argv
 
+    writer = status.ErrorSniffingWriter(sys.stdout)
+    original_stdout = sys.stdout
+    status.reset()
+    sys.stdout = writer
+    try:
+        _dispatch(argv)
+    finally:
+        writer.finish()
+        sys.stdout = original_stdout
+
+    if writer.saw_error or status.failure_marked():
+        sys.exit(status.EXIT_FAILURE)
+
+
+def _dispatch(argv: list[str]) -> None:
     if _should_use_legacy_dispatch(argv):
         CliApp().dispatch(argv)
         return

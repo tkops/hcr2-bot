@@ -8,7 +8,7 @@ def format_k(value):
     try:
         val = float(value)
         return f"{val/1000:.1f}K"
-    except Exception:
+    except (TypeError, ValueError):
         return str(value)
 
 

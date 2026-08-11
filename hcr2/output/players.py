@@ -4,6 +4,7 @@ import textwrap
 from datetime import datetime
 
 from hcr2.models.player import PlayerAbsentRow, PlayerDetail, PlayerLeaderRow, PlayerListRow, PlayerSearchRow
+from hcr2.timestamps import to_local
 from hcr2.services.players import (
     AddPlayerResult,
     AwayClearResult,
@@ -42,7 +43,7 @@ def print_player_list(result: PlayerListResult, *, active_only: bool = False, te
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for row in rows:
         abs_mark = "x" if row.away_until and row.away_until > now else ""
-        created = (row.created_at or "-")[:19]
+        created = to_local(row.created_at)
         print(
             f"{row.id:<4} "
             f"{(row.name or '-'):<20} "
@@ -70,9 +71,10 @@ def print_player_detail(player: PlayerDetail) -> None:
     print(f"{'Birthday':<15}: {format_birthday(player.birthday)}")
     print(f"{'Team':<15}: {player.team or '-'}")
     print(f"{'Discord':<15}: {player.discord_name or '-'}")
-    print(f"{'Created':<15}: {player.created_at}")
-    print(f"{'Last modified':<15}: {player.last_modified or '-'}")
-    print(f"{'Active modified':<15}: {player.active_modified or '-'}")
+    # These three are UTC in the DB; away_* are already local. See hcr2/timestamps.py.
+    print(f"{'Created':<15}: {to_local(player.created_at)}")
+    print(f"{'Last modified':<15}: {to_local(player.last_modified)}")
+    print(f"{'Active modified':<15}: {to_local(player.active_modified)}")
     print(f"{'Away from':<15}: {player.away_from or '-'}")
     print(f"{'Away until':<15}: {player.away_until or '-'}")
     print(f"{'First Match':<15}: {player.first_match or '-'}")
