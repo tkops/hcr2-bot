@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import re
 import sqlite3
@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 from hcr2.integrations.nextcloud import NEXTCLOUD_BASE, delete_file, download_file, upload_file
 from hcr2.repositories import matches as match_repo
+from hcr2.repositories import players as player_repo
 from hcr2.services import matchscores as matchscore_service
 from hcr2.services import players as player_service
 
@@ -33,12 +34,15 @@ class MatchSheetApplyResult:
     changed: int
     score_updated: bool
     errors: int = 0
+    renamed: list[tuple[int, str, str]] = field(default_factory=list)
+    rename_errors: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class MatchSheetValidationResult:
     entries: list[dict[str, int]]
     errors: list[str]
+    name_updates: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,8 @@ AbsentChecker = Callable[..., bool]
 PLAYERS_XLSX_NAME = "Ladys.xlsx"
 PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
 PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
+
+MAX_PLAYER_NAME_LEN = 64
 
 DONATIONS_XLSX_NAME = "Donations.xlsx"
 DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
@@ -355,6 +361,7 @@ def import_match_sheet(
         entries=validation.entries,
         score_ladys=ladyscore if ladyscore is not None else 0,
         score_opponent=oppscore if oppscore is not None else 0,
+        name_updates=validation.name_updates,
     )
 
     delete_local_file(downloaded)
@@ -584,6 +591,7 @@ def validate_match_sheet_rows(
 ) -> MatchSheetValidationResult:
     errors: list[str] = []
     entries: list[dict[str, int]] = []
+    name_updates: list[dict[str, Any]] = []
 
     if lady_score is None or opponent_score is None:
         errors.append("Row 2: please fill team scores in C2 (Power Ladies) and D2 (Opponent).")
@@ -610,6 +618,14 @@ def validate_match_sheet_rows(
             player_id = int(new_id)
         else:
             player_id = int(pid_or_msg)
+            name_update = _match_sheet_name_update(
+                player_id=player_id,
+                name_cell=player_name_cell,
+                row_idx=row_idx,
+                errors=errors,
+            )
+            if name_update is not None:
+                name_updates.append(name_update)
 
         score_cell = row[3] if len(row) >= 4 else None
         points_cell = row[4] if len(row) >= 5 else None
@@ -640,7 +656,7 @@ def validate_match_sheet_rows(
     if lady_score is not None and sum_points != lady_score:
         errors.append(f"Team points mismatch: sum(points)={sum_points} != C2={lady_score}")
 
-    return MatchSheetValidationResult(entries=entries, errors=errors)
+    return MatchSheetValidationResult(entries=entries, errors=errors, name_updates=name_updates)
 
 
 def apply_match_sheet_entries(
@@ -649,7 +665,10 @@ def apply_match_sheet_entries(
     entries: list[dict[str, int]],
     score_ladys: int,
     score_opponent: int,
+    name_updates: list[dict[str, Any]] | tuple = (),
 ) -> MatchSheetApplyResult:
+    renamed, rename_errors = _apply_player_renames(name_updates)
+
     imported = 0
     changed = 0
     errors = 0
@@ -680,7 +699,57 @@ def apply_match_sheet_entries(
         changed=changed,
         score_updated=score_updated,
         errors=errors,
+        renamed=renamed,
+        rename_errors=rename_errors,
     )
+
+
+def _match_sheet_name_update(
+    *,
+    player_id: int,
+    name_cell,
+    row_idx: int,
+    errors: list[str],
+) -> dict[str, Any] | None:
+    """Column C is a rename candidate; an empty cell never clears the stored name."""
+    name = ("" if name_cell is None else str(name_cell)).strip()
+    if not name:
+        return None
+    if len(name) > MAX_PLAYER_NAME_LEN:
+        errors.append(
+            f"Row {row_idx}: Player name too long (max {MAX_PLAYER_NAME_LEN} characters): '{name}'"
+        )
+        return None
+    return {"row": row_idx, "pid": player_id, "name": name}
+
+
+def _apply_player_renames(
+    name_updates: list[dict[str, Any]] | tuple,
+) -> tuple[list[tuple[int, str, str]], list[str]]:
+    renamed: list[tuple[int, str, str]] = []
+    errors: list[str] = []
+
+    for update in name_updates:
+        player_id = int(update["pid"])
+        new_name = str(update["name"]).strip()
+        current = player_repo.get_player_brief(player_id)
+        if current is None:
+            # Unknown ID; add_score reports it while importing the score itself.
+            continue
+        if not new_name or new_name == (current.name or "").strip():
+            continue
+
+        result = player_service.edit_player(player_id, name=new_name)
+        if result.status == "UPDATED":
+            renamed.append((player_id, current.name, new_name))
+        else:
+            # Wording avoids "invalid"/"not found" — bot.py would colour the whole import as an error.
+            errors.append(
+                f"Row {update.get('row', '?')}: kept stored name for player {player_id} "
+                f"(rename rejected: {result.status})"
+            )
+
+    return renamed, errors
 
 
 def parse_player_id_marker(pid_cell):

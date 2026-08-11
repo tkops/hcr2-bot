@@ -99,9 +99,9 @@ dev and prod live on the same host as different users, with **separate databases
 | bot | `hcr2-bot-dev.service` → `bot.py dev` | `hcr2-bot-prod.service` → `bot.py prod` |
 
 Both bots run as **enabled systemd units** (`/etc/systemd/system/hcr2-bot-{dev,prod}.service`,
-`Restart=on-failure`), not as hand-started processes. The dev unit runs from this working directory,
-so edits here do not take effect until it is restarted — and a long-running instance is serving
-Discord the whole time:
+`Restart=on-failure`), not as hand-started processes. Because the bot shells out per command, edits
+under `hcr2/` and `modules/` take effect on the next Discord command without a restart; only changes
+to `bot.py` itself need one — and a long-running instance is serving Discord the whole time:
 
 ```bash
 sudo systemctl restart hcr2-bot-dev     # ask the owner; sudo is not available to Claude here
@@ -136,6 +136,20 @@ playbook locally.
 Collabora by users), then re-import and diff it back into the DB. Flow control lives in
 `hcr2/services/sheets.py`, workbook I/O in `hcr2/exporters/excel.py`, remote paths and WebDAV in
 `hcr2/integrations/nextcloud.py`, status output in `hcr2/output/sheets.py`.
+
+**dev and prod share one Nextcloud target** (same `NEXTCLOUD_BASE`, same credentials), while their
+databases are separate. So a `sheet` command run from dev acts on the files the prod team is actually
+working in. `sheet player import` and `sheet donations import` call `cleanup_imported_workbook`,
+which **deletes the remote workbook** after importing — running either from dev imports the team's
+entries into the *dev* DB and removes their file. Match-sheet import (`sheet import <match_id>`)
+deletes only the local temp copy. Never run `sheet` commands to try something out; the tests cover
+these paths network-free by injecting a `workbook_reader` and patching the up/download helpers.
+
+Match-sheet column C (`Player`) is a rename channel: on import, a changed non-empty name is written
+to `players.name` via `player_service.edit_player` (alias untouched), reported per player in the
+import output, and rejected renames keep the stored name. An empty cell never clears a name, and
+names longer than `MAX_PLAYER_NAME_LEN` abort the import as a validation error. Rows using `a` in
+column B create a player from column C as before.
 
 ### Secrets
 

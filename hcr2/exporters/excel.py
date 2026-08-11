@@ -128,7 +128,8 @@ def build_match_sheet_workbook(
         "H4: If a player left the team but is still listed, delete the row.\n"
         "H5: If a player is missing, add them with the correct ID.\n"
         "H6: If a missing player has not been created yet, enter 'a' for add in column B instead of the ID. The player is created during import.\n"
-        "H7: Enter the match results in cell C2 (Ladies) and D2 (opponent)."
+        "H7: Enter the match results in cell C2 (Ladies) and D2 (opponent).\n"
+        "H8: Column C (Player) may be corrected when someone changed their name; the new name is stored during import. Leave it as it is otherwise, and never use it for notes — use column H."
     )
     ws["H3"].alignment = Alignment(wrap_text=True, vertical="top")
 

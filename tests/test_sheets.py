@@ -316,6 +316,86 @@ class SheetTests(TemporaryDatabaseTestCase):
                 {"row": 5, "pid": 3, "score": 42000, "points": 120, "absent": 1, "checkin": 0},
             ],
         )
+        # Only the existing-ID row is a rename candidate; the 'a' row already created the player.
+        self.assertEqual(result.name_updates, [{"row": 4, "pid": 1, "name": "Alice"}])
+
+    def test_sheet_service_collects_name_updates_and_rejects_overlong_names(self) -> None:
+        rows = [
+            (4, (1, 1, "  Alice Cooper  ", 51000, 210, "false", "false")),
+            (5, (1, 2, None, 42000, 120, "false", "false")),
+            (6, (1, 3, "x" * (sheet_service.MAX_PLAYER_NAME_LEN + 1), 41000, 100, "false", "false")),
+        ]
+
+        result = sheet_service.validate_match_sheet_rows(
+            lady_score=430,
+            opponent_score=220,
+            rows=rows,
+            player_creator=lambda _name: None,
+        )
+
+        self.assertEqual(result.name_updates, [{"row": 4, "pid": 1, "name": "Alice Cooper"}])
+        self.assertTrue(any("Player name too long" in error for error in result.errors))
+
+    def test_sheet_service_applies_player_renames_from_match_sheet(self) -> None:
+        result = sheet_service.apply_match_sheet_entries(
+            match_id=1,
+            entries=[{"pid": 1, "score": 51000, "points": 210, "absent": 0, "checkin": 1}],
+            score_ladys=210,
+            score_opponent=200,
+            name_updates=[
+                {"row": 4, "pid": 1, "name": "Alice Cooper"},
+                {"row": 5, "pid": 2, "name": "Betty"},
+                {"row": 6, "pid": 999, "name": "Ghost"},
+            ],
+        )
+
+        self.assertEqual(result.renamed, [(1, "Alice", "Alice Cooper")])
+        self.assertEqual(result.rename_errors, [])
+        with sqlite3.connect(self.db_path) as conn:
+            names = conn.execute("SELECT id, name FROM players ORDER BY id").fetchall()
+        # 2 keeps its name (unchanged in the sheet), 999 does not exist and is ignored.
+        self.assertEqual(names, [(1, "Alice Cooper"), (2, "Betty")])
+
+    def test_sheet_service_keeps_name_when_rename_is_rejected(self) -> None:
+        with mock.patch.object(
+            sheet_service.player_service,
+            "edit_player",
+            return_value=mock.Mock(status="ALIAS_CONFLICT"),
+        ):
+            renamed, errors = sheet_service._apply_player_renames(
+                [{"row": 7, "pid": 1, "name": "Renamed"}]
+            )
+
+        self.assertEqual(renamed, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("kept stored name for player 1", errors[0])
+        # bot.py flags the whole output as an error when it contains these substrings.
+        self.assertNotIn("invalid", errors[0].lower())
+        self.assertNotIn("not found", errors[0].lower())
+
+    def test_sheet_service_imports_match_sheet_workflow_with_rename(self) -> None:
+        workbook = excel_exporter.Workbook()
+        ws = workbook.active
+        ws["C2"] = 330
+        ws["D2"] = 220
+        ws.append(["MatchID", "PlayerID", "Player", "Score", "Points", "Absent", "Checkin"])
+        ws.append([1, 1, "Alice Cooper", 51000, 210, "false", "true"])
+        ws.append([1, 2, "Betty", 42000, 120, "true", "false"])
+        local_path = Path(self.tempdir.name) / "1_Teamcup_Rivals.xlsx"
+        workbook.save(local_path)
+
+        with mock.patch.object(sheet_service, "download_match_sheet", return_value=local_path):
+            outcome = sheet_service.import_match_sheet(
+                self.db_path,
+                1,
+                workbook_reader=excel_exporter.read_match_sheet_workbook,
+            )
+
+        self.assertEqual(outcome.status, "IMPORTED")
+        self.assertEqual(outcome.result.renamed, [(1, "Alice", "Alice Cooper")])
+        with sqlite3.connect(self.db_path) as conn:
+            name = conn.execute("SELECT name FROM players WHERE id = 1").fetchone()[0]
+        self.assertEqual(name, "Alice Cooper")
 
     def test_sheet_service_reports_match_sheet_validation_errors(self) -> None:
         rows = [
