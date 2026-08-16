@@ -74,6 +74,7 @@ tests/test_stats.py          stats repository, service and CLI smoke behavior
 tests/test_output.py         formatting and workbook output helpers
 tests/test_migrations.py     migration runner behavior
 tests/test_nextcloud.py      Nextcloud path helpers
+tests/test_videos.py         match video lookup, frames and result import
 ```
 
 ## Project Layout
@@ -113,6 +114,20 @@ The migrated domains include `vehicle`, `season`, `teamevent`, `match`,
 Legacy modules under `modules/` remain as compatibility CLI adapters; SQL
 access, business logic and output formatting live under `hcr2/repositories/`,
 `hcr2/services/` and `hcr2/output/`.
+
+The `video` entity reads a final standings recording that was dropped into the
+same Nextcloud folder as the match sheets and writes the readings straight to
+`matchscore`, without the workbook detour: `video pull` downloads it,
+`video frames` cuts it with ffmpeg, `video roster` lists the players to map the
+names against, and `video apply` validates a `results.json` and imports it. The
+import refuses to write unless the points sum equals the team total read from the
+video header and the opponent name read from the header matches the match, compared
+after normalising case, spaces, accents and emoji away. Beyond that it reports what does not
+fit without blocking: names the video spells differently (with the `player edit` that would
+fix them), roster players who did not drive, and scores that deviate from a player's own
+average further than the team as a whole did. `video frames` needs an ffmpeg binary; it is looked up in `$HCR2_FFMPEG`, on `PATH`
+and finally through the optional `imageio-ffmpeg` package
+(`pip3 install --user imageio-ffmpeg`, no root required).
 
 Sheet workflows are split across `hcr2/services/sheets.py`,
 `hcr2/exporters/excel.py`, `hcr2/output/sheets.py` and

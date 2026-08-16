@@ -3,3 +3,4 @@ __pycache__
 secrets_config.py
 tmp/
 .codex
+.claude/settings.local.json

@@ -45,8 +45,8 @@ Three consumers sit on top of one SQLite database:
 ### CLI dispatch
 
 `hcr2/cli/registry.py` holds `ENTITY_SPECS` — the single list of top-level entities
-(`vehicle`, `player`, `teamevent`, `season`, `match`, `matchscore`, `stats`, `sheet`, `donations`,
-`version`), each mapping to a legacy `modules/<entity>.py` that exposes `handle_command(cmd, args)`
+(`vehicle`, `player`, `teamevent`, `season`, `match`, `matchscore`, `stats`, `sheet`, `video`,
+`donations`, `version`), each mapping to a `modules/<entity>.py` that exposes `handle_command(cmd, args)`
 and `print_help()`. `hcr2/cli/app.py` registers each spec both as a Typer command and in a hand-rolled
 `CliApp.dispatch`; `_should_use_legacy_dispatch` routes bare/`help`/unknown argv to the hand-rolled
 path and everything else through Typer with `allow_extra_args`/`ignore_unknown_options` — so Typer
@@ -185,6 +185,51 @@ to `players.name` via `player_service.edit_player` (alias untouched), reported p
 import output, and rejected renames keep the stored name. An empty cell never clears a name, and
 names longer than `MAX_PLAYER_NAME_LEN` abort the import as a validation error. Rows using `a` in
 column B create a player from column C as before.
+
+### Match videos
+
+`video` reads the final standings recording instead of a workbook. The video is dropped into the
+**same Nextcloud folder as the match sheets** (`Power-Ladys-Scores/S<season>/`), found via
+`nextcloud.list_directory` (PROPFIND, Depth 1), cached under `tmp/video/<match_id>/` and cut into
+frames by ffmpeg. `hcr2/services/videos.py` holds the flow,
+`hcr2/output/videos.py` the prints, `.claude/skills/match-video/SKILL.md` the reading instructions
+(row layout, colour rule, transliteration, the known renamer at player id 50).
+
+Two things are deliberate:
+
+- **Two cross-checks are code, not prompt discipline.** `video apply` refuses to write unless the
+  sum of the points column equals `score_ladys` from the video header (is the reading complete?)
+  *and* the `opponent` read from the header matches `match.opponent` (is this the right recording?).
+  `compare_opponent` normalises away case, spaces, accents, emoji and symbols and tolerates a name
+  the video truncated, so only a genuinely different team trips it. `--force` downgrades both to
+  warnings.
+- **A video whose name does not carry the match id is flagged**, even when it is the only file in
+  the folder — the wrong recording produces plausible but wrong scores.
+- **Two structural checks catch a misread digit** where the sum cannot: the standings are ordered
+  by score and points follow the rank, so a higher score with fewer points is impossible
+  (`_check_monotonicity`); and the real ceiling is the event's `tracks × max_score_per_track`
+  (60000 for a 4-track Nitro), not the flat 75000 the matchscore service allows.
+
+Everything else is a **`ReviewNote`** — `build_notes` compares the reading against the database and
+reports what does not fit *without* blocking: a video name that differs from the stored one (with a
+ready-made `player edit`, but only when the video name is ASCII — otherwise it has to be
+transliterated by hand first), a roster player who did not drive split by whether they are marked
+away, and score outliers. Outliers are measured against the **median shift of the whole team**, not
+against the player's own average alone: a hard track set drags everyone down and would otherwise
+flag the entire roster. This is why `VideoEntry.name` carries what the *video* showed rather than
+what the database holds — the model records, the code compares.
+
+`apply_results` does not reuse `sheets.apply_match_sheet_entries` because `absent` may be omitted
+in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
+`sheet player import`, nothing on Nextcloud is deleted.
+
+**ffmpeg is a runtime dependency of `video frames` only**, and it is not packaged as `ffmpeg` here:
+CentOS Stream 9 has no such package, EPEL ships `ffmpeg-free`, and the recordings are **HEVC**
+(`hvc1` + AAC) — the codec that build may drop. So `resolve_ffmpeg()` tries `$HCR2_FFMPEG`, then
+`PATH`, then `imageio_ffmpeg.get_ffmpeg_exe()`; `pip3 install --user imageio-ffmpeg` bundles a
+static full build (verified to decode HEVC) and needs no root. It is deliberately **not** in
+`requirements.txt`: prod only runs the bot, which has no video command. `video frames` reports a
+missing binary with that hint rather than failing obscurely.
 
 ### Secrets
 

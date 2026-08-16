@@ -114,6 +114,42 @@ def get_match_result(match_id: int) -> tuple[int, int]:
         return cur.fetchone() or (0, 0)
 
 
+def get_match_score_ceiling(match_id: int) -> int | None:
+    """tracks x max_score_per_track of the match's team event - the real upper bound."""
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT e.tracks, e.max_score_per_track
+            FROM match m
+            JOIN teamevent e ON m.teamevent_id = e.id
+            WHERE m.id = ?
+            """,
+            (match_id,),
+        )
+        row = cur.fetchone()
+    if not row or not row[0] or not row[1]:
+        return None
+    return int(row[0]) * int(row[1])
+
+
+def recent_scores(player_id: int, *, exclude_match_id: int, limit: int = 5) -> list[int]:
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT s.score
+            FROM matchscore s
+            JOIN match m ON s.match_id = m.id
+            WHERE s.player_id = ? AND s.match_id <> ? AND s.score > 0
+            ORDER BY m.start DESC
+            LIMIT ?
+            """,
+            (player_id, exclude_match_id, limit),
+        )
+        return [int(row[0]) for row in cur.fetchall()]
+
+
 def insert_score(
     *,
     match_id: int,

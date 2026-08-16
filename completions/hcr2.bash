@@ -31,6 +31,7 @@ _hcr2_entity_commands()
         matchscore) echo "add list list-short delete edit" ;;
         stats) echo "perf avg alias rank te te-user scatter bdayplot battle absent player score points" ;;
         sheet) echo "create import player donations" ;;
+        video) echo "list pull frames roster apply" ;;
         donations) echo "add delete edit show stats under list" ;;
     esac
 }
@@ -74,6 +75,11 @@ _hcr2_flags()
         stats:perf) echo "--active" ;;
         stats:score|stats:points) echo "--skip --no-skip" ;;
 
+        video:list|video:roster) echo "--match" ;;
+        video:pull) echo "--match --file" ;;
+        video:frames) echo "--match --file --fps --width --crop --start --duration" ;;
+        video:apply) echo "--match --file --dry-run --force" ;;
+
         donations:add) echo "--player --date --total" ;;
         donations:delete) echo "--id" ;;
         donations:edit) echo "--id" ;;
@@ -110,13 +116,13 @@ _hcr2()
     fi
 
     if (( COMP_CWORD == 1 )); then
-        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet donations version help -h --help" "$cur"
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video donations version help -h --help" "$cur"
         return
     fi
 
     entity="${COMP_WORDS[1]}"
     if [[ "$entity" == "help" ]]; then
-        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet donations version -h --help" "$cur"
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video donations version -h --help" "$cur"
         return
     fi
 
