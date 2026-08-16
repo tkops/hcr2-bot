@@ -1,6 +1,10 @@
-VERSION = "1.3.0"
+VERSION = "1.5.0"
 
 HISTORY = [
+    ("1.5.0", "2026-08-16", "video apply meldet zusaetzlich Auffaelligkeiten: abweichende Namen, nicht gefahrene Spielerinnen und Score-Ausreisser"),
+    ("1.4.2", "2026-08-16", "video apply pr\u00fcft zus\u00e4tzlich den Gegnernamen aus dem Videokopf gegen das Match"),
+    ("1.4.1", "2026-08-16", "ffmpeg wird \u00fcber HCR2_FFMPEG, PATH und imageio-ffmpeg gesucht (HEVC-f\u00e4hig, ohne root)"),
+    ("1.4.0", "2026-08-16", "Match-Video: Ergebnisse aus dem Endstand-Video auslesen und per 'video apply' in die DB schreiben"),
     ("1.3.0", "2026-08-11", "CLI exit codes, bot contract tests, UTC timestamps, error causes"),
     ("1.2.0", "2026-08-11", "Block deletes that would orphan result data"),
     ("1.1.0", "2026-08-11", "Apply player name changes from match sheet import"),

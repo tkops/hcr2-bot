@@ -56,6 +56,7 @@ class CliHelpSmokeTests(unittest.TestCase):
             "matchscore",
             "stats",
             "sheet",
+            "video",
             "donations",
             "version",
         ):
@@ -94,6 +95,7 @@ class CliHelpSmokeTests(unittest.TestCase):
             "matchscore": "list-short",
             "stats": "perf",
             "sheet": "player export",
+            "video": "roster --match <match_id>",
             "donations": "under",
         }
         for entity, expected_command in entities.items():
@@ -112,6 +114,7 @@ class CliHelpSmokeTests(unittest.TestCase):
             ("matchscore", "list"),
             ("stats", "perf"),
             ("sheet", "player"),
+            ("video", "roster"),
             ("donations", "list"),
         )
         for entity, command in commands:

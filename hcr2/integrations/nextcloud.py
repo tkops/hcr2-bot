@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote
+from xml.etree import ElementTree
 
 import requests
 
@@ -11,6 +16,26 @@ from secrets_config import NEXTCLOUD_AUTH
 
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
+
+DAV_NS = "{DAV:}"
+
+PROPFIND_BODY = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<d:propfind xmlns:d="DAV:"><d:prop>'
+    "<d:getlastmodified/><d:getcontentlength/><d:resourcetype/>"
+    "</d:prop></d:propfind>"
+)
+
+
+@dataclass(frozen=True)
+class RemoteEntry:
+    """One entry of a WebDAV collection, path relative to the DAV files root."""
+
+    name: str
+    path: str
+    size: int
+    last_modified: Optional[datetime]
+    is_dir: bool
 
 
 def _report(what: str, error: Exception | None) -> None:
@@ -89,6 +114,95 @@ def download_file(remote_path, local_path: Path) -> Optional[Path]:
 
     local_path.write_bytes(response.content)
     return local_path if local_path.exists() and local_path.stat().st_size > 0 else None
+
+
+def list_directory(remote_path) -> list[RemoteEntry]:
+    """List one remote collection (Depth 1). The collection itself is not returned."""
+    user, password = NEXTCLOUD_AUTH
+    remote_path = str(remote_path).strip("/")
+    try:
+        response = requests.request(
+            "PROPFIND",
+            remote_url(remote_path),
+            auth=(user, password),
+            headers={"Depth": "1", "Content-Type": "application/xml"},
+            data=PROPFIND_BODY.encode("utf-8"),
+        )
+    except requests.RequestException as e:
+        _report(f"PROPFIND failed for {remote_path}", e)
+        return []
+
+    if response.status_code != 207:
+        _report(f"PROPFIND returned HTTP {response.status_code} for {remote_path}", None)
+        return []
+
+    try:
+        return _parse_propfind(response.content, base=remote_path)
+    except ElementTree.ParseError as e:
+        _report(f"PROPFIND returned unparsable XML for {remote_path}", e)
+        return []
+
+
+def _dav_root_prefix() -> str:
+    user, _ = NEXTCLOUD_AUTH
+    url = NEXTCLOUD_URL.format(user=user, path="")
+    return url.split("://", 1)[-1].split("/", 1)[-1]
+
+
+def _parse_propfind(payload: bytes, *, base: str) -> list[RemoteEntry]:
+    root = ElementTree.fromstring(payload)
+    prefix = _dav_root_prefix().strip("/")
+    entries: list[RemoteEntry] = []
+
+    for response in root.findall(f"{DAV_NS}response"):
+        path = _href_to_path(response.findtext(f"{DAV_NS}href") or "")
+        if prefix and path.startswith(prefix):
+            path = path[len(prefix):].strip("/")
+        if not path or path == base:
+            continue
+
+        propstat = response.find(f"{DAV_NS}propstat")
+        prop = propstat.find(f"{DAV_NS}prop") if propstat is not None else None
+        is_dir = prop is not None and prop.find(f"{DAV_NS}resourcetype/{DAV_NS}collection") is not None
+
+        entries.append(
+            RemoteEntry(
+                name=path.rsplit("/", 1)[-1],
+                path=path,
+                size=_read_size(prop),
+                last_modified=_read_last_modified(prop),
+                is_dir=is_dir,
+            )
+        )
+
+    return entries
+
+
+def _href_to_path(href: str) -> str:
+    """href may be a bare path or an absolute URL - both reduce to the DAV path."""
+    raw = unquote(href)
+    if "://" in raw:
+        rest = raw.split("://", 1)[1]
+        raw = rest.split("/", 1)[1] if "/" in rest else ""
+    return raw.strip("/")
+
+
+def _read_size(prop) -> int:
+    raw = prop.findtext(f"{DAV_NS}getcontentlength") if prop is not None else None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _read_last_modified(prop) -> Optional[datetime]:
+    raw = prop.findtext(f"{DAV_NS}getlastmodified") if prop is not None else None
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def match_sheet_remote_path(season: int, filename: str) -> Path:
