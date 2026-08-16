@@ -117,7 +117,7 @@ access, business logic and output formatting live under `hcr2/repositories/`,
 `hcr2/services/` and `hcr2/output/`.
 
 The `video` entity reads a final standings recording that was dropped into the
-same Nextcloud folder as the match sheets and writes the readings straight to
+same Nextcloud folder as the match sheets (`Power-Ladys-Scores/Team-Event/S<season>/`) and writes the readings straight to
 `matchscore`, without the workbook detour: `video pull` downloads it,
 `video frames` cuts it with ffmpeg, `video roster` lists the players to map the
 names against, and `video apply` validates a `results.json` and imports it. The
@@ -131,7 +131,7 @@ and finally through the optional `imageio-ffmpeg` package
 (`pip3 install --user imageio-ffmpeg`, no root required).
 
 `video player frames` / `video player apply` do the same for the team screen recording
-(`Ladys.mp4`, next to `Ladys.xlsx` in the base folder): they update garage power, names,
+(`Ladys.mp4`, next to `Ladys.xlsx` in `Power-Ladys-Scores/Ladys/`): they update garage power, names,
 joiners and leavers of the active PLTE list. An unknown name is never resolved silently -
 the plan stops and offers candidates, the players missing from the video first, until the
 row carries an explicit `new` or `reactivate` decision.

@@ -4,3 +4,5 @@ secrets_config.py
 tmp/
 .codex
 .claude/settings.local.json
+# Local mirror of the Nextcloud share - sheet create writes real member data here.
+Power-Ladys-Scores/

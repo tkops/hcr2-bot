@@ -78,7 +78,11 @@ def results_path(match_id: int) -> Path:
 
 
 def season_folder(season: int) -> str:
-    return (nextcloud.NEXTCLOUD_BASE / f"S{season}").as_posix()
+    return nextcloud.remote_path(nextcloud.season_subpath(season))
+
+
+def team_folder() -> str:
+    return nextcloud.remote_path(nextcloud.LADYS_DIR)
 
 
 # -------------------- Nextcloud lookup --------------------
@@ -301,7 +305,7 @@ def pull_team_video(
     downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
 ) -> PullOutcome:
     """The team screen is not tied to a season, so it lives next to Ladys.xlsx in the base folder."""
-    candidates = list_candidates_in(nextcloud.NEXTCLOUD_BASE.as_posix(), lister=lister)
+    candidates = list_candidates_in(team_folder(), lister=lister)
     if not candidates:
         return PullOutcome(status="NO_VIDEO")
 

@@ -242,7 +242,7 @@ def _handle_player_frames(args):
     )
     filename = get_arg_value(args, "file") or video_service.TEAM_VIDEO_NAME
     if outcome.pull is not None and outcome.pull.status in ("NO_VIDEO", "NOT_FOUND", "DOWNLOAD_FAILED"):
-        video_output.print_team_video_missing(video_service.nextcloud.NEXTCLOUD_BASE.as_posix(), filename)
+        video_output.print_team_video_missing(video_service.team_folder(), filename)
         return
     if outcome.pull is not None and outcome.pull.candidate is not None and outcome.pull.local_path is not None:
         state = "Cached" if outcome.pull.status == "CACHED" else "Downloaded"

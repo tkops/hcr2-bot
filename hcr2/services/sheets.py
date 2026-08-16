@@ -8,7 +8,16 @@ from typing import Any, Callable, Optional
 
 from hcr2 import timestamps
 from hcr2.db import connection as db_connection
-from hcr2.integrations.nextcloud import NEXTCLOUD_BASE, delete_file, download_file, upload_file
+from hcr2.integrations import nextcloud
+from hcr2.integrations.nextcloud import (
+    DONATIONS_DIR,
+    LADYS_DIR,
+    NEXTCLOUD_BASE,
+    delete_file,
+    download_file,
+    season_subpath,
+    upload_file,
+)
 from hcr2.repositories import matches as match_repo
 from hcr2.repositories import players as player_repo
 from hcr2.services import matchscores as matchscore_service
@@ -101,13 +110,13 @@ AbsentChecker = Callable[..., bool]
 
 
 PLAYERS_XLSX_NAME = "Ladys.xlsx"
-PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / PLAYERS_XLSX_NAME
+PLAYERS_REMOTE_PATH = NEXTCLOUD_BASE / LADYS_DIR / PLAYERS_XLSX_NAME
 PLAYERS_LOCAL_TMP = Path("tmp") / PLAYERS_XLSX_NAME
 
 MAX_PLAYER_NAME_LEN = 64
 
 DONATIONS_XLSX_NAME = "Donations.xlsx"
-DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_XLSX_NAME
+DONATIONS_REMOTE_PATH = NEXTCLOUD_BASE / DONATIONS_DIR / DONATIONS_XLSX_NAME
 DONATIONS_LOCAL_TMP = Path("tmp") / DONATIONS_XLSX_NAME
 
 
@@ -120,20 +129,29 @@ def match_sheet_filename(match_id: int, event: str, opponent: str) -> str:
 
 
 def match_sheet_local_path(output_path: Path, season: int, filename: str) -> Path:
-    return output_path / f"S{season}" / filename
+    """The local mirror keeps the remote layout, so both can be compared by eye."""
+    return output_path / season_subpath(season) / filename
 
 
 def match_sheet_remote_path_for_filename(season: int, filename: str) -> Path:
-    return NEXTCLOUD_BASE / f"S{season}" / filename
+    return NEXTCLOUD_BASE / season_subpath(season) / filename
 
 
 def match_sheet_tmp_path(filename: str) -> Path:
     return Path("tmp") / filename
 
 
-def scores_web_url(season: int | None = None) -> str:
-    path = "/Scores" if season is None else f"/Scores/S{season}"
+SHARE_ROOT = "/Scores"
+
+
+def web_url(subpath: Path | str | None = None) -> str:
+    """The share exposes NEXTCLOUD_BASE as /Scores, so remote paths map one to one."""
+    path = SHARE_ROOT if subpath is None else f"{SHARE_ROOT}/{Path(subpath).as_posix()}"
     return f"https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path={path}"
+
+
+def scores_web_url(season: int | None = None) -> str:
+    return web_url(None if season is None else season_subpath(season))
 
 
 def upload_match_sheet(local_path: Path, season: int, filename: str) -> tuple[Optional[str], bool]:
@@ -199,8 +217,8 @@ def export_players_workbook(
 
     return WorkbookExportOutcome(
         status="EXPORTED",
-        label=f"{NEXTCLOUD_BASE}/{PLAYERS_XLSX_NAME}",
-        web_url=scores_web_url(),
+        label=PLAYERS_REMOTE_PATH.as_posix(),
+        web_url=web_url(LADYS_DIR),
         created=created,
     )
 
@@ -222,8 +240,8 @@ def export_donations_workbook(
 
     return WorkbookExportOutcome(
         status="EXPORTED",
-        label=f"{NEXTCLOUD_BASE}/{DONATIONS_XLSX_NAME}",
-        web_url=scores_web_url(),
+        label=DONATIONS_REMOTE_PATH.as_posix(),
+        web_url=web_url(DONATIONS_DIR),
         created=created,
     )
 

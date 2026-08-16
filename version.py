@@ -1,6 +1,7 @@
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 HISTORY = [
+    ("1.7.0", "2026-08-16", "Nextcloud in Unterordner gegliedert: Team-Event/S<nr>, Ladys, Donations, Wochen-Truhe; Skill team-video heisst jetzt player-video"),
     ("1.6.0", "2026-08-16", "Kader-Abgleich aus dem Team-Video: video player frames/apply aktualisiert GP, Namen, Zu- und Abgaenge"),
     ("1.5.0", "2026-08-16", "video apply meldet zusaetzlich Auffaelligkeiten: abweichende Namen, nicht gefahrene Spielerinnen und Score-Ausreisser"),
     ("1.4.2", "2026-08-16", "video apply pr\u00fcft zus\u00e4tzlich den Gegnernamen aus dem Videokopf gegen das Match"),

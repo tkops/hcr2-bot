@@ -1,6 +1,6 @@
 ---
-name: team-video
-description: Die PLTE-Spielerliste aus dem Team-Infos-Video (Ladys.mp4) aktualisieren - Garage Power, Namen, Zu- und Abgänge. Nutzen, wenn der Kader abgeglichen werden soll, egal wie formuliert ("/team-video", "Ladys.mp4 ist hochgeladen", "Kader aktualisieren", "neue Spielerliste", "Garage Power aktualisieren", "wer ist neu im Team"). Nicht verwechseln mit [[match-video]], das die Ergebnisse eines einzelnen Matches einträgt.
+name: player-video
+description: Die PLTE-Spielerliste aus dem Team-Infos-Video (Ladys.mp4) aktualisieren - Garage Power, Namen, Zu- und Abgänge. Nutzen, wenn der Kader abgeglichen werden soll, egal wie formuliert ("/player-video", "Ladys.mp4 ist hochgeladen", "Kader aktualisieren", "neue Spielerliste", "Garage Power aktualisieren", "wer ist neu im Team"). Nicht verwechseln mit [[match-video]] (Ergebnisse eines Matches) oder [[chest-video]] (Wochen-Truhe).
 ---
 
 # Kader aus dem Team-Video aktualisieren
@@ -20,7 +20,7 @@ Spielerinnen. Bei jedem Zugang fragst du nach — siehe Schritt 5.
 python3 hcr2.py video player frames
 ```
 
-Holt `Ladys.mp4` aus dem Nextcloud-Basisordner (dort, wo auch `Ladys.xlsx` liegt) nach
+Holt `Ladys.mp4` aus `Power-Ladys-Scores/Ladys/` (dort liegt auch `Ladys.xlsx`) nach
 `tmp/video/team/` und schneidet mit 1 fps. Bei `❌ ffmpeg not found` gilt derselbe
 Hinweis wie bei [[match-video]]: `pip3 install --user imageio-ffmpeg`.
 

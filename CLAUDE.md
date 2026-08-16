@@ -167,6 +167,24 @@ playbook locally.
 
 ### Sheets / Nextcloud
 
+**The remote layout is one subfolder per source of truth**, and every remote path in the
+codebase derives from the constants in `hcr2/integrations/nextcloud.py` — a hardcoded second
+copy is how the two drift apart:
+
+```
+Power-Ladys-Scores/            share root, exposed to the team as /Scores
+  Team-Event/S<season>/        match videos + match sheets (both, same folder)
+  Ladys/                       Ladys.mp4 (team screen) + Ladys.xlsx
+  Donations/                   Donations.xlsx
+  Wochen-Truhe/                weekly chest, feature still to come
+```
+
+`season_subpath()` and `remote_path()` build the paths; `sheets.web_url()` maps a remote
+subpath to the share link the bot posts, so `/Scores` mirrors `Power-Ladys-Scores` one to one.
+`match_sheet_local_path` keeps the same shape locally, so the mirror in the repo root can be
+compared with the remote by eye. The Excel route is deliberately kept working as the
+Claude-free fallback for entering results by hand.
+
 `sheet` commands export a match/player/donations workbook, upload it to Nextcloud (edited in
 Collabora by users), then re-import and diff it back into the DB. Flow control lives in
 `hcr2/services/sheets.py`, workbook I/O in `hcr2/exporters/excel.py`, remote paths and WebDAV in
@@ -189,7 +207,7 @@ column B create a player from column C as before.
 ### Match videos
 
 `video` reads the final standings recording instead of a workbook. The video is dropped into the
-**same Nextcloud folder as the match sheets** (`Power-Ladys-Scores/S<season>/`), found via
+**same Nextcloud folder as the match sheets** (`Power-Ladys-Scores/Team-Event/S<season>/`), found via
 `nextcloud.list_directory` (PROPFIND, Depth 1), cached under `tmp/video/<match_id>/` and cut into
 frames by ffmpeg. `hcr2/services/videos.py` holds the flow,
 `hcr2/output/videos.py` the prints, `.claude/skills/match-video/SKILL.md` the reading instructions
@@ -223,12 +241,12 @@ what the database holds — the model records, the code compares.
 in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
 `sheet player import`, nothing on Nextcloud is deleted.
 
-### Team screen video
+### Team screen video (player-video)
 
-`video player frames` / `video player apply` read `Ladys.mp4` from the Nextcloud **base**
-folder (next to `Ladys.xlsx`, it is not season-bound) and reconcile the active PLTE list:
+`video player frames` / `video player apply` read `Ladys.mp4` from `Power-Ladys-Scores/Ladys/`
+(next to `Ladys.xlsx`, it is not season-bound) and reconcile the active PLTE list:
 garage power, names, joiners, leavers. `hcr2/services/rosters.py` holds the diff,
-`.claude/skills/team-video/SKILL.md` the reading instructions.
+`.claude/skills/player-video/SKILL.md` the reading instructions.
 
 The problem this flow exists to solve is not OCR, it is identity: an unknown name may be a
 new member or one of 600+ former players under a changed name. So `build_plan` never
