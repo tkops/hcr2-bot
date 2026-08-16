@@ -30,6 +30,11 @@ def print_no_video_found(folder: str, *, match_id: int) -> None:
     print(f"   Put the recording there, ideally named after the match (e.g. {match_id}.mp4).")
 
 
+def print_team_video_missing(folder: str, filename: str) -> None:
+    print(f"❌ '{filename}' not found in {folder}")
+    print("   Upload the team screen recording there, next to Ladys.xlsx.")
+
+
 def print_video_not_found(filename: str, candidates: Sequence[VideoCandidate]) -> None:
     print(f"❌ Video '{filename}' not found on Nextcloud")
     print_candidates(candidates)

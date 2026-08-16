@@ -40,6 +40,8 @@ from hcr2.services import matchscores as matchscore_service
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 
 LOCAL_VIDEO_ROOT = Path("tmp") / "video"
+TEAM_VIDEO_NAME = "Ladys.mp4"
+TEAM_LOCAL_DIR = LOCAL_VIDEO_ROOT / "team"
 FRAME_PATTERN = "frame_%04d.jpg"
 FRAME_GLOB = "frame_*.jpg"
 
@@ -86,7 +88,15 @@ def list_candidates(
     *,
     lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
 ) -> list[VideoCandidate]:
-    entries = lister(season_folder(season))
+    return list_candidates_in(season_folder(season), lister=lister)
+
+
+def list_candidates_in(
+    folder: str,
+    *,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+) -> list[VideoCandidate]:
+    entries = lister(folder)
     candidates = [
         VideoCandidate(
             name=entry.name,
@@ -228,10 +238,34 @@ def extract_frames(
         return FramesOutcome(status="FFMPEG_MISSING")
 
     pull = pull_video(match_id, filename=filename, lister=lister, downloader=downloader)
+    return _cut_frames(
+        pull,
+        frames_dir(match_id),
+        executable=executable,
+        fps=fps,
+        width=width,
+        crop=crop,
+        start=start,
+        duration=duration,
+        runner=runner,
+    )
+
+
+def _cut_frames(
+    pull: PullOutcome,
+    out_dir: Path,
+    *,
+    executable: str,
+    fps: float,
+    width: int,
+    crop: str | None,
+    start: str | None,
+    duration: str | None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess] | None,
+) -> FramesOutcome:
     if pull.status not in ("OK", "CACHED") or pull.local_path is None:
         return FramesOutcome(status="NO_VIDEO", pull=pull)
 
-    out_dir = frames_dir(match_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     for stale in out_dir.glob(FRAME_GLOB):
         stale.unlink()
@@ -256,6 +290,65 @@ def extract_frames(
         return FramesOutcome(status="NO_FRAMES", frame_dir=out_dir, pull=pull)
 
     return FramesOutcome(status="OK", frame_dir=out_dir, frame_count=len(frames), pull=pull)
+
+
+# -------------------- Team video (Ladys.mp4) --------------------
+
+def pull_team_video(
+    *,
+    filename: str = TEAM_VIDEO_NAME,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+    downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
+) -> PullOutcome:
+    """The team screen is not tied to a season, so it lives next to Ladys.xlsx in the base folder."""
+    candidates = list_candidates_in(nextcloud.NEXTCLOUD_BASE.as_posix(), lister=lister)
+    if not candidates:
+        return PullOutcome(status="NO_VIDEO")
+
+    wanted = filename.strip().lower()
+    candidate = next((c for c in candidates if c.name.lower() == wanted), None)
+    if candidate is None:
+        return PullOutcome(status="NOT_FOUND", candidates=candidates)
+
+    target = TEAM_LOCAL_DIR / candidate.name
+    if target.exists() and candidate.size and target.stat().st_size == candidate.size:
+        return PullOutcome(status="CACHED", local_path=target, candidate=candidate, candidates=candidates)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if downloader(candidate.remote_path, target) is None:
+        return PullOutcome(status="DOWNLOAD_FAILED", candidate=candidate, candidates=candidates)
+    return PullOutcome(status="OK", local_path=target, candidate=candidate, candidates=candidates)
+
+
+def extract_team_frames(
+    *,
+    fps: float = DEFAULT_FPS,
+    width: int = DEFAULT_WIDTH,
+    crop: str | None = None,
+    start: str | None = None,
+    duration: str | None = None,
+    filename: str = TEAM_VIDEO_NAME,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+    downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
+    runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
+    ffmpeg_resolver: Callable[[], str | None] = resolve_ffmpeg,
+) -> FramesOutcome:
+    executable = ffmpeg_resolver()
+    if executable is None:
+        return FramesOutcome(status="FFMPEG_MISSING")
+
+    pull = pull_team_video(filename=filename, lister=lister, downloader=downloader)
+    return _cut_frames(
+        pull,
+        TEAM_LOCAL_DIR / "frames",
+        executable=executable,
+        fps=fps,
+        width=width,
+        crop=crop,
+        start=start,
+        duration=duration,
+        runner=runner,
+    )
 
 
 # -------------------- Roster --------------------

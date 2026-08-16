@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from hcr2.output import rosters as roster_output
 from hcr2.output import videos as video_output
 from hcr2.repositories import matches as match_repo
+from hcr2.services import rosters as roster_service
 from hcr2.services import videos as video_service
 from modules.common import (
     get_arg_value,
@@ -25,6 +27,11 @@ USAGE_FRAMES = (
 )
 USAGE_ROSTER = "Usage: video roster --match <match_id>"
 USAGE_APPLY = "Usage: video apply --match <match_id> [--file <results.json>] [--dry-run] [--force]"
+USAGE_PLAYER = "Usage: video player <frames|apply>"
+USAGE_PLAYER_FRAMES = (
+    "Usage: video player frames [--file Ladys.mp4] [--fps <n>] [--width <px>] "
+    "[--crop <w:h:x:y>] [--start <hh:mm:ss>] [--duration <sec>]"
+)
 
 
 def print_help():
@@ -42,10 +49,17 @@ def print_help():
                 "apply --match <match_id> [--file <results.json>] [--dry-run] [--force]",
                 "Validate readings and write them to matchscore",
             ),
+            ("player frames [--file Ladys.mp4]", "Cut the team screen video into frames"),
+            (
+                "player apply [--file <roster.json>] [--dry-run] [--force]",
+                "Update the PLTE player list from the team screen",
+            ),
         ],
         notes=[
             "Videos live next to the match sheets: Power-Ladys-Scores/S<season>/.",
             "apply refuses to write unless the points sum equals score_ladys (--force overrides).",
+            "The team screen video (Ladys.mp4) sits in the base folder, next to Ladys.xlsx.",
+            "player apply refuses to write while an addition has no new/reactivate decision.",
         ],
     )
 
@@ -61,6 +75,7 @@ def handle_command(command, args):
         "frames": _handle_frames,
         "roster": _handle_roster,
         "apply": _handle_apply,
+        "player": _handle_player,
     }
     handler = handlers.get(command)
     if handler is None:
@@ -194,6 +209,76 @@ def _handle_apply(args):
         dry_run=get_arg_value(args, "dry-run") is not None,
     )
     video_output.print_apply_outcome(outcome, match_id=match_id)
+
+
+def _handle_player(args):
+    if not args or args[0].startswith("--"):
+        print(USAGE_PLAYER)
+        return
+
+    sub, rest = args[0], args[1:]
+    if sub == "frames":
+        _handle_player_frames(rest)
+        return
+    if sub == "apply":
+        _handle_player_apply(rest)
+        return
+    print(USAGE_PLAYER)
+
+
+def _handle_player_frames(args):
+    fps = _parse_fps(get_arg_value(args, "fps"))
+    if fps is None:
+        print(USAGE_PLAYER_FRAMES)
+        return
+
+    outcome = video_service.extract_team_frames(
+        fps=fps,
+        width=parse_int(get_arg_value(args, "width"), default=video_service.DEFAULT_WIDTH),
+        crop=get_arg_value(args, "crop"),
+        start=get_arg_value(args, "start"),
+        duration=get_arg_value(args, "duration"),
+        filename=get_arg_value(args, "file") or video_service.TEAM_VIDEO_NAME,
+    )
+    filename = get_arg_value(args, "file") or video_service.TEAM_VIDEO_NAME
+    if outcome.pull is not None and outcome.pull.status in ("NO_VIDEO", "NOT_FOUND", "DOWNLOAD_FAILED"):
+        video_output.print_team_video_missing(video_service.nextcloud.NEXTCLOUD_BASE.as_posix(), filename)
+        return
+    if outcome.pull is not None and outcome.pull.candidate is not None and outcome.pull.local_path is not None:
+        state = "Cached" if outcome.pull.status == "CACHED" else "Downloaded"
+        print(f"✅ {outcome.pull.candidate.name} → {outcome.pull.local_path} ({state})")
+    video_output.print_frames_outcome(outcome)
+
+
+def _handle_player_apply(args):
+    path = roster_service.roster_path(get_arg_value(args, "file"))
+    video, errors = roster_service.load_readings(path)
+    if video is None or errors:
+        roster_output.print_plan_errors(errors)
+        return
+
+    dry_run = get_arg_value(args, "dry-run") is not None
+    plan = roster_service.build_plan(video, force=get_arg_value(args, "force") is not None)
+
+    if plan.status == "ERRORS":
+        roster_output.print_plan(plan)
+        return
+
+    if plan.status == "PENDING":
+        roster_output.print_plan(plan)
+        roster_output.print_pending(plan.pending)
+        if not dry_run:
+            roster_output.print_needs_decision()
+        return
+
+    if dry_run:
+        roster_output.print_plan(plan)
+        roster_output.print_summary(plan, dry_run=True)
+        return
+
+    applied = roster_service.apply_plan(plan, video)
+    roster_output.print_plan(applied, applied=True)
+    roster_output.print_summary(applied, dry_run=False)
 
 
 if __name__ == "__main__":

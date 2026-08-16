@@ -31,7 +31,7 @@ _hcr2_entity_commands()
         matchscore) echo "add list list-short delete edit" ;;
         stats) echo "perf avg alias rank te te-user scatter bdayplot battle absent player score points" ;;
         sheet) echo "create import player donations" ;;
-        video) echo "list pull frames roster apply" ;;
+        video) echo "list pull frames roster apply player" ;;
         donations) echo "add delete edit show stats under list" ;;
     esac
 }
@@ -79,6 +79,7 @@ _hcr2_flags()
         video:pull) echo "--match --file" ;;
         video:frames) echo "--match --file --fps --width --crop --start --duration" ;;
         video:apply) echo "--match --file --dry-run --force" ;;
+        video:player) echo "--file --fps --width --crop --start --duration --dry-run --force" ;;
 
         donations:add) echo "--player --date --total" ;;
         donations:delete) echo "--id" ;;
@@ -141,6 +142,11 @@ _hcr2()
 
     if [[ "$entity" == "sheet" && ( "$command" == "player" || "$command" == "donations" ) && COMP_CWORD -eq 3 ]]; then
         _hcr2_comp_words "export import" "$cur"
+        return
+    fi
+
+    if [[ "$entity" == "video" && "$command" == "player" && COMP_CWORD -eq 3 ]]; then
+        _hcr2_comp_words "frames apply" "$cur"
         return
     fi
 

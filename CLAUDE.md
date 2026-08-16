@@ -223,6 +223,30 @@ what the database holds — the model records, the code compares.
 in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
 `sheet player import`, nothing on Nextcloud is deleted.
 
+### Team screen video
+
+`video player frames` / `video player apply` read `Ladys.mp4` from the Nextcloud **base**
+folder (next to `Ladys.xlsx`, it is not season-bound) and reconcile the active PLTE list:
+garage power, names, joiners, leavers. `hcr2/services/rosters.py` holds the diff,
+`.claude/skills/team-video/SKILL.md` the reading instructions.
+
+The problem this flow exists to solve is not OCR, it is identity: an unknown name may be a
+new member or one of 600+ former players under a changed name. So `build_plan` never
+resolves an addition on its own — the plan stops at `PENDING` until the row carries `new`
+or `reactivate: <id>`. `find_candidates` puts the players *missing from the video* at the
+top of every candidate list unconditionally, because one leaver plus one arrival is what a
+rename looks like from outside; below them come fuzzy matches, where containment
+(`Bisa` inside `BisaTheWise`) outranks the raw ratio — short leftover names score
+deceptively high on `SequenceMatcher` alone. `reactivate` pointing at an *active* player is
+the normal rename case and turns into RENAME + GP instead of REACTIVATE, and removes that
+player from the leavers.
+
+Two rails mirror the match flow: the member count in the screen header must equal the rows
+read, and more than `MAX_LEAVER_SHARE` of the roster leaving is treated as an incomplete
+reading. A third is specific here — `untypeable_characters` rejects any stored name the
+team could not enter on a German keyboard (umlauts and ß pass, `£ π Ł` and emoji do not),
+so the transliteration convention is enforced rather than merely documented.
+
 **ffmpeg is a runtime dependency of `video frames` only**, and it is not packaged as `ffmpeg` here:
 CentOS Stream 9 has no such package, EPEL ships `ffmpeg-free`, and the recordings are **HEVC**
 (`hvc1` + AAC) — the codec that build may drop. So `resolve_ffmpeg()` tries `$HCR2_FFMPEG`, then
