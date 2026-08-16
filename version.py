@@ -1,6 +1,7 @@
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 HISTORY = [
+    ("1.9.1", "2026-08-16", "Discord-Ausgabe wird bei Ueberlaenge aufgeteilt statt verworfen; km-Rangliste passt in eine Nachricht"),
     ("1.9.0", "2026-08-16", "chest-video: Wochen-Truhe auslesen, video chest apply, roster ohne Match"),
     ("1.8.0", "2026-08-16", "Wochenkilometer: distance-Entity, Bot-Befehl .km, Schnitt im Profil, video chest frames"),
     ("1.7.0", "2026-08-16", "Nextcloud in Unterordner gegliedert: Team-Event/S<nr>, Ladys, Donations, Wochen-Truhe; Skill team-video heisst jetzt player-video"),

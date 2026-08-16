@@ -22,20 +22,26 @@ def print_ranking(year: int, week: int, rows: Sequence[DistanceRankRow]) -> None
 
     total = sum(row.km for row in rows)
     print(f"🚗 Kilometres {year} W{week:02d} – {len(rows)} players, {total} km")
+    # A full roster has to stay inside one Discord message, so the columns are only
+    # as wide as the data actually needs.
     print_table(
-        headers=[f"{'#':>3}", f"{'Player':<20}", f"{'km':>6}", f"{'avg':>6}", "trend"],
+        headers=[f"{'#':>2}", f"{'Player':<14}", f"{'km':>5}", f"{'avg':>5}", "+-"],
         rows=[
             [
-                f"{index:>3}",
-                f"{row.name:<20}",
-                f"{row.km:>6}",
-                f"{row.average:>6.0f}",
+                f"{index:>2}",
+                f"{_short(row.name):<14}",
+                f"{row.km:>5}",
+                f"{row.average:>5.0f}",
                 _trend(row.km, row.average),
             ]
             for index, row in enumerate(rows, start=1)
         ],
-        width=48,
+        width=38,
     )
+
+
+def _short(name: str, width: int = 14) -> str:
+    return name if len(name) <= width else name[: width - 1] + "…"
 
 
 def _trend(km: int, average: float) -> str:
@@ -43,9 +49,9 @@ def _trend(km: int, average: float) -> str:
         return "-"
     change = (km - average) / average
     if change >= 0.1:
-        return f"▲ {change:+.0%}"
+        return f"{change:+.0%}"
     if change <= -0.1:
-        return f"▼ {change:+.0%}"
+        return f"{change:+.0%}"
     return "="
 
 

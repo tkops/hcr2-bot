@@ -118,3 +118,46 @@ class BotErrorDetectionTests(TemporaryDatabaseTestCase):
         self.assertIn("line one", result)
         self.assertTrue(bool(result))
         self.assertFalse(bool(bot.CliResult("", ok=False)))
+
+
+class DiscordMessageLengthTests(TemporaryDatabaseTestCase):
+    """Discord drops a message over 2000 characters, so long output has to be split."""
+
+    def test_a_long_table_is_split_on_line_boundaries(self) -> None:
+        bot = _import_bot()
+        text = "\n".join(f"row {index:03d} " + "x" * 40 for index in range(200))
+
+        chunks = bot.codeblock_chunks(text, budget=500)
+
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 500)
+        # nothing lost and no row cut in half
+        self.assertEqual("\n".join(chunks).split("\n"), text.split("\n"))
+
+    def test_a_single_overlong_line_is_cut_rather_than_dropped(self) -> None:
+        bot = _import_bot()
+        chunks = bot.codeblock_chunks("y" * 1200, budget=500)
+
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual("".join(chunks), "y" * 1200)
+
+    def test_short_output_stays_one_chunk(self) -> None:
+        bot = _import_bot()
+        self.assertEqual(bot.codeblock_chunks("one\ntwo", budget=500), ["one\ntwo"])
+
+    def test_a_full_roster_ranking_fits_one_message(self) -> None:
+        """49 players is the real team size - it must not need splitting at all."""
+        from hcr2.models.distance import DistanceRankRow
+        from hcr2.output import distances as distance_output
+
+        bot = _import_bot()
+        rows = [
+            DistanceRankRow(player_id=index, name=f"PL|Longish{index:02d}", km=900 - index * 7,
+                            average=800 - index * 7, weeks=8)
+            for index in range(49)
+        ]
+        output = self.capture_stdout(distance_output.print_ranking, 2026, 34, rows)
+
+        self.assertLessEqual(len(output) + bot.CODEBLOCK_FENCE_LEN, bot.MAX_DISCORD_MSG_LEN)
+

@@ -242,21 +242,68 @@ def _in_channels(message, ids):
     parent_id = getattr(ch, "parent_id", None)
     return parent_id in ids
 
+# A full roster does not fit in one Discord message; splitting beats dropping it,
+# but an unbounded split would spam the channel on a runaway output.
+CODEBLOCK_MAX_MESSAGES = 4
+CODEBLOCK_FENCE_LEN = 8
+
+
+def codeblock_chunks(text: str, *, budget: int) -> list[str]:
+    """Split on line boundaries so a table never breaks in the middle of a row."""
+    chunks: list[str] = []
+    current: list[str] = []
+    length = 0
+
+    for line in (text or "").split("\n"):
+        while len(line) > budget:
+            if current:
+                chunks.append("\n".join(current))
+                current, length = [], 0
+            chunks.append(line[:budget])
+            line = line[budget:]
+        if current and length + len(line) + 1 > budget:
+            chunks.append("\n".join(current))
+            current, length = [], 0
+        current.append(line)
+        length += len(line) + 1
+
+    if current:
+        chunks.append("\n".join(current))
+    return [chunk for chunk in chunks if chunk.strip()]
+
+
+def _unfence(text: str) -> str:
+    body = text.strip()[3:-3]
+    return body.split("\n", 1)[1] if body.startswith(("python", "text", "ansi")) else body
+
+
 async def send_codeblock(channel, text: str):
     if not text:
         await send_warning(channel, "No data found or an error occurred.")
         return
+
     s = text.strip()
-    if s.startswith("```") and s.endswith("```"):
-        if len(s) <= MAX_DISCORD_MSG_LEN:
-            await channel.send(s)
-        else:
-            await send_warning(channel, "Output too long to display.")
-    else:
-        if len(text) + 8 <= MAX_DISCORD_MSG_LEN:
-            await channel.send(f"```\n{text}```")
-        else:
-            await send_warning(channel, "Output too long to display.")
+    prefenced = s.startswith("```") and s.endswith("```")
+
+    if prefenced and len(s) <= MAX_DISCORD_MSG_LEN:
+        await channel.send(s)
+        return
+    if not prefenced and len(text) + CODEBLOCK_FENCE_LEN <= MAX_DISCORD_MSG_LEN:
+        await channel.send(f"```\n{text}```")
+        return
+
+    chunks = codeblock_chunks(
+        _unfence(s) if prefenced else text,
+        budget=MAX_DISCORD_MSG_LEN - CODEBLOCK_FENCE_LEN,
+    )
+    for chunk in chunks[:CODEBLOCK_MAX_MESSAGES]:
+        await channel.send(f"```\n{chunk}\n```")
+    if len(chunks) > CODEBLOCK_MAX_MESSAGES:
+        await send_warning(
+            channel,
+            f"Output cut off after {CODEBLOCK_MAX_MESSAGES} messages - {len(chunks)} would be needed. "
+            "Narrow it down with a filter.",
+        )
 
 def _clean_status_text(text: str) -> str:
     text = (text or "").strip()
