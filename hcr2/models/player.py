@@ -43,6 +43,8 @@ class PlayerDetail:
     match_count: int
     first_match: str | None
     last_match: str | None
+    avg_km: float = 0.0
+    km_weeks: int = 0
 
 
 @dataclass(frozen=True)

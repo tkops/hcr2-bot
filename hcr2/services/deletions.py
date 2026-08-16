@@ -33,6 +33,7 @@ DEPENDENCIES: dict[str, tuple[tuple[str, str, str, str], ...]] = {
     "player": (
         ("matchscore", "player_id", "match score", "match scores"),
         ("donation", "player_id", "donation", "donations"),
+        ("distance", "player_id", "distance entry", "distance entries"),
     ),
     "match": (
         ("matchscore", "match_id", "match score", "match scores"),

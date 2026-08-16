@@ -80,11 +80,18 @@ def print_player_detail(player: PlayerDetail) -> None:
     print(f"{'First Match':<15}: {player.first_match or '-'}")
     print(f"{'Last Match':<15}: {player.last_match or '-'}")
     print(f"{'Match Count':<15}: {player.match_count}")
+    print(f"{'Avg km/week':<15}: {_avg_km(player)}")
     _print_wrapped("About", player.about)
     _print_wrapped("Vehicles", player.preferred_vehicles)
     _print_wrapped("Playstyle", player.playstyle)
     _print_wrapped("Language", player.language)
     _print_wrapped("Emoji", player.emoji)
+
+
+def _avg_km(player: PlayerDetail) -> str:
+    if not player.km_weeks:
+        return "-"
+    return f"{player.avg_km:.0f} ({player.km_weeks} weeks)"
 
 
 def print_player_search_rows(rows: list[PlayerSearchRow]) -> None:

@@ -31,7 +31,8 @@ _hcr2_entity_commands()
         matchscore) echo "add list list-short delete edit" ;;
         stats) echo "perf avg alias rank te te-user scatter bdayplot battle absent player score points" ;;
         sheet) echo "create import player donations" ;;
-        video) echo "list pull frames roster apply player" ;;
+        video) echo "list pull frames roster apply player chest" ;;
+        distance) echo "list show weeks add delete" ;;
         donations) echo "add delete edit show stats under list" ;;
     esac
 }
@@ -80,6 +81,13 @@ _hcr2_flags()
         video:frames) echo "--match --file --fps --width --crop --start --duration" ;;
         video:apply) echo "--match --file --dry-run --force" ;;
         video:player) echo "--file --fps --width --crop --start --duration --dry-run --force" ;;
+        video:chest) echo "--year --week --file --fps --width --crop --start --duration" ;;
+
+        distance:list) echo "--year --week" ;;
+        distance:show) echo "--player --num" ;;
+        distance:weeks) echo "--num" ;;
+        distance:add) echo "--player --km --year --week" ;;
+        distance:delete) echo "--id" ;;
 
         donations:add) echo "--player --date --total" ;;
         donations:delete) echo "--id" ;;
@@ -117,13 +125,13 @@ _hcr2()
     fi
 
     if (( COMP_CWORD == 1 )); then
-        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video donations version help -h --help" "$cur"
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video distance donations version help -h --help" "$cur"
         return
     fi
 
     entity="${COMP_WORDS[1]}"
     if [[ "$entity" == "help" ]]; then
-        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video donations version -h --help" "$cur"
+        _hcr2_comp_words "vehicle player teamevent season match matchscore stats sheet video distance donations version -h --help" "$cur"
         return
     fi
 
@@ -147,6 +155,11 @@ _hcr2()
 
     if [[ "$entity" == "video" && "$command" == "player" && COMP_CWORD -eq 3 ]]; then
         _hcr2_comp_words "frames apply" "$cur"
+        return
+    fi
+
+    if [[ "$entity" == "video" && "$command" == "chest" && COMP_CWORD -eq 3 ]]; then
+        _hcr2_comp_words "frames" "$cur"
         return
     fi
 

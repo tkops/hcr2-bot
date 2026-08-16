@@ -42,6 +42,7 @@ VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 LOCAL_VIDEO_ROOT = Path("tmp") / "video"
 TEAM_VIDEO_NAME = "Ladys.mp4"
 TEAM_LOCAL_DIR = LOCAL_VIDEO_ROOT / "team"
+CHEST_LOCAL_ROOT = LOCAL_VIDEO_ROOT / "chest"
 FRAME_PATTERN = "frame_%04d.jpg"
 FRAME_GLOB = "frame_*.jpg"
 
@@ -83,6 +84,19 @@ def season_folder(season: int) -> str:
 
 def team_folder() -> str:
     return nextcloud.remote_path(nextcloud.LADYS_DIR)
+
+
+def chest_folder(year: int) -> str:
+    """One subfolder per year, one file per ISO week: Wochen-Truhe/2026/w34.mp4."""
+    return nextcloud.remote_path(nextcloud.CHEST_DIR / str(year))
+
+
+def chest_video_name(week: int) -> str:
+    return f"w{week}.mp4"
+
+
+def chest_local_dir(year: int, week: int) -> Path:
+    return CHEST_LOCAL_ROOT / str(year) / f"w{week:02d}"
 
 
 # -------------------- Nextcloud lookup --------------------
@@ -345,6 +359,77 @@ def extract_team_frames(
     return _cut_frames(
         pull,
         TEAM_LOCAL_DIR / "frames",
+        executable=executable,
+        fps=fps,
+        width=width,
+        crop=crop,
+        start=start,
+        duration=duration,
+        runner=runner,
+    )
+
+
+def pull_chest_video(
+    year: int,
+    week: int,
+    *,
+    filename: str | None = None,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+    downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
+) -> PullOutcome:
+    candidates = list_candidates_in(chest_folder(year), lister=lister)
+    if not candidates:
+        return PullOutcome(status="NO_VIDEO")
+
+    wanted = (filename or chest_video_name(week)).strip().lower()
+    # w34.mp4 and w034.mp4 are the same week; do not make the user guess the padding.
+    candidate = next(
+        (c for c in candidates if c.name.lower() == wanted or _week_of(c.name) == week),
+        None,
+    )
+    if candidate is None:
+        return PullOutcome(status="NOT_FOUND", candidates=candidates)
+
+    target = chest_local_dir(year, week) / candidate.name
+    if target.exists() and candidate.size and target.stat().st_size == candidate.size:
+        return PullOutcome(status="CACHED", local_path=target, candidate=candidate, candidates=candidates)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if downloader(candidate.remote_path, target) is None:
+        return PullOutcome(status="DOWNLOAD_FAILED", candidate=candidate, candidates=candidates)
+    return PullOutcome(status="OK", local_path=target, candidate=candidate, candidates=candidates)
+
+
+def _week_of(name: str) -> int | None:
+    stem = name.rsplit(".", 1)[0].strip().lower()
+    if not stem.startswith("w") or not stem[1:].isdigit():
+        return None
+    return int(stem[1:])
+
+
+def extract_chest_frames(
+    year: int,
+    week: int,
+    *,
+    fps: float = DEFAULT_FPS,
+    width: int = DEFAULT_WIDTH,
+    crop: str | None = None,
+    start: str | None = None,
+    duration: str | None = None,
+    filename: str | None = None,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+    downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
+    runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
+    ffmpeg_resolver: Callable[[], str | None] = resolve_ffmpeg,
+) -> FramesOutcome:
+    executable = ffmpeg_resolver()
+    if executable is None:
+        return FramesOutcome(status="FFMPEG_MISSING")
+
+    pull = pull_chest_video(year, week, filename=filename, lister=lister, downloader=downloader)
+    return _cut_frames(
+        pull,
+        chest_local_dir(year, week) / "frames",
         executable=executable,
         fps=fps,
         width=width,

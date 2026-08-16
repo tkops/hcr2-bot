@@ -1,6 +1,7 @@
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 HISTORY = [
+    ("1.8.0", "2026-08-16", "Wochenkilometer: distance-Entity, Bot-Befehl .km, Schnitt im Profil, video chest frames"),
     ("1.7.0", "2026-08-16", "Nextcloud in Unterordner gegliedert: Team-Event/S<nr>, Ladys, Donations, Wochen-Truhe; Skill team-video heisst jetzt player-video"),
     ("1.6.0", "2026-08-16", "Kader-Abgleich aus dem Team-Video: video player frames/apply aktualisiert GP, Namen, Zu- und Abgaenge"),
     ("1.5.0", "2026-08-16", "video apply meldet zusaetzlich Auffaelligkeiten: abweichende Namen, nicht gefahrene Spielerinnen und Score-Ausreisser"),

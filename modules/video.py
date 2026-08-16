@@ -28,6 +28,7 @@ USAGE_FRAMES = (
 USAGE_ROSTER = "Usage: video roster --match <match_id>"
 USAGE_APPLY = "Usage: video apply --match <match_id> [--file <results.json>] [--dry-run] [--force]"
 USAGE_PLAYER = "Usage: video player <frames|apply>"
+USAGE_CHEST = "Usage: video chest frames --year <yyyy> --week <n> [--file <name>] [--fps <n>] [--width <px>]"
 USAGE_PLAYER_FRAMES = (
     "Usage: video player frames [--file Ladys.mp4] [--fps <n>] [--width <px>] "
     "[--crop <w:h:x:y>] [--start <hh:mm:ss>] [--duration <sec>]"
@@ -50,6 +51,7 @@ def print_help():
                 "Validate readings and write them to matchscore",
             ),
             ("player frames [--file Ladys.mp4]", "Cut the team screen video into frames"),
+            ("chest frames --year <yyyy> --week <n>", "Cut the weekly distance chest video into frames"),
             (
                 "player apply [--file <roster.json>] [--dry-run] [--force]",
                 "Update the PLTE player list from the team screen",
@@ -58,7 +60,7 @@ def print_help():
         notes=[
             "Videos live next to the match sheets: Power-Ladys-Scores/S<season>/.",
             "apply refuses to write unless the points sum equals score_ladys (--force overrides).",
-            "The team screen video (Ladys.mp4) sits in the base folder, next to Ladys.xlsx.",
+            "The team screen video (Ladys.mp4) sits in Ladys/, the chest videos in Wochen-Truhe/<year>/w<week>.mp4.",
             "player apply refuses to write while an addition has no new/reactivate decision.",
         ],
     )
@@ -76,6 +78,7 @@ def handle_command(command, args):
         "roster": _handle_roster,
         "apply": _handle_apply,
         "player": _handle_player,
+        "chest": _handle_chest,
     }
     handler = handlers.get(command)
     if handler is None:
@@ -166,6 +169,40 @@ def _handle_frames(args):
         return
     if outcome.pull is not None:
         video_output.print_pull_outcome(outcome.pull, match_id=match_id)
+    video_output.print_frames_outcome(outcome)
+
+
+def _handle_chest(args):
+    if not args or args[0] != "frames":
+        print(USAGE_CHEST)
+        return
+
+    rest = args[1:]
+    year = parse_int(get_arg_value(rest, "year"), default=None)
+    week = parse_int(get_arg_value(rest, "week"), default=None)
+    fps = _parse_fps(get_arg_value(rest, "fps"))
+    if year is None or week is None or not 1 <= week <= 53 or fps is None:
+        print(USAGE_CHEST)
+        return
+
+    outcome = video_service.extract_chest_frames(
+        year,
+        week,
+        fps=fps,
+        width=parse_int(get_arg_value(rest, "width"), default=video_service.DEFAULT_WIDTH),
+        crop=get_arg_value(rest, "crop"),
+        start=get_arg_value(rest, "start"),
+        duration=get_arg_value(rest, "duration"),
+        filename=get_arg_value(rest, "file"),
+    )
+    if outcome.pull is not None and outcome.pull.status in ("NO_VIDEO", "NOT_FOUND", "DOWNLOAD_FAILED"):
+        video_output.print_team_video_missing(
+            video_service.chest_folder(year), get_arg_value(rest, "file") or video_service.chest_video_name(week)
+        )
+        return
+    if outcome.pull is not None and outcome.pull.candidate is not None and outcome.pull.local_path is not None:
+        state = "Cached" if outcome.pull.status == "CACHED" else "Downloaded"
+        print(f"✅ {outcome.pull.candidate.name} → {outcome.pull.local_path} ({state})")
     video_output.print_frames_outcome(outcome)
 
 

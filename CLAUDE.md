@@ -46,7 +46,7 @@ Three consumers sit on top of one SQLite database:
 
 `hcr2/cli/registry.py` holds `ENTITY_SPECS` — the single list of top-level entities
 (`vehicle`, `player`, `teamevent`, `season`, `match`, `matchscore`, `stats`, `sheet`, `video`,
-`donations`, `version`), each mapping to a `modules/<entity>.py` that exposes `handle_command(cmd, args)`
+`distance`, `donations`, `version`), each mapping to a `modules/<entity>.py` that exposes `handle_command(cmd, args)`
 and `print_help()`. `hcr2/cli/app.py` registers each spec both as a Typer command and in a hand-rolled
 `CliApp.dispatch`; `_should_use_legacy_dispatch` routes bare/`help`/unknown argv to the hand-rolled
 path and everything else through Typer with `allow_extra_args`/`ignore_unknown_options` — so Typer
@@ -272,6 +272,29 @@ CentOS Stream 9 has no such package, EPEL ships `ffmpeg-free`, and the recording
 static full build (verified to decode HEVC) and needs no root. It is deliberately **not** in
 `requirements.txt`: prod only runs the bot, which has no video command. `video frames` reports a
 missing binary with that hint rather than failing obscurely.
+
+### Weekly distance
+
+`distance` holds the kilometres from the team distance chest — **one row per player and ISO
+week, holding that week's distance**, not a running total like `donation`. The chest resets
+every period, so the number in the video already is the week's performance and there is
+nothing to subtract. Migration `0003`, `ON DELETE RESTRICT` like the other result data, and
+`deletions.DEPENDENCIES["player"]` lists it so a delete reports it instead of failing.
+
+The averages in `player show` and in the ranking are deliberately the **same** window
+(`distances.AVERAGE_WINDOW`, imported into the players repository as
+`DISTANCE_AVERAGE_WINDOW`): two different definitions of "average" in two places is how a
+number stops meaning anything. It looks at recent weeks rather than all time, so it describes
+current form and survives one missed week.
+
+`import_week` takes the chest progress from the video header as `team_total` and refuses to
+write when the kilometres do not add up to it — the same role the points sum plays for a
+match. The videos live in `Wochen-Truhe/<year>/w<week>.mp4`; `video chest frames --year --week`
+fetches and cuts them, matching the week number rather than the exact filename so `W34.mp4`
+and `w034.mp4` both work. The reading skill (`chest-video`) does not exist yet.
+
+Bot: `.km` (last week's ranking), `.km <player>` (that player's weeks), `.km weeks` (team
+totals). It is in `PUBLIC_COMMANDS`.
 
 ### Secrets
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from hcr2.db.connection import connect_dict_db
+# Same window as the distance repository, so profile and ranking agree on "average".
+from hcr2.repositories.distances import AVERAGE_WINDOW as DISTANCE_AVERAGE_WINDOW
 from hcr2.models.player import (
     PlayerAbsentRow,
     PlayerBirthdayRow,
@@ -276,7 +278,17 @@ def get_player_detail(player_id: int) -> PlayerDetail | None:
             (player_id,),
         )
         match_row = cur.fetchone()
-        return _detail_from_mapping(row, match_row)
+
+        # Average over the recent weeks, not over all time - it describes current form.
+        cur.execute(
+            """
+            SELECT AVG(km) AS avg_km, COUNT(*) AS km_weeks
+            FROM (SELECT km FROM distance WHERE player_id = ?
+                  ORDER BY year DESC, week DESC LIMIT ?)
+            """,
+            (player_id, DISTANCE_AVERAGE_WINDOW),
+        )
+        return _detail_from_mapping(row, match_row, cur.fetchone())
 
 
 def set_active(player_id: int, active: bool) -> None:
@@ -371,7 +383,7 @@ def _list_row_from_mapping(row) -> PlayerListRow:
     )
 
 
-def _detail_from_mapping(row, match_row) -> PlayerDetail:
+def _detail_from_mapping(row, match_row, distance_row=None) -> PlayerDetail:
     return PlayerDetail(
         id=row["id"],
         name=row["name"],
@@ -395,4 +407,6 @@ def _detail_from_mapping(row, match_row) -> PlayerDetail:
         match_count=(match_row["match_count"] or 0) if match_row else 0,
         first_match=match_row["first_match"] if match_row else None,
         last_match=match_row["last_match"] if match_row else None,
+        avg_km=float(distance_row["avg_km"] or 0) if distance_row else 0.0,
+        km_weeks=int(distance_row["km_weeks"] or 0) if distance_row else 0,
     )
