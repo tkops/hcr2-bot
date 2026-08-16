@@ -304,13 +304,22 @@ the header is the hard check and the chest difference is reported without blocki
 Bot: `.km` (last week's ranking), `.km <player>` (that player's weeks), `.km weeks` (team
 totals). It is in `PUBLIC_COMMANDS`.
 
-**Discord drops any message over 2000 characters**, and `send_codeblock` used to answer that
-with "Output too long to display" — so `.p` (82k characters) and a 49-player `.km` (2154)
-simply produced nothing. It now splits on line boundaries via `codeblock_chunks`, capped at
-`CODEBLOCK_MAX_MESSAGES` with a warning naming how many would have been needed; output that
-already fits takes the unchanged single-message path. Independently, the ranking table is
-sized so a full roster stays inside one message (1691 characters for 49 players) — a test
-pins that, because the natural fix of widening a column would silently split every week.
+**Discord drops any message over 2000 characters** (`MAX_DISCORD_MSG_LEN` is 1990), and
+`send_codeblock` used to answer that with "Output too long to display" — a 49-player `.km`
+came to 2154 characters and produced an empty reply. It now splits on line boundaries via
+`codeblock_chunks`, capped at `CODEBLOCK_MAX_MESSAGES` with a warning naming how many would
+have been needed; output that already fits takes the unchanged single-message path.
+
+**Do not judge a bot command's size from the `COMMANDS` dict at the top of `bot.py`.** It is
+a fallback table, and the dispatch below overrides it: `.p` is listed there as
+`player list` (82k characters) but the handler actually runs
+`player list-active --team PLTE` — 1551 characters, which always fitted. Measure what the
+handler runs.
+
+Independently, the kilometre ranking is sized so a full roster stays inside one message
+(1691 characters for 49 players) — a test pins that, because widening a column later would
+otherwise silently start splitting the weekly ranking in two. As of now no bot command
+exceeds the limit, so the splitting is a net for lists that grow, not a live fix.
 
 ### Secrets
 
