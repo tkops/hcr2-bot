@@ -6,8 +6,10 @@ cumulative donation totals.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 from hcr2.models.distance import DistanceHistoryRow, DistanceRankRow, DistanceWeek
 from hcr2.repositories import distances as distance_repo
@@ -16,6 +18,29 @@ from hcr2.services import matchscores as matchscore_service
 
 
 MAX_KM = 20000
+
+
+def chest_path(year: int, week: int, path: str | Path | None = None) -> Path:
+    if path:
+        return Path(path)
+    from hcr2.services.videos import chest_local_dir
+
+    return chest_local_dir(year, week) / "chest.json"
+
+
+def load_chest_file(path: str | Path) -> tuple[dict | None, list[str]]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, [f"chest file not found: {path}"]
+    except json.JSONDecodeError as e:
+        return None, [f"chest file is not valid JSON: {e}"]
+    except OSError as e:
+        return None, [f"chest file unreadable: {type(e).__name__}: {e}"]
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("players"), list):
+        return None, ["chest file must be one object with a players list"]
+    return payload, []
 
 
 @dataclass(frozen=True)
@@ -94,10 +119,18 @@ def import_week(
     week: int,
     entries: list[dict],
     team_total: int | None = None,
+    member_count: int | None = None,
     force: bool = False,
+    dry_run: bool = False,
 ) -> ImportResult:
-    """Applies one week in full. The chest progress from the video header is the
-    completeness proof, the same role the points sum plays for a match."""
+    """Applies one week in full.
+
+    The completeness proof is the **member count** from the screen header, not the
+    chest total: the chest keeps counting kilometres from players who have left the
+    team since, while the list only shows current members. Measured against a real
+    recording the two were 207 km apart with every row read correctly, so a mismatch
+    there is reported and never blocks.
+    """
     errors: list[str] = []
     warnings: list[str] = []
     resolved: list[tuple[int, str, int]] = []
@@ -125,16 +158,28 @@ def import_week(
         seen.add(player_id)
         resolved.append((player_id, brief.name, km))
 
-    total = sum(km for _, _, km in resolved)
-    if team_total is not None and team_total != total:
+    if member_count is not None and member_count != len(entries):
         message = (
-            f"kilometres add up to {total}, but the chest shows {team_total} "
-            f"(off by {total - team_total:+d}) - a row was missed or misread"
+            f"the screen shows {member_count} members, but {len(entries)} rows were read "
+            "- a row was missed"
         )
         (warnings if force else errors).append(message + (" [forced]" if force else ""))
 
+    total = sum(km for _, _, km in resolved)
+    if team_total is not None and team_total != total:
+        difference = team_total - total
+        warnings.append(
+            f"chest shows {team_total} km, the rows add up to {total} ({difference:+d}) "
+            "- expected when someone left the team mid-period, suspicious if it is large"
+        )
+
     if errors:
         return ImportResult(status="ERRORS", year=year, week=week, errors=errors, warnings=warnings, total=total)
+
+    if dry_run:
+        return ImportResult(
+            status="DRY_RUN", year=year, week=week, imported=len(resolved), total=total, warnings=warnings
+        )
 
     for player_id, _, km in resolved:
         distance_repo.upsert(player_id, year=year, week=week, km=km)

@@ -81,7 +81,7 @@ _hcr2_flags()
         video:frames) echo "--match --file --fps --width --crop --start --duration" ;;
         video:apply) echo "--match --file --dry-run --force" ;;
         video:player) echo "--file --fps --width --crop --start --duration --dry-run --force" ;;
-        video:chest) echo "--year --week --file --fps --width --crop --start --duration" ;;
+        video:chest) echo "--year --week --file --fps --width --crop --start --duration --dry-run --force" ;;
 
         distance:list) echo "--year --week" ;;
         distance:show) echo "--player --num" ;;
@@ -159,7 +159,7 @@ _hcr2()
     fi
 
     if [[ "$entity" == "video" && "$command" == "chest" && COMP_CWORD -eq 3 ]]; then
-        _hcr2_comp_words "frames" "$cur"
+        _hcr2_comp_words "frames apply" "$cur"
         return
     fi
 

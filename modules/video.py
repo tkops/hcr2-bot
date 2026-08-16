@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from hcr2.output import distances as distance_output
 from hcr2.output import rosters as roster_output
 from hcr2.output import videos as video_output
 from hcr2.repositories import matches as match_repo
+from hcr2.services import distances as distance_service
 from hcr2.services import rosters as roster_service
 from hcr2.services import videos as video_service
 from modules.common import (
@@ -25,10 +27,12 @@ USAGE_FRAMES = (
     "Usage: video frames --match <match_id> [--file <name>] [--fps <n>] "
     "[--width <px>] [--crop <w:h:x:y>] [--start <hh:mm:ss>] [--duration <sec>]"
 )
-USAGE_ROSTER = "Usage: video roster --match <match_id>"
+USAGE_ROSTER = "Usage: video roster [--match <match_id>]"
 USAGE_APPLY = "Usage: video apply --match <match_id> [--file <results.json>] [--dry-run] [--force]"
 USAGE_PLAYER = "Usage: video player <frames|apply>"
-USAGE_CHEST = "Usage: video chest frames --year <yyyy> --week <n> [--file <name>] [--fps <n>] [--width <px>]"
+USAGE_CHEST = "Usage: video chest <frames|apply> --year <yyyy> --week <n> [options]"
+USAGE_CHEST_FRAMES = "Usage: video chest frames --year <yyyy> --week <n> [--file <name>] [--fps <n>] [--width <px>]"
+USAGE_CHEST_APPLY = "Usage: video chest apply --year <yyyy> --week <n> [--file <chest.json>] [--dry-run] [--force]"
 USAGE_PLAYER_FRAMES = (
     "Usage: video player frames [--file Ladys.mp4] [--fps <n>] [--width <px>] "
     "[--crop <w:h:x:y>] [--start <hh:mm:ss>] [--duration <sec>]"
@@ -45,20 +49,24 @@ def print_help():
                 "frames --match <match_id> [--fps <n>] [--width <px>] [--crop <w:h:x:y>]",
                 "Cut the video into frames with ffmpeg",
             ),
-            ("roster --match <match_id>", "Show active PLTE players for name matching"),
+            ("roster [--match <match_id>]", "Show active PLTE players for name matching"),
             (
                 "apply --match <match_id> [--file <results.json>] [--dry-run] [--force]",
                 "Validate readings and write them to matchscore",
             ),
             ("player frames [--file Ladys.mp4]", "Cut the team screen video into frames"),
-            ("chest frames --year <yyyy> --week <n>", "Cut the weekly distance chest video into frames"),
             (
                 "player apply [--file <roster.json>] [--dry-run] [--force]",
                 "Update the PLTE player list from the team screen",
             ),
+            ("chest frames --year <yyyy> --week <n>", "Cut the weekly distance chest video into frames"),
+            (
+                "chest apply --year <yyyy> --week <n> [--file <chest.json>] [--dry-run] [--force]",
+                "Write the read kilometres to distance",
+            ),
         ],
         notes=[
-            "Videos live next to the match sheets: Power-Ladys-Scores/S<season>/.",
+            "Match videos live next to the match sheets: Power-Ladys-Scores/Team-Event/S<season>/.",
             "apply refuses to write unless the points sum equals score_ladys (--force overrides).",
             "The team screen video (Ladys.mp4) sits in Ladys/, the chest videos in Wochen-Truhe/<year>/w<week>.mp4.",
             "player apply refuses to write while an addition has no new/reactivate decision.",
@@ -173,16 +181,24 @@ def _handle_frames(args):
 
 
 def _handle_chest(args):
-    if not args or args[0] != "frames":
+    if not args or args[0] not in ("frames", "apply"):
         print(USAGE_CHEST)
         return
 
-    rest = args[1:]
+    sub, rest = args[0], args[1:]
     year = parse_int(get_arg_value(rest, "year"), default=None)
     week = parse_int(get_arg_value(rest, "week"), default=None)
+    if year is None or week is None or not 1 <= week <= 53:
+        print(USAGE_CHEST_FRAMES if sub == "frames" else USAGE_CHEST_APPLY)
+        return
+
+    if sub == "apply":
+        _handle_chest_apply(rest, year=year, week=week)
+        return
+
     fps = _parse_fps(get_arg_value(rest, "fps"))
-    if year is None or week is None or not 1 <= week <= 53 or fps is None:
-        print(USAGE_CHEST)
+    if fps is None:
+        print(USAGE_CHEST_FRAMES)
         return
 
     outcome = video_service.extract_chest_frames(
@@ -206,6 +222,27 @@ def _handle_chest(args):
     video_output.print_frames_outcome(outcome)
 
 
+def _handle_chest_apply(args, *, year: int, week: int):
+    path = distance_service.chest_path(year, week, get_arg_value(args, "file"))
+    payload, errors = distance_service.load_chest_file(path)
+    if payload is None:
+        distance_output.print_import_result(
+            distance_service.ImportResult(status="ERRORS", year=year, week=week, errors=errors)
+        )
+        return
+
+    result = distance_service.import_week(
+        year=year,
+        week=week,
+        entries=payload.get("players") or [],
+        team_total=payload.get("team_total"),
+        member_count=payload.get("member_count"),
+        force=get_arg_value(args, "force") is not None,
+        dry_run=get_arg_value(args, "dry-run") is not None,
+    )
+    distance_output.print_import_result(result)
+
+
 def _parse_fps(raw: str | None):
     if raw is None:
         return video_service.DEFAULT_FPS
@@ -217,9 +254,12 @@ def _parse_fps(raw: str | None):
 
 
 def _handle_roster(args):
-    match_id = _match_id_from(args, USAGE_ROSTER)
-    if match_id is None:
+    raw = get_arg_value(args, "match")
+    match_id = parse_int(raw, default=None) if raw is not None else None
+    if raw is not None and match_id is None:
+        video_output.print_invalid_match_id()
         return
+
     roster = video_service.get_roster(match_id)
     if roster is None:
         video_output.print_no_match_found()

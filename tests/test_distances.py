@@ -60,19 +60,27 @@ class DistanceServiceTests(TemporaryDatabaseTestCase):
 
 
 class DistanceImportTests(TemporaryDatabaseTestCase):
-    def test_the_chest_total_has_to_match_the_sum(self) -> None:
+    def test_the_member_count_is_the_completeness_check(self) -> None:
         result = distance_service.import_week(
-            year=2026, week=34, entries=[{"pid": 1, "km": 100}], team_total=150
+            year=2026, week=34, entries=[{"pid": 1, "km": 100}], member_count=2
         )
         self.assertEqual(result.status, "ERRORS")
         self.assertTrue(any("a row was missed" in error for error in result.errors))
 
-    def test_force_downgrades_the_total_check(self) -> None:
+    def test_force_downgrades_the_member_count_check(self) -> None:
         result = distance_service.import_week(
-            year=2026, week=34, entries=[{"pid": 1, "km": 100}], team_total=150, force=True
+            year=2026, week=34, entries=[{"pid": 1, "km": 100}], member_count=2, force=True
         )
         self.assertEqual(result.status, "IMPORTED")
         self.assertTrue(any("[forced]" in warning for warning in result.warnings))
+
+    def test_a_chest_total_above_the_rows_only_warns(self) -> None:
+        # The chest keeps counting kilometres of players who have left since.
+        result = distance_service.import_week(
+            year=2026, week=34, entries=[{"pid": 1, "km": 100}], team_total=307
+        )
+        self.assertEqual(result.status, "IMPORTED")
+        self.assertTrue(any("+207" in warning for warning in result.warnings))
 
     def test_duplicates_and_unknown_players_are_rejected(self) -> None:
         result = distance_service.import_week(

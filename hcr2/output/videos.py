@@ -97,8 +97,9 @@ def print_frames_outcome(outcome: FramesOutcome) -> None:
     print(f"✅ {outcome.frame_count} frames → {outcome.frame_dir}")
 
 
-def print_roster(match_id: int, roster: Sequence[RosterPlayer]) -> None:
-    print(f"Roster for match {match_id} - {len(roster)} active PLTE players")
+def print_roster(match_id: int | None, roster: Sequence[RosterPlayer]) -> None:
+    scope = f"match {match_id}" if match_id is not None else "the active team"
+    print(f"Roster for {scope} - {len(roster)} active PLTE players")
     print_table(
         headers=[f"{'ID':>4}", f"{'Player':<24}", f"{'Alias':<16}", "Away until"],
         rows=[

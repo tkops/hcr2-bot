@@ -291,7 +291,15 @@ current form and survives one missed week.
 write when the kilometres do not add up to it — the same role the points sum plays for a
 match. The videos live in `Wochen-Truhe/<year>/w<week>.mp4`; `video chest frames --year --week`
 fetches and cuts them, matching the week number rather than the exact filename so `W34.mp4`
-and `w034.mp4` both work. The reading skill (`chest-video`) does not exist yet.
+and `w034.mp4` both work; `video chest apply` writes a reading, and
+`.claude/skills/chest-video/SKILL.md` holds the reading instructions.
+
+**The completeness proof here is the member count, not the chest total** — and that is a
+correction, not a preference. The first design blocked on the chest progress the way the
+match flow blocks on the points sum. Measured against a real recording (2026 W34) the 49
+rows added up to 10824 km while the chest showed 11031: the chest keeps counting kilometres
+of players who left mid-period, the list only shows current members. So `member_count` from
+the header is the hard check and the chest difference is reported without blocking.
 
 Bot: `.km` (last week's ranking), `.km <player>` (that player's weeks), `.km weeks` (team
 totals). It is in `PUBLIC_COMMANDS`.

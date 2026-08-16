@@ -96,7 +96,7 @@ class CliHelpSmokeTests(unittest.TestCase):
             "matchscore": "list-short",
             "stats": "perf",
             "sheet": "player export",
-            "video": "roster --match <match_id>",
+            "video": "roster [--match <match_id>]",
             "distance": "weeks [--num <weeks>]",
             "donations": "under",
         }

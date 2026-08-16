@@ -442,8 +442,10 @@ def extract_chest_frames(
 
 # -------------------- Roster --------------------
 
-def get_roster(match_id: int) -> list[RosterPlayer] | None:
-    if match_repo.get_match(match_id) is None:
+def get_roster(match_id: int | None = None) -> list[RosterPlayer] | None:
+    """Without a match id: just the active PLTE list - the chest and team screens
+    need the same mapping table but have no match to hang it on."""
+    if match_id is not None and match_repo.get_match(match_id) is None:
         return None
     return [
         RosterPlayer(id=row.id, name=row.name, alias=row.alias, away_until=row.away_until)

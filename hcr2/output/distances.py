@@ -119,4 +119,10 @@ def print_import_result(result: ImportResult) -> None:
 
     for message in result.warnings:
         print(f"⚠️  {message}")
+    if result.status == "DRY_RUN":
+        print(
+            f"ℹ️  Dry run: {result.year} W{result.week:02d}, {result.imported} players, "
+            f"{result.total} km. Nothing written."
+        )
+        return
     print(f"✅ {result.year} W{result.week:02d}: {result.imported} players, {result.total} km imported")
