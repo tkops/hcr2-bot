@@ -75,6 +75,8 @@ tests/test_output.py         formatting and workbook output helpers
 tests/test_migrations.py     migration runner behavior
 tests/test_nextcloud.py      Nextcloud path helpers
 tests/test_videos.py         match video lookup, frames and result import
+tests/test_rosters.py        team screen video matching and roster plan
+tests/test_distances.py      weekly kilometres, import checks and profile average
 ```
 
 ## Project Layout
@@ -116,7 +118,7 @@ access, business logic and output formatting live under `hcr2/repositories/`,
 `hcr2/services/` and `hcr2/output/`.
 
 The `video` entity reads a final standings recording that was dropped into the
-same Nextcloud folder as the match sheets and writes the readings straight to
+same Nextcloud folder as the match sheets (`Power-Ladys-Scores/Team-Event/S<season>/`) and writes the readings straight to
 `matchscore`, without the workbook detour: `video pull` downloads it,
 `video frames` cuts it with ffmpeg, `video roster` lists the players to map the
 names against, and `video apply` validates a `results.json` and imports it. The
@@ -128,6 +130,12 @@ fix them), roster players who did not drive, and scores that deviate from a play
 average further than the team as a whole did. `video frames` needs an ffmpeg binary; it is looked up in `$HCR2_FFMPEG`, on `PATH`
 and finally through the optional `imageio-ffmpeg` package
 (`pip3 install --user imageio-ffmpeg`, no root required).
+
+`video player frames` / `video player apply` do the same for the team screen recording
+(`Ladys.mp4`, next to `Ladys.xlsx` in `Power-Ladys-Scores/Ladys/`): they update garage power, names,
+joiners and leavers of the active PLTE list. An unknown name is never resolved silently -
+the plan stops and offers candidates, the players missing from the video first, until the
+row carries an explicit `new` or `reactivate` decision.
 
 Sheet workflows are split across `hcr2/services/sheets.py`,
 `hcr2/exporters/excel.py`, `hcr2/output/sheets.py` and

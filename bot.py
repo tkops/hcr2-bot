@@ -40,7 +40,8 @@ PUBLIC_COMMANDS = [
     ".away", ".back", ".help",
     ".vehicles", ".about", ".language", ".playstyle", ".birthday", ".emoji",
     ".leader", ".profile",
-    ".search", ".player", ".stats", ".d", ".donations", ".garagepower"
+    ".search", ".player", ".stats", ".d", ".donations", ".garagepower",
+    ".km"
 ]
 
 # ===================== Mode/Config laden ====================================
@@ -422,6 +423,7 @@ async def send_public_help(channel):
             (".player <id>", "Show player"),
             (".stats", "Current performance"),
             (".donations", "Donation index below 100"),
+            (".km [<player>|weeks]", "Kilometres of the last week"),
         ]),
         inline=False,
     )
@@ -1175,6 +1177,18 @@ async def on_message(message):
         else:
             call = ["stats", sub] + rest
 
+        output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
+        return
+
+    # --- Weekly kilometres from the distance chest ---
+    if cmd == ".km":
+        if args and args[0].lower() in ("weeks", "wochen"):
+            call = ["distance", "weeks"]
+        elif args:
+            call = ["distance", "show", "--player", " ".join(args)]
+        else:
+            call = ["distance", "list"]
         output = await run_hcr2(call)
         await send_codeblock(message.channel, output)
         return

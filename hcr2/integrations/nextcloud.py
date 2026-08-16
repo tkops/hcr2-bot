@@ -17,6 +17,22 @@ from secrets_config import NEXTCLOUD_AUTH
 NEXTCLOUD_BASE = Path("Power-Ladys-Scores")
 NEXTCLOUD_URL = "http://192.168.178.101:8080/remote.php/dav/files/{user}/{path}"
 
+# One subfolder per source of truth, all relative to NEXTCLOUD_BASE. Keep every remote
+# path in the codebase derived from these - the layout is shared with the team, and a
+# hardcoded second copy is how the two drift apart.
+TEAM_EVENT_DIR = Path("Team-Event")   # S<season>/ with the match videos and match sheets
+LADYS_DIR = Path("Ladys")             # team screen recordings and Ladys.xlsx
+DONATIONS_DIR = Path("Donations")     # Donations.xlsx
+CHEST_DIR = Path("Wochen-Truhe")      # weekly chest, feature still to come
+
+
+def season_subpath(season: int) -> Path:
+    return TEAM_EVENT_DIR / f"S{season}"
+
+
+def remote_path(*parts) -> str:
+    return NEXTCLOUD_BASE.joinpath(*parts).as_posix()
+
 DAV_NS = "{DAV:}"
 
 PROPFIND_BODY = (
@@ -206,7 +222,7 @@ def _read_last_modified(prop) -> Optional[datetime]:
 
 
 def match_sheet_remote_path(season: int, filename: str) -> Path:
-    return NEXTCLOUD_BASE / f"S{season}" / filename
+    return NEXTCLOUD_BASE / season_subpath(season) / filename
 
 
 def _ensure_remote_dirs(remote_path: str) -> None:

@@ -18,11 +18,11 @@ from tests.support import TemporaryDatabaseTestCase
 PROPFIND_XML = b"""<?xml version="1.0"?>
 <d:multistatus xmlns:d="DAV:">
   <d:response>
-    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/S2/</d:href>
+    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/Team-Event/S2/</d:href>
     <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
   </d:response>
   <d:response>
-    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/S2/1_Teamcup_Rivals.xlsx</d:href>
+    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/Team-Event/S2/1_Teamcup_Rivals.xlsx</d:href>
     <d:propstat><d:prop>
       <d:getlastmodified>Mon, 10 Aug 2026 10:00:00 GMT</d:getlastmodified>
       <d:getcontentlength>4711</d:getcontentlength>
@@ -30,7 +30,7 @@ PROPFIND_XML = b"""<?xml version="1.0"?>
     </d:prop></d:propstat>
   </d:response>
   <d:response>
-    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/S2/1%20Final%20Standings.mp4</d:href>
+    <d:href>/remote.php/dav/files/user/Power-Ladys-Scores/Team-Event/S2/1%20Final%20Standings.mp4</d:href>
     <d:propstat><d:prop>
       <d:getlastmodified>Tue, 11 Aug 2026 12:00:00 GMT</d:getlastmodified>
       <d:getcontentlength>1048576</d:getcontentlength>
@@ -44,7 +44,7 @@ PROPFIND_XML = b"""<?xml version="1.0"?>
 def candidate(name: str, *, days: int = 0, size: int = 10) -> VideoCandidate:
     return VideoCandidate(
         name=name,
-        remote_path=f"Power-Ladys-Scores/S2/{name}",
+        remote_path=f"Power-Ladys-Scores/Team-Event/S2/{name}",
         size=size,
         last_modified=datetime(2026, 8, 1, tzinfo=timezone.utc) + timedelta(days=days),
     )
@@ -55,7 +55,7 @@ class PropfindParsingTests(unittest.TestCase):
         response = mock.Mock(status_code=207, content=PROPFIND_XML)
         with mock.patch.object(nextcloud, "NEXTCLOUD_AUTH", ("user", "secret")), \
                 mock.patch.object(nextcloud.requests, "request", return_value=response) as request:
-            entries = nextcloud.list_directory("Power-Ladys-Scores/S2")
+            entries = nextcloud.list_directory("Power-Ladys-Scores/Team-Event/S2")
 
         self.assertEqual(request.call_args.args[0], "PROPFIND")
         self.assertEqual(request.call_args.kwargs["headers"]["Depth"], "1")
@@ -68,7 +68,7 @@ class PropfindParsingTests(unittest.TestCase):
         response = mock.Mock(status_code=404, content=b"")
         with mock.patch.object(nextcloud, "NEXTCLOUD_AUTH", ("user", "secret")), \
                 mock.patch.object(nextcloud.requests, "request", return_value=response):
-            self.assertEqual(nextcloud.list_directory("Power-Ladys-Scores/S2"), [])
+            self.assertEqual(nextcloud.list_directory("Power-Ladys-Scores/Team-Event/S2"), [])
 
 
 class CandidateSelectionTests(unittest.TestCase):

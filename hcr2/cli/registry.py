@@ -5,7 +5,19 @@ from types import ModuleType
 from typing import Callable
 
 import version
-from modules import donations, match, matchscore, player, season, sheet, stats, teamevent, vehicle, video
+from modules import (
+    distance,
+    donations,
+    match,
+    matchscore,
+    player,
+    season,
+    sheet,
+    stats,
+    teamevent,
+    vehicle,
+    video,
+)
 
 
 CommandHandler = Callable[[list[str]], None]
@@ -58,6 +70,7 @@ ENTITY_SPECS: tuple[EntitySpec, ...] = (
     EntitySpec("stats", "Show statistics", module=stats),
     EntitySpec("sheet", "Manage Excel files for matches", module=sheet),
     EntitySpec("video", "Read match results from a final standings video", module=video),
+    EntitySpec("distance", "Weekly kilometres from the distance chest", module=distance),
     EntitySpec("donations", "Manage Research Lab donations", module=donations),
     EntitySpec(
         "version",

@@ -26,8 +26,8 @@ Argument: die Match-ID.
 python3 hcr2.py video frames --match <id>
 ```
 
-Das lädt das Video aus `Power-Ladys-Scores/S<season>/` (dort, wo auch die Match-Sheets
-liegen) nach `tmp/video/<id>/` und schneidet es mit 1 fps in Frames.
+Das lädt das Video aus `Power-Ladys-Scores/Team-Event/S<season>/` (dort liegen auch die
+Match-Sheets) nach `tmp/video/<id>/` und schneidet es mit 1 fps in Frames.
 
 - **⚠️ zum Dateinamen ernst nehmen.** Heißt die Datei nicht `<id>.mp4`, hat der Befehl
   nur geraten. Vor dem Weitermachen mit `python3 hcr2.py video list --match <id>`

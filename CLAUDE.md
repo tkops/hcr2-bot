@@ -46,7 +46,7 @@ Three consumers sit on top of one SQLite database:
 
 `hcr2/cli/registry.py` holds `ENTITY_SPECS` — the single list of top-level entities
 (`vehicle`, `player`, `teamevent`, `season`, `match`, `matchscore`, `stats`, `sheet`, `video`,
-`donations`, `version`), each mapping to a `modules/<entity>.py` that exposes `handle_command(cmd, args)`
+`distance`, `donations`, `version`), each mapping to a `modules/<entity>.py` that exposes `handle_command(cmd, args)`
 and `print_help()`. `hcr2/cli/app.py` registers each spec both as a Typer command and in a hand-rolled
 `CliApp.dispatch`; `_should_use_legacy_dispatch` routes bare/`help`/unknown argv to the hand-rolled
 path and everything else through Typer with `allow_extra_args`/`ignore_unknown_options` — so Typer
@@ -167,6 +167,24 @@ playbook locally.
 
 ### Sheets / Nextcloud
 
+**The remote layout is one subfolder per source of truth**, and every remote path in the
+codebase derives from the constants in `hcr2/integrations/nextcloud.py` — a hardcoded second
+copy is how the two drift apart:
+
+```
+Power-Ladys-Scores/            share root, exposed to the team as /Scores
+  Team-Event/S<season>/        match videos + match sheets (both, same folder)
+  Ladys/                       Ladys.mp4 (team screen) + Ladys.xlsx
+  Donations/                   Donations.xlsx
+  Wochen-Truhe/                weekly chest, feature still to come
+```
+
+`season_subpath()` and `remote_path()` build the paths; `sheets.web_url()` maps a remote
+subpath to the share link the bot posts, so `/Scores` mirrors `Power-Ladys-Scores` one to one.
+`match_sheet_local_path` keeps the same shape locally, so the mirror in the repo root can be
+compared with the remote by eye. The Excel route is deliberately kept working as the
+Claude-free fallback for entering results by hand.
+
 `sheet` commands export a match/player/donations workbook, upload it to Nextcloud (edited in
 Collabora by users), then re-import and diff it back into the DB. Flow control lives in
 `hcr2/services/sheets.py`, workbook I/O in `hcr2/exporters/excel.py`, remote paths and WebDAV in
@@ -189,7 +207,7 @@ column B create a player from column C as before.
 ### Match videos
 
 `video` reads the final standings recording instead of a workbook. The video is dropped into the
-**same Nextcloud folder as the match sheets** (`Power-Ladys-Scores/S<season>/`), found via
+**same Nextcloud folder as the match sheets** (`Power-Ladys-Scores/Team-Event/S<season>/`), found via
 `nextcloud.list_directory` (PROPFIND, Depth 1), cached under `tmp/video/<match_id>/` and cut into
 frames by ffmpeg. `hcr2/services/videos.py` holds the flow,
 `hcr2/output/videos.py` the prints, `.claude/skills/match-video/SKILL.md` the reading instructions
@@ -223,6 +241,30 @@ what the database holds — the model records, the code compares.
 in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
 `sheet player import`, nothing on Nextcloud is deleted.
 
+### Team screen video (player-video)
+
+`video player frames` / `video player apply` read `Ladys.mp4` from `Power-Ladys-Scores/Ladys/`
+(next to `Ladys.xlsx`, it is not season-bound) and reconcile the active PLTE list:
+garage power, names, joiners, leavers. `hcr2/services/rosters.py` holds the diff,
+`.claude/skills/player-video/SKILL.md` the reading instructions.
+
+The problem this flow exists to solve is not OCR, it is identity: an unknown name may be a
+new member or one of 600+ former players under a changed name. So `build_plan` never
+resolves an addition on its own — the plan stops at `PENDING` until the row carries `new`
+or `reactivate: <id>`. `find_candidates` puts the players *missing from the video* at the
+top of every candidate list unconditionally, because one leaver plus one arrival is what a
+rename looks like from outside; below them come fuzzy matches, where containment
+(`Bisa` inside `BisaTheWise`) outranks the raw ratio — short leftover names score
+deceptively high on `SequenceMatcher` alone. `reactivate` pointing at an *active* player is
+the normal rename case and turns into RENAME + GP instead of REACTIVATE, and removes that
+player from the leavers.
+
+Two rails mirror the match flow: the member count in the screen header must equal the rows
+read, and more than `MAX_LEAVER_SHARE` of the roster leaving is treated as an incomplete
+reading. A third is specific here — `untypeable_characters` rejects any stored name the
+team could not enter on a German keyboard (umlauts and ß pass, `£ π Ł` and emoji do not),
+so the transliteration convention is enforced rather than merely documented.
+
 **ffmpeg is a runtime dependency of `video frames` only**, and it is not packaged as `ffmpeg` here:
 CentOS Stream 9 has no such package, EPEL ships `ffmpeg-free`, and the recordings are **HEVC**
 (`hvc1` + AAC) — the codec that build may drop. So `resolve_ffmpeg()` tries `$HCR2_FFMPEG`, then
@@ -230,6 +272,37 @@ CentOS Stream 9 has no such package, EPEL ships `ffmpeg-free`, and the recording
 static full build (verified to decode HEVC) and needs no root. It is deliberately **not** in
 `requirements.txt`: prod only runs the bot, which has no video command. `video frames` reports a
 missing binary with that hint rather than failing obscurely.
+
+### Weekly distance
+
+`distance` holds the kilometres from the team distance chest — **one row per player and ISO
+week, holding that week's distance**, not a running total like `donation`. The chest resets
+every period, so the number in the video already is the week's performance and there is
+nothing to subtract. Migration `0003`, `ON DELETE RESTRICT` like the other result data, and
+`deletions.DEPENDENCIES["player"]` lists it so a delete reports it instead of failing.
+
+The averages in `player show` and in the ranking are deliberately the **same** window
+(`distances.AVERAGE_WINDOW`, imported into the players repository as
+`DISTANCE_AVERAGE_WINDOW`): two different definitions of "average" in two places is how a
+number stops meaning anything. It looks at recent weeks rather than all time, so it describes
+current form and survives one missed week.
+
+`import_week` takes the chest progress from the video header as `team_total` and refuses to
+write when the kilometres do not add up to it — the same role the points sum plays for a
+match. The videos live in `Wochen-Truhe/<year>/w<week>.mp4`; `video chest frames --year --week`
+fetches and cuts them, matching the week number rather than the exact filename so `W34.mp4`
+and `w034.mp4` both work; `video chest apply` writes a reading, and
+`.claude/skills/chest-video/SKILL.md` holds the reading instructions.
+
+**The completeness proof here is the member count, not the chest total** — and that is a
+correction, not a preference. The first design blocked on the chest progress the way the
+match flow blocks on the points sum. Measured against a real recording (2026 W34) the 49
+rows added up to 10824 km while the chest showed 11031: the chest keeps counting kilometres
+of players who left mid-period, the list only shows current members. So `member_count` from
+the header is the hard check and the chest difference is reported without blocking.
+
+Bot: `.km` (last week's ranking), `.km <player>` (that player's weeks), `.km weeks` (team
+totals). It is in `PUBLIC_COMMANDS`.
 
 ### Secrets
 

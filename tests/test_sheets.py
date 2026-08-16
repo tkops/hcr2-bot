@@ -16,10 +16,10 @@ class SheetTests(TemporaryDatabaseTestCase):
         self.assertEqual(filename, "7_Team_Cup_Fast_Opps_1.xlsx")
         self.assertEqual(
             sheet_service.match_sheet_remote_path_for_filename(62, filename).as_posix(),
-            "Power-Ladys-Scores/S62/7_Team_Cup_Fast_Opps_1.xlsx",
+            "Power-Ladys-Scores/Team-Event/S62/7_Team_Cup_Fast_Opps_1.xlsx",
         )
         self.assertEqual(sheet_service.match_sheet_tmp_path(filename), Path("tmp") / filename)
-        self.assertEqual(sheet_service.scores_web_url(62), "https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S62")
+        self.assertEqual(sheet_service.scores_web_url(62), "https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/Team-Event/S62")
         self.assertEqual(sheet_service.to_k(12500), 12.5)
         self.assertEqual(sheet_service.parse_k_amount("12,5k"), 12500)
         self.assertEqual(sheet_service.parse_k_amount(7), 7000)
@@ -36,10 +36,10 @@ class SheetTests(TemporaryDatabaseTestCase):
 
         upload.assert_called_once_with(
             local_path,
-            Path("Power-Ladys-Scores") / "S62" / local_path.name,
+            Path("Power-Ladys-Scores") / "Team-Event" / "S62" / local_path.name,
             overwrite=False,
         )
-        download.assert_called_once_with(Path("Power-Ladys-Scores") / "S62" / local_path.name, local_path)
+        download.assert_called_once_with(Path("Power-Ladys-Scores") / "Team-Event" / "S62" / local_path.name, local_path)
         delete.assert_called_once_with(sheet_service.PLAYERS_REMOTE_PATH)
 
     def test_sheet_service_imports_player_rows(self) -> None:
@@ -114,7 +114,7 @@ class SheetTests(TemporaryDatabaseTestCase):
             )
 
         self.assertEqual(outcome.status, "EXPORTED")
-        self.assertEqual(outcome.label, "Power-Ladys-Scores/Ladys.xlsx")
+        self.assertEqual(outcome.label, "Power-Ladys-Scores/Ladys/Ladys.xlsx")
         self.assertTrue(outcome.created)
         self.assertFalse(out_path.exists())
         upload.assert_called_once_with(out_path, sheet_service.PLAYERS_REMOTE_PATH, overwrite=True)
@@ -147,7 +147,7 @@ class SheetTests(TemporaryDatabaseTestCase):
             )
 
         self.assertEqual(outcome.status, "EXPORTED")
-        self.assertEqual(outcome.label, "Power-Ladys-Scores/Donations.xlsx")
+        self.assertEqual(outcome.label, "Power-Ladys-Scores/Donations/Donations.xlsx")
         self.assertFalse(outcome.created)
         self.assertFalse(out_path.exists())
         upload.assert_called_once_with(out_path, sheet_service.DONATIONS_REMOTE_PATH, overwrite=True)
@@ -206,14 +206,14 @@ class SheetTests(TemporaryDatabaseTestCase):
                 absent_checker=lambda _day, _frm, _until: False,
             )
 
-        expected_local = output_path / "S2" / "1_Teamcup_Rivals.xlsx"
+        expected_local = output_path / "Team-Event" / "S2" / "1_Teamcup_Rivals.xlsx"
         self.assertEqual(outcome.status, "EXPORTED")
-        self.assertEqual(outcome.markdown_link, "[1_Teamcup_Rivals.xlsx](https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/S2)")
+        self.assertEqual(outcome.markdown_link, "[1_Teamcup_Rivals.xlsx](https://t4s.srvdns.de/s/MCneXpH3RPB6XKs?path=/Scores/Team-Event/S2)")
         self.assertTrue(outcome.created)
         self.assertFalse(expected_local.exists())
         upload.assert_called_once_with(
             expected_local,
-            Path("Power-Ladys-Scores") / "S2" / "1_Teamcup_Rivals.xlsx",
+            Path("Power-Ladys-Scores") / "Team-Event" / "S2" / "1_Teamcup_Rivals.xlsx",
             overwrite=False,
         )
 
@@ -429,7 +429,7 @@ class SheetTests(TemporaryDatabaseTestCase):
         self.assertTrue(created)
         self.assertIn("[7_Team_Cup_Fast_Opps_1.xlsx]", result)
         local_path, season, filename = upload.call_args.args
-        self.assertEqual(local_path, output_path / "S62" / "7_Team_Cup_Fast_Opps_1.xlsx")
+        self.assertEqual(local_path, output_path / "Team-Event" / "S62" / "7_Team_Cup_Fast_Opps_1.xlsx")
         self.assertEqual(season, 62)
         self.assertEqual(filename, "7_Team_Cup_Fast_Opps_1.xlsx")
         self.assertFalse(local_path.exists())
