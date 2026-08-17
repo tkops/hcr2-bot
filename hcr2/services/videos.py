@@ -35,6 +35,7 @@ from hcr2.repositories import matches as match_repo
 from hcr2.repositories import matchscores as matchscore_repo
 from hcr2.repositories import players as player_repo
 from hcr2.services import matchscores as matchscore_service
+from hcr2.timestamps import to_local
 
 
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
@@ -448,9 +449,28 @@ def get_roster(match_id: int | None = None) -> list[RosterPlayer] | None:
     if match_id is not None and match_repo.get_match(match_id) is None:
         return None
     return [
-        RosterPlayer(id=row.id, name=row.name, alias=row.alias, away_until=row.away_until)
+        RosterPlayer(
+            id=row.id,
+            name=row.name,
+            alias=row.alias,
+            away_until=row.away_until,
+            joined_at=_joined_date(row),
+        )
         for row in player_repo.list_players(active_only=True, team_filter="PLTE", sort_by="name")
     ]
+
+
+def _joined_date(row) -> str | None:
+    """When this player became part of the active roster, as a local date.
+
+    `active_modified` is the better answer where it exists - it also covers a returning
+    player who was reactivated - and its trigger fires only on a real change of `active`,
+    so it is not bumped by unrelated edits. A freshly added player never saw an UPDATE,
+    so there it stays NULL and `created_at` is all we have.
+    """
+    stored = row.active_modified or row.created_at
+    local = to_local(stored, placeholder="")
+    return local[:10] if len(local) >= 10 and local[4] == "-" else None
 
 
 # -------------------- Results file --------------------
@@ -738,6 +758,8 @@ def _name_notes(rows: Sequence[tuple[VideoEntry, str]]) -> list[ReviewNote]:
 def _absence_notes(match_id: int, rows: Sequence[tuple[VideoEntry, str]]) -> list[ReviewNote]:
     """A 0/0 row and a missing row mean the same thing - the player did not drive."""
     drove = {entry.pid for entry, _ in rows if entry.score > 0 or entry.points > 0}
+    match = match_repo.get_match(match_id)
+    match_start = match.start if match is not None else None
 
     notes = []
     for player in get_roster(match_id) or []:
@@ -745,6 +767,15 @@ def _absence_notes(match_id: int, rows: Sequence[tuple[VideoEntry, str]]) -> lis
             continue
         history = matchscore_repo.recent_scores(player.id, exclude_match_id=match_id)
         last = f", last scored {_thousands(history[0])}" if history else ", no earlier score"
+        if joined_after_start(player.joined_at, match_start) and not matchscore_repo.has_ever_driven(player.id):
+            notes.append(ReviewNote(
+                kind="joined",
+                message=(
+                    f"{player.name} ({player.id}) joined the roster on {player.joined_at}, after this "
+                    f"match started on {match_start} - could not drive it{last}"
+                ),
+            ))
+            continue
         if matchscore_service.compute_absent(match_id, player.id):
             notes.append(ReviewNote(
                 kind="absent",
@@ -756,6 +787,25 @@ def _absence_notes(match_id: int, rows: Sequence[tuple[VideoEntry, str]]) -> lis
             message=f"{player.name} ({player.id}) did not drive and is not marked away{last}",
         ))
     return notes
+
+
+def joined_after_start(joined_at: str | None, match_start: str | None) -> bool:
+    """Someone who joined once the match was running could not take part - the game
+    locks the roster at the start, so this is not a no-show and not the player's doing.
+
+    Only half the test: the caller also requires that the player has never driven, see
+    `matchscore_repo.has_ever_driven`. On its own a join date is too weak to excuse
+    anyone, because it falls back to a seed-wide `created_at`.
+
+    Both sides are plain `YYYY-MM-DD` local dates, so a string compare is the date
+    compare. Two cases deliberately do *not* excuse anyone, because a wrong excuse
+    hides a real no-show while a wrong flag only costs a line to read: an unknown date
+    on either side, and a join on the start date itself - day granularity cannot say
+    whether that was before or after the start.
+    """
+    if not joined_at or not match_start:
+        return False
+    return joined_at > match_start
 
 
 def _outlier_notes(match_id: int, rows: Sequence[tuple[VideoEntry, str]]) -> list[ReviewNote]:

@@ -237,6 +237,17 @@ against the player's own average alone: a hard track set drags everyone down and
 flag the entire roster. This is why `VideoEntry.name` carries what the *video* showed rather than
 what the database holds — the model records, the code compares.
 
+A roster player who joined **after the match started** could not take part at all, so she is
+reported as `[Joined late]` rather than as a no-show, and gets **no matchscore row** — a 0/0 would
+read as having ducked out and would drag her average down. Two conditions must both hold, and the
+second is what makes it safe: `RosterPlayer.joined_at` (from `active_modified`, falling back to
+`created_at`) is **strictly after** `match.start`, *and* `matchscores.has_ever_driven` is false.
+The date alone is not evidence — `created_at` is one bulk seed timestamp for every player imported
+at once (`2025-07-20` in prod), so on any match older than that it would excuse the entire roster;
+measured against the live DB that is 48 players versus the 1 the guard actually lets through. A join
+**on** the start date stays a no-show, because day granularity cannot place it either side of the
+start and a wrong excuse hides a real absence.
+
 `apply_results` does not reuse `sheets.apply_match_sheet_entries` because `absent` may be omitted
 in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
 `sheet player import`, nothing on Nextcloud is deleted.

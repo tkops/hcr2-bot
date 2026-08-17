@@ -368,6 +368,44 @@ class ReviewNoteTests(TemporaryDatabaseTestCase):
         self.assertIn("Alice", notes["missing"].message)
         self.assertIn("did not drive", notes["missing"].message)
 
+    def add_late_joiner(self, joined_at: str) -> None:
+        """A second active PLTE player whose roster row postdates match 1 (2021-06-05)."""
+        import sqlite3
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO players (id, name, alias, garage_power, active, team, discord_name,
+                                     is_leader, created_at)
+                VALUES (3, 'Newbie', 'newbie', 3000, 1, 'PLTE', NULL, 0, ?)
+                """,
+                (joined_at,),
+            )
+
+    def test_a_player_who_joined_after_the_match_started_is_excused(self) -> None:
+        self.add_late_joiner("2021-06-09 08:00:00")
+        notes = self.notes_for([VideoEntry(pid=1, score=44000, points=210)])
+        self.assertIn("joined", notes)
+        self.assertIn("Newbie", notes["joined"].message)
+        self.assertIn("could not drive it", notes["joined"].message)
+        # ...and is not also reported as a plain no-show.
+        self.assertNotIn("missing", notes)
+
+    def test_joining_on_the_start_date_itself_stays_a_no_show(self) -> None:
+        """Day granularity cannot say whether that was before or after the start."""
+        self.add_late_joiner("2021-06-05 08:00:00")
+        notes = self.notes_for([VideoEntry(pid=1, score=44000, points=210)])
+        self.assertNotIn("joined", notes)
+        self.assertIn("Newbie", notes["missing"].message)
+
+    def test_a_player_who_has_driven_before_is_never_excused_by_a_late_roster_date(self) -> None:
+        """Guards the bulk `created_at` seed date: Alice's row postdates the 2021 match,
+        but her result for it proves she was a member."""
+        notes = self.notes_for([VideoEntry(pid=2, score=30000, points=50), VideoEntry(pid=1, score=0, points=0)])
+        self.assertNotIn("joined", notes)
+        self.assertIn("missing", notes)
+        self.assertIn("Alice", notes["missing"].message)
+
     def test_a_close_opponent_spelling_is_offered_as_a_match_edit(self) -> None:
         notes = self.notes_for(
             [VideoEntry(pid=1, score=44000, points=210)], opponent="Rivalz"

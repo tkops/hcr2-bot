@@ -126,6 +126,7 @@ NOTE_LABELS = {
     "name": "Name",
     "missing": "Not in standings",
     "absent": "Away",
+    "joined": "Joined late",
     "outlier": "Score",
 }
 

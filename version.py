@@ -1,6 +1,7 @@
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 HISTORY = [
+    ("1.9.2", "2026-08-17", "video: Spielerinnen, die erst nach dem Matchstart ins Team kamen, werden als 'Joined late' gemeldet statt als Nichtstarter"),
     ("1.9.1", "2026-08-16", "Discord-Ausgabe wird bei Ueberlaenge aufgeteilt statt verworfen; km-Rangliste passt in eine Nachricht"),
     ("1.9.0", "2026-08-16", "chest-video: Wochen-Truhe auslesen, video chest apply, roster ohne Match"),
     ("1.8.0", "2026-08-16", "Wochenkilometer: distance-Entity, Bot-Befehl .km, Schnitt im Profil, video chest frames"),

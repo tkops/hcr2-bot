@@ -170,6 +170,7 @@ sondern jeden Punkt einordnen:
 | `[Opponent]` / `[Name]` | Video und DB schreiben denselben Namen anders | Vorgeschlagenen Befehl zeigen, **nicht** selbst ausführen. Bei Sonderzeichen erst transliterieren (£ → J, π → n) und den Befehl entsprechend anpassen. |
 | `[Not in standings]` | Kaderspielerin ist nicht gefahren und nicht als abwesend eingetragen | Hervorheben, besonders bei jemandem mit hohem letzten Score — das ist oft der Hinweis auf einen Kaderwechsel oder eine vergessene Abwesenheit. |
 | `[Away]` | Nicht gefahren, aber als abwesend eingetragen | Nur erwähnen, das ist der Normalfall. |
+| `[Joined late]` | Kaderspielerin kam erst nach dem Matchstart ins Team und konnte gar nicht teilnehmen | Als erklärt abhaken. **Keine** 0/0-Zeile für sie schreiben — ab dem Folgematch wird Teilnahme aber erwartet. |
 | `[Score]` | Score weicht stark vom eigenen Schnitt ab, gemessen an der Verschiebung des ganzen Teams | Prüfen, ob du dich verlesen hast: die Zeile im Frame nochmal ansehen. Erst wenn die Zahl stimmt, ist es ein echter Einbruch. |
 
 Was der Block **nicht** kann: eine Zeile finden, die du komplett übersehen hast — dafür

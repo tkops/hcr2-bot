@@ -150,6 +150,23 @@ def recent_scores(player_id: int, *, exclude_match_id: int, limit: int = 5) -> l
         return [int(row[0]) for row in cur.fetchall()]
 
 
+def has_ever_driven(player_id: int) -> bool:
+    """Any scoring result at all, this match included.
+
+    Proof of membership that no roster timestamp can override: `created_at` is a bulk
+    seed date for everyone imported at once, so on its own it would excuse a whole
+    roster on any match older than that seed. A 0/0 row does not count - it records
+    exactly the case where someone did *not* drive.
+    """
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM matchscore WHERE player_id = ? AND score > 0 LIMIT 1",
+            (player_id,),
+        )
+        return cur.fetchone() is not None
+
+
 def insert_score(
     *,
     match_id: int,

@@ -58,6 +58,10 @@ class RosterPlayer:
     name: str
     alias: str | None
     away_until: str | None
+    joined_at: str | None = None
+    """Local date (YYYY-MM-DD) the player became part of the active roster - `None`
+    when it cannot be determined. Someone who joined after a match had started could
+    not drive it, which is not the same as not showing up."""
 
 
 @dataclass(frozen=True)
