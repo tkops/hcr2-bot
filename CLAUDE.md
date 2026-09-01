@@ -18,6 +18,7 @@ python3 hcr2.py <entity> <command> [flags]           # legacy-compatible entry p
 python3 migrate_db.py [--db /path/to/hcr2.db]        # apply SQL migrations
 python3 bot.py dev | python3 bot.py prod             # Discord bot (needs secrets_config.py)
 python3 scripts/bump_version.py patch "Changelog text"
+python3 scripts/post_discord.py --mode prod --channel admin --file note.md  # manual post
 source completions/hcr2.bash                         # bash completion
 ```
 
@@ -36,6 +37,15 @@ Three consumers sit on top of one SQLite database:
    non-leaders may run. `run_hcr2` returns a `CliResult` — a `str` subclass carrying `ok` from the
    exit code — so the 52 call sites keep working unchanged while `_output_is_error` can trust the
    exit code instead of searching the text for words like "invalid".
+
+   `scripts/post_discord.py` goes the other way: the bot only ever writes as a reaction to a
+   command, so an announcement needs this. It reads `secrets_config.CONFIG` for token and channel
+   ids, so `--channel user|admin|birthday` means exactly what it means in `bot.py`. `--mode` is
+   required (dev and prod are different servers, and a post cannot be un-sent), `--dry-run` shows
+   what would go out, `--split` cuts on line boundaries past the 2000-character limit. `birthday`
+   is the one channel the bot posts to but takes **no** commands in — `on_message` listens only in
+   `CHANNEL_IDS` and `ADMIN_CHANNEL_IDS`, so a leader command typed under such a post does nothing.
+
 3. **One-off maintenance scripts** at the root (`import_match.py`, `import_teamevent.py`,
    `import_player.py`, `import_matchscores.py`, `import_flags.py`, `find_teamevent.py`,
    `backup_schema.py`, `catxls.py`). These predate the package: they hardcode
