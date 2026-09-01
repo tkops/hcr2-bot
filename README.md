@@ -77,6 +77,7 @@ tests/test_nextcloud.py      Nextcloud path helpers
 tests/test_videos.py         match video lookup, frames and result import
 tests/test_rosters.py        team screen video matching and roster plan
 tests/test_distances.py      weekly kilometres, import checks and profile average
+tests/test_broom.py          removal ranking: veto, loyalty shield and shrinkage
 ```
 
 ## Project Layout

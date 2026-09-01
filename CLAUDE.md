@@ -332,6 +332,146 @@ Independently, the kilometre ranking is sized so a full roster stays inside one 
 otherwise silently start splitting the weekly ranking in two. As of now no bot command
 exceeds the limit, so the splitting is a net for lists that grow, not a live fix.
 
+### Broom (Rauswurf-Kandidaten)
+
+`stats broom` rankt Kandidatinnen für einen Rauswurf über die letzten
+`broom.WINDOW_MATCHES` Matches (40, ≈10 Wochen) und begründet jede Zeile.
+`hcr2/services/broom.py` hält das Modell, `hcr2/output/broom.py` die Ausgabe,
+`hcr2/repositories/broom.py` das SQL. Im Bot gibt es zwei Einstiege, `.B` und
+`.stats broom`, die sich `bot.broom_call()` teilen — dort werden Discord-Argumente auf
+Flags übersetzt (`.B 10` → `--top 10`, `all` → `--all`, `leader` →
+`--include-leaders`), weil in Discord niemand Flags tippt. Eine Ziffer direkt hinter
+einem Flag ist dessen Wert und nicht das Top-Limit, sonst wird `.B --last 80` zu
+`--last --top 80`.
+
+**Beide Einstiege sind leader-only, kommen aber unterschiedlich dahin.** `.B` steht
+einfach nicht in `PUBLIC_COMMANDS`, also greift die Kanal- und Rollenprüfung in
+`on_message`. `.stats` **ist** öffentlich, deshalb braucht das Subkommando ein
+**eigenes Gate** (`leader and in_admin_channel`) — fällt das weg, kann jedes Mitglied
+im User-Channel die Liste abrufen. Ein Test in `tests/test_bot_contract.py` pinnt
+beide Hälften. `.b` ist bewusst frei geblieben: nach der Konvention (klein listet,
+groß zeigt Details) wäre das der Platz für eine Einzelansicht.
+
+Vier Entscheidungen, die gegen die echte DB gemessen sind und nicht aus Geschmack
+stammen:
+
+- **Zugehörigkeit schützt oben und belastet unten.** Anzahl Matches ist hier fast
+  dasselbe wie Zugehörigkeitsdauer (7 Matches bei der Neuesten, 797 bei der
+  Ältesten), also hätte sie als reiner Strafposten immer die fünf jüngsten
+  Mitglieder nach oben gesetzt — unabhängig davon, wie sie fahren. Ab
+  `PROBATION_MATCHES + 1` ist sie deshalb ein Multiplikator ≤ 1 (`LOYALTY_TIERS`,
+  Boden `LOYALTY_FLOOR`), der ein Risiko nur senken kann. **Innerhalb der Probezeit
+  gilt das Gegenteil** (`PROBATION_PENALTY`, ×1,30): wer noch nichts geleistet hat,
+  hat auch keinen Kredit. Das Fenster ist bewusst kurz — bei 11 gefahrenen Matches
+  ist eine Spielerin schon draußen, also kann der alte Fehlermodus („die Neuesten
+  stehen immer oben") nicht zurückkommen.
+- **Quoten werden gegen die Teamquote geschrumpft** (`SHRINKAGE`) — **außer in der
+  Probezeit**. Ohne Shrinkage kam die etablierte Neue über die Hintertür zurück:
+  1 unentschuldigtes Fehlen von 7 Matches sind 14 % und schlagen jeden
+  Veteranenwert. Für eine Spielerin in der Probezeit ist diese Begründung bewusst
+  umgekehrt — dort *ist* das Überreagieren auf die kleine Stichprobe die Regel, also
+  wird sie roh gemessen.
+- **Jede im Team wird bewertet, `MIN_MATCHES` ist keine Eintrittshürde.** Es
+  definiert nur die `cohort` — die Population, aus der Regression, Perzentile und
+  Teamquoten kommen. Wer eine Kaderzeile im Fenster hat, wird gereiht; die Faktoren,
+  die eine dünne Stichprobe nicht tragen, melden sich selbst ab
+  (`MIN_TREND_MATCHES` für Trend und Aussetzer, `MIN_CONTRIBUTION_ROWS` für den
+  Beitrag) und ihr Gewicht wird umgelegt. `BroomUnrated` bleibt nur für den Fall
+  „gar keine Kaderzeile im Fenster" — frisch aufgenommen, noch kein Match. Weil ein
+  kurzes Fenster damit eine Rangliste ohne Maßstab erzeugen kann, trägt
+  `BroomResult.cohort_size` die Kohortengröße und die Ausgabe warnt unter
+  `MIN_COHORT`: eine Liste, die auf zwei Faktoren beruht, sieht sonst genauso
+  belastbar aus wie eine auf sieben.
+- **Die Probezeit ist die Ausnahme von der Shrinkage.** Ein einzelnes
+  unentschuldigtes Fehlen ist dort schon ein Sofortfall, und im Sofortfall-Tier
+  stehen Probezeitfälle **vorn** — es gibt keine Historie dagegen abzuwägen.
+- **Rückkehrerinnen bekommen einen Bonus** (`RETURNER_BONUS`, ×0,90 auf den
+  Schutzfaktor), denn zurückzukommen *ist* Loyalität. `is_returner` erkennt sie an
+  gefahrenen Matches **außerhalb** des Fensters (≥ `MIN_MATCHES`) plus einer echten
+  Lücke darin (`rows <= window - MIN_MATCHES`) — nicht an Datumsfeldern. Am echten
+  Kader trennt das die Gruppen exakt: jede Neue hat 0 Matches Historie, jede
+  Rückkehrerin mindestens 19. Die zweite Bedingung ist die wichtige — die Historie
+  einer Veteranin ist ebenso groß, sie war nur das ganze Fenster über im Kader, und
+  ohne sie würde jede den Bonus einsammeln.
+- **Ein Check-in-No-Show vetoisiert eine Neue und reizt bei allen anderen die
+  Zuverlässigkeit aus.** `checkin = 1` heißt „in der Liste, Score `--`" — eingeloggt,
+  Slot belegt, nicht gefahren. Das passiert ~2,5× pro Monat im ganzen Kader, als rein
+  gewichtete Achse wäre es für fast alle null. Unter `NEWCOMER_MATCHES` gefahrenen
+  Matches beendet **eine** Episode die Diskussion. Bei einer Etablierten nicht:
+  `BLOCKER_FLOOR_EPISODES` Episoden setzen den Zuverlässigkeitsfaktor auf sein
+  Maximum, und der Rest des Modells entscheidet, wo sie damit landet. Eine Veteranin,
+  die das Team in Punkten trägt, wird deswegen nicht rausgeworfen — der reale Fall
+  (536 gefahrene Matches, 78,9 Punkte pro Kadermatch) liegt damit auf Platz 13 statt
+  als Sofortfall auf Platz 1. `blocker_episodes` fasst Vorkommen innerhalb
+  `BLOCKER_EPISODE_DAYS` zu einem Vorfall zusammen — ohne das wäre ein
+  Gründungsmitglied mit 782 gefahrenen Matches Sofortfall, weil zwei ihrer Vorkommen
+  zwei Tage auseinander lagen. Vorkommen außerhalb des Fensters erscheinen als
+  `blockers_earlier` und ranken nie.
+- **Der absolute Beitrag zählt, nicht nur der Vergleich pro Match.** Gemessen am
+  echten Kader holte eine Spielerin 56 Event-Punkte aus 38 gefahrenen Matches (1,4
+  pro Match), eine andere 2682 aus 32 (78,9) — jedes Match schlecht zu fahren bringt
+  dem Team weniger als gelegentlich richtig. `points_per_row` teilt durch die
+  **verfügbaren** Kadermatches (`available_rows = rows - excused`), aus zwei Gründen:
+  eine mitten im Fenster Beigetretene wird nicht für Matches bestraft, in denen sie
+  nicht dabei sein konnte, und entschuldigtes Fehlen kommt nicht durch die Hintertür
+  in die Wertung zurück — genau das hatte ein Test aufgedeckt. Unentschuldigte
+  Zeilen bleiben im Nenner, Abtauchen kostet also weiter. Das Gewicht ist bewusst
+  moderat: `corr(Punkte, perfΔ) = 0,78`, der Faktor wiederholt die Leistung zum
+  großen Teil und darf dieselbe Sache nicht zweimal zählen. Auffällig ist dagegen
+  `corr(Punkte, gefahrene Matches) = 0,19` — die Summe wird von der Qualität
+  bestimmt, nicht von der Teilnahme, was die Regel überhaupt erst rechtfertigt.
+- **Die GP-Korrektur wird gemessen, nicht gesetzt.** `_gp_slope` regressiert die
+  Leistungsdelta auf die Garage Power des aktuellen Kaders (live 1,09 Score pro
+  GP-Punkt, r = 0,28, also unter 10 % erklärte Varianz) — genau der kleine Anteil,
+  den die Korrektur haben soll, weil nur die *aktuelle* GP bekannt ist.
+
+**Alle Kohortenwerte — Regression, Perzentile, Teamquoten — laufen über den ganzen
+Kader, Leader eingeschlossen, aber nur über Spielerinnen mit mindestens
+`MIN_MATCHES` Fensterspielen; gefiltert wird erst bei der Ausgabe.** Wer gelistet
+wird, ist Policy; wie GP mit Score zusammenhängt, ist es nicht. Die Steigung ohne
+Leader zu schätzen schnitt das High-GP-Ende ab und drückte sie von 1,09 auf 0,37.
+Deshalb ändert `--include-leaders` nur, wer erscheint, nicht die Werte der anderen.
+`_percentile` gibt bei einer Kohorte ohne Streuung 0,5 zurück statt 1,0 — „wie viele
+liegen unter mir" ist bei lauter gleichen Werten 0 und hätte über `low_is_worse`
+den ganzen Kader als jeweils Schlechteste bewertet.
+
+Die Begründungszeilen sind **deterministische Vorlagen**, kein Modelltext: gleiche
+Datenlage, gleiche Sätze. Sie können auch entlasten („durch GP erklärt"), und wenn
+keine Schwelle greift, nennt `_with_reasons` den stärksten Faktor — ein Name mit
+leerem Block darunter liest sich als Fehler. `--json` gibt dasselbe maschinenlesbar
+aus, als Andockpunkt für einen späteren Skill, der daraus ein Gespräch formuliert.
+Die Rechnung bleibt Code, weil der Bot kein Claude aufrufen kann und weil eine Liste,
+die sich zwischen zwei Läufen ändert, in einem Rauswurfgespräch nichts wert ist.
+
+Kilometer zählen als Motivation (`corr(km, Leistung) = +0,58`, doppelt so stark wie
+GP), überschneiden sich also mit der Leistung — beide Gewichte zusammen sind deshalb
+bewusst moderat.
+
+**Entschuldigte Abwesenheit ist kein Faktor.** Sie korreliert mit nichts
+(r = −0,03 gegen die Kilometer), sagt also nichts über Einsatz, sondern ist echtes
+Leben. `excused` bleibt im Modell und erscheint als Kontextzeile mit „zählt nicht",
+weil 15 % Abwesenheit im Fenster für ein Gespräch relevant ist — nur eben nicht als
+Vorwurf. Ein Test pinnt, dass sie das Risiko nicht bewegt.
+
+**Die Ausgabe ist deutsch**, als einziges Modul unter `hcr2/output/` — der Text geht
+direkt an die Teamleitung. Jeder Faktor trägt in `FACTORS` Kürzel, Gewicht, Erklärung
+und Emoji beieinander, damit Tabellenkopf, Legende und Rechnung nicht auseinander
+laufen können; die Gewichte summieren auf 100 (auch das ein Test). Die Legende steht
+**am Ende**: die Standardausgabe ist ~3000 Zeichen und wird von `send_codeblock` auf
+zwei Nachrichten geteilt, und in die erste gehört die Rangliste mit ihren
+Begründungen, nicht die Spaltenerklärung.
+
+**Die Emoji-Spaltenköpfe sind Handarbeit, und zwei Tests halten sie zusammen.** Ein
+Emoji ist *zwei* Anzeigespalten breit, aber für `len()` ein Zeichen — deshalb wird
+die Kopfzelle als `icon + ICON_CELL` (zwei Leerzeichen) gebaut und nicht mit
+`f"{icon:>4}"` rechtsbündig gefüllt, was eine Spalte zu breit herauskäme. Die
+Datenzeilen enthalten kein Emoji und richten sich damit immer aneinander aus; nur der
+Kopf kann verrutschen. Ein Test prüft, dass Kopf, Trennlinie und Datenzeilen
+identische *Anzeige*breite haben (`WIDTH`), ein zweiter, dass jedes Icon ein einzelner
+Codepoint ohne Variation Selector ist — `🛡️` (U+1F6E1 U+FE0F), ZWJ-Sequenzen und
+Skin-Tones rendern je nach Client ein oder zwei Spalten breit, und eine Tabelle, die
+nur manchmal ausgerichtet ist, ist schlechter als eine ohne Emoji.
+
 ### Secrets
 
 `secrets_config.py` is gitignored and exports `CONFIG` (per-mode Discord token, channel and role IDs)

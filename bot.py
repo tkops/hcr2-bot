@@ -558,6 +558,7 @@ async def send_admin_help(channel):
         value=help_field([
             (".v", "List vehicles"),
             (".d", "Donation index below 100"),
+            (".B [n|all|leaders]", "Removal candidates with reasons"),
             (".version", "Show bot version"),
             (".ph .th .sh .mh .xh", "Detailed admin helps"),
         ]),
@@ -662,6 +663,28 @@ async def on_ready():
 
 def is_public(cmd: str) -> bool:
     return cmd in PUBLIC_COMMANDS
+
+def broom_call(args) -> list:
+    """CLI-Aufruf für die Besen-Liste aus Discord-Argumenten.
+
+    Nobody types flags in Discord: '.B 10' means the top ten. Shared by '.B' and
+    '.stats broom' so the two entry points cannot drift apart.
+    """
+    call = ["stats", "broom"]
+    after_flag = False
+    for a in args:
+        if a.isdigit() and not after_flag:
+            call += ["--top", a]
+        elif a.lower() == "all":
+            call.append("--all")
+        elif a.lower() in ("leaders", "leader"):
+            call.append("--include-leaders")
+        else:
+            call.append(a)
+        # A digit right behind a flag is that flag's value, not the top limit -
+        # otherwise '.B --last 80' turns into '--last --top 80'.
+        after_flag = a.startswith("--")
+    return call
 
 # ===================== Admin Sub-Help Texte (2 Spalten) ======================
 
@@ -1159,6 +1182,12 @@ async def on_message(message):
         sub = args[0].lower() if args else "perf"
         rest = args[1:] if args else []
 
+        # .stats itself is public, so the subcommand needs its own gate: broom names
+        # candidates for removal and must never reach the user channel. Silently
+        # ignored like every other admin command, so it does not advertise itself.
+        if sub == "broom" and not (leader and in_admin_channel):
+            return
+
         if sub in ("bday", "birthday"):
             call = ["stats", "bdayplot"] + rest
 
@@ -1221,10 +1250,18 @@ async def on_message(message):
             call = ["stats", "battle", rest[0], rest[1]]
         elif sub == "absent":
             call = ["stats", "absent"] + rest
+        elif sub == "broom":
+            call = broom_call(rest)
         else:
             call = ["stats", sub] + rest
 
         output = await run_hcr2(call)
+        await send_codeblock(message.channel, output)
+        return
+
+    # --- Broom: removal candidates (short form of '.stats broom') ---
+    if cmd == ".B":
+        output = await run_hcr2(broom_call(args))
         await send_codeblock(message.channel, output)
         return
 
