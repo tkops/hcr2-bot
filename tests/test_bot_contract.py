@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from unittest import mock
 
 from modules import player
@@ -161,3 +162,50 @@ class DiscordMessageLengthTests(TemporaryDatabaseTestCase):
 
         self.assertLessEqual(len(output) + bot.CODEBLOCK_FENCE_LEN, bot.MAX_DISCORD_MSG_LEN)
 
+
+
+class BroomShortcutTests(TemporaryDatabaseTestCase):
+    """'.B' is the short form of '.stats broom'."""
+
+    def test_digits_become_a_top_limit(self) -> None:
+        bot = _import_bot()
+        self.assertEqual(bot.broom_call(["10"]), ["stats", "broom", "--top", "10"])
+
+    def test_words_map_to_the_flags_nobody_types_in_discord(self) -> None:
+        bot = _import_bot()
+        self.assertEqual(bot.broom_call(["all"]), ["stats", "broom", "--all"])
+        self.assertEqual(
+            bot.broom_call(["leader"]), ["stats", "broom", "--include-leaders"]
+        )
+
+    def test_no_arguments_means_the_cli_default(self) -> None:
+        bot = _import_bot()
+        self.assertEqual(bot.broom_call([]), ["stats", "broom"])
+
+    def test_unknown_arguments_are_passed_through(self) -> None:
+        """So '--last 80' keeps working from Discord without a mapping per flag."""
+        bot = _import_bot()
+        self.assertEqual(
+            bot.broom_call(["--last", "80"]), ["stats", "broom", "--last", "80"]
+        )
+
+    def test_a_digit_behind_a_flag_is_that_flags_value(self) -> None:
+        """Not the top limit - '.B --last 80 3' has to mean both."""
+        bot = _import_bot()
+        self.assertEqual(
+            bot.broom_call(["--last", "80", "3"]),
+            ["stats", "broom", "--last", "80", "--top", "3"],
+        )
+
+    def test_the_shortcut_is_not_public(self) -> None:
+        """Both entry points have to be leader-only, and they get there differently:
+        '.B' is simply absent from PUBLIC_COMMANDS, so the channel and role check in
+        on_message covers it. '.stats' *is* public, which is why the broom subcommand
+        needs its own explicit gate - removing that gate would expose the list.
+        """
+        bot = _import_bot()
+        self.assertFalse(bot.is_public(".B"))
+        self.assertTrue(bot.is_public(".stats"))
+
+        source = (Path(__file__).resolve().parent.parent / "bot.py").read_text(encoding="utf-8")
+        self.assertIn('if sub == "broom" and not (leader and in_admin_channel):', source)

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 from typing import Callable, Optional
 
+from hcr2.output import broom as broom_output
 from hcr2.output import stats as stats_output
 from hcr2.repositories import stats as stats_repo
+from hcr2.services import broom as broom_service
 from hcr2.services import stats as stats_service
-from modules.common import is_help_request, parse_int, print_command_help, print_unknown_command
+from modules.common import (
+    get_arg_value,
+    is_help_request,
+    parse_int,
+    print_command_help,
+    print_unknown_command,
+)
 
 PERF_TABLE_LIMIT = 50
 
@@ -29,6 +37,7 @@ def handle_command(cmd, args):
         "score": _handle_score,
         "points": _handle_points,
         "player": _handle_player,
+        "broom": _handle_broom,
     }
     handler = handlers.get(cmd)
     if handler is None:
@@ -159,6 +168,40 @@ def _handle_player(args):
         return
     show_player_last_matches(player_id, last_n=last_n)
 
+USAGE_BROOM = (
+    "Usage: stats broom [--last <matches>] [--top <n>] [--all] "
+    "[--include-leaders] [--json]"
+)
+
+
+def _handle_broom(args):
+    window = broom_service.WINDOW_MATCHES
+    limit = broom_output.DEFAULT_LIMIT
+
+    raw_window = get_arg_value(args, "--last")
+    if raw_window is not None:
+        window = parse_int(raw_window, default=None)
+        if window is None or window < 1:
+            print(USAGE_BROOM)
+            return
+
+    raw_limit = get_arg_value(args, "--top")
+    if raw_limit is not None:
+        limit = parse_int(raw_limit, default=None)
+        if limit is None or limit < 1:
+            print(USAGE_BROOM)
+            return
+
+    result = broom_service.rank(
+        window=window,
+        include_leaders="--include-leaders" in args,
+    )
+    if "--json" in args:
+        broom_output.print_json(result)
+        return
+    broom_output.print_result(result, limit=limit, show_all="--all" in args)
+
+
 def print_help():
     print_command_help(
         usage="hcr2.py stats <command> [options]",
@@ -176,11 +219,18 @@ def print_help():
             ("player <id> [N]", "Show the last matches for one player"),
             ("score [season] [--skip|--no-skip]", "Show sum of scores per player in season"),
             ("points [season] [--skip|--no-skip]", "Show sum of points per player in season"),
+            (
+                "broom [--last <matches>] [--top <n>] [--all] [--include-leaders] [--json]",
+                "Rank candidates for removal, with reasons (German output)",
+            ),
         ],
         notes=[
             "perf defaults to players with at least 20% scored matches in season.",
             "perf --active shows only active PLTE players with more than 0 scored matches.",
             "score and points default to scored active PLTE players.",
+            f"broom looks at the last {broom_service.WINDOW_MATCHES} matches, skips leaders",
+            "and needs at least "
+            f"{broom_service.MIN_MATCHES} driven matches per player to rate her.",
         ],
     )
 

@@ -1,6 +1,7 @@
-VERSION = "1.9.2"
+VERSION = "1.10.0"
 
 HISTORY = [
+    ("1.10.0", "2026-09-01", "stats broom / Bot .B: Rauswurf-Kandidatinnen mit Begruendung je Kandidatin - sieben gewichtete Faktoren ueber die letzten 40 Matches, Schutz durch Zugehoerigkeit, Probezeit fuer die ersten 10 Matches, Rueckkehrer-Bonus"),
     ("1.9.2", "2026-08-17", "video: Spielerinnen, die erst nach dem Matchstart ins Team kamen, werden als 'Joined late' gemeldet statt als Nichtstarter"),
     ("1.9.1", "2026-08-16", "Discord-Ausgabe wird bei Ueberlaenge aufgeteilt statt verworfen; km-Rangliste passt in eine Nachricht"),
     ("1.9.0", "2026-08-16", "chest-video: Wochen-Truhe auslesen, video chest apply, roster ohne Match"),
