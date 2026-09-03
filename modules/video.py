@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Callable
 
 from hcr2.output import distances as distance_output
+from hcr2.output import interim as interim_output
 from hcr2.output import rosters as roster_output
 from hcr2.output import videos as video_output
 from hcr2.repositories import matches as match_repo
 from hcr2.services import distances as distance_service
+from hcr2.services import interim as interim_service
 from hcr2.services import rosters as roster_service
 from hcr2.services import videos as video_service
 from modules.common import (
@@ -21,10 +23,14 @@ from modules.common import (
 )
 
 
-USAGE_LIST = "Usage: video list --match <match_id>"
-USAGE_PULL = "Usage: video pull --match <match_id> [--file <name>]"
+USAGE_LIST = "Usage: video list --match <match_id> [--season <n>]"
+USAGE_PULL = "Usage: video pull --match <match_id> [--file <name>] [--season <n>]"
+USAGE_INTERIM = (
+    "Usage: video interim --match <match_id> [--file <results.json>] [--out <path>] "
+    "[--cleanup [--video <name>]] [--season <n>]"
+)
 USAGE_FRAMES = (
-    "Usage: video frames --match <match_id> [--file <name>] [--fps <n>] "
+    "Usage: video frames --match <match_id> [--file <name>] [--season <n>] [--fps <n>] "
     "[--width <px>] [--crop <w:h:x:y>] [--start <hh:mm:ss>] [--duration <sec>]"
 )
 USAGE_ROSTER = "Usage: video roster [--match <match_id>]"
@@ -43,13 +49,17 @@ def print_help():
     print_command_help(
         usage="hcr2.py video <command> [options]",
         commands=[
-            ("list --match <match_id>", "List video files in the match's season folder"),
+            ("list --match <match_id> [--season <n>]", "List video files in the match's season folder"),
             ("pull --match <match_id> [--file <name>]", "Download the match video from Nextcloud"),
             (
                 "frames --match <match_id> [--fps <n>] [--width <px>] [--crop <w:h:x:y>]",
                 "Cut the video into frames with ffmpeg",
             ),
             ("roster [--match <match_id>]", "Show active PLTE players for name matching"),
+            (
+                "interim --match <match_id> [--file <results.json>] [--out <path>] [--cleanup]",
+                "Report a running match: who has not driven, who improved, who is behind",
+            ),
             (
                 "apply --match <match_id> [--file <results.json>] [--dry-run] [--force]",
                 "Validate readings and write them to matchscore",
@@ -68,6 +78,8 @@ def print_help():
         notes=[
             "Match videos live next to the match sheets: Power-Ladys-Scores/Team-Event/S<season>/.",
             "apply refuses to write unless the points sum equals score_ladys (--force overrides).",
+            "interim never writes; a reading with time_left is refused by apply as a result.",
+            "frames/pull take --season for a match row that does not exist yet (interim recording).",
             "The team screen video (Ladys.mp4) sits in Ladys/, the chest videos in Wochen-Truhe/<year>/w<week>.mp4.",
             "player apply refuses to write while an addition has no new/reactivate decision.",
         ],
@@ -85,6 +97,7 @@ def handle_command(command, args):
         "frames": _handle_frames,
         "roster": _handle_roster,
         "apply": _handle_apply,
+        "interim": _handle_interim,
         "player": _handle_player,
         "chest": _handle_chest,
     }
@@ -113,13 +126,15 @@ def _handle_list(args):
     if match_id is None:
         return
 
+    season = parse_int(get_arg_value(args, "season"), default=None)
     match = match_repo.get_match(match_id)
-    if match is None:
+    if match is None and season is None:
         video_output.print_no_match_found()
         return
 
-    folder = video_service.season_folder(match.season_number)
-    candidates = video_service.list_candidates(match.season_number)
+    folder_season = season if match is None else match.season_number
+    folder = video_service.season_folder(folder_season)
+    candidates = video_service.list_candidates(folder_season)
     if not candidates:
         video_output.print_no_video_found(folder, match_id=match_id)
         return
@@ -130,7 +145,11 @@ def _handle_pull(args):
     match_id = _match_id_from(args, USAGE_PULL)
     if match_id is None:
         return
-    outcome = video_service.pull_video(match_id, filename=get_arg_value(args, "file"))
+    outcome = video_service.pull_video(
+        match_id,
+        filename=get_arg_value(args, "file"),
+        season=parse_int(get_arg_value(args, "season"), default=None),
+    )
     _report_pull(outcome, match_id=match_id, filename=get_arg_value(args, "file"))
 
 
@@ -171,6 +190,7 @@ def _handle_frames(args):
         start=get_arg_value(args, "start"),
         duration=get_arg_value(args, "duration"),
         filename=filename,
+        season=parse_int(get_arg_value(args, "season"), default=None),
     )
     if outcome.status == "NO_VIDEO" and outcome.pull is not None:
         _report_pull(outcome.pull, match_id=match_id, filename=filename)
@@ -286,6 +306,40 @@ def _handle_apply(args):
         dry_run=get_arg_value(args, "dry-run") is not None,
     )
     video_output.print_apply_outcome(outcome, match_id=match_id)
+
+
+def _handle_interim(args):
+    """Read-only by design: the match is still running, so every score is provisional."""
+    match_id = _match_id_from(args, USAGE_INTERIM)
+    if match_id is None:
+        return
+
+    raw_file = get_arg_value(args, "file")
+    path = Path(raw_file) if raw_file else video_service.results_path(match_id)
+    results, read_errors = video_service.load_results(path)
+    if results is None or read_errors:
+        video_output.print_results_errors(read_errors)
+        return
+
+    report = interim_service.build_report(results, match_id=match_id)
+    if report.status == "NO_MATCH":
+        interim_output.print_no_match_found(match_id)
+        return
+
+    interim_output.print_report(report)
+
+    out = get_arg_value(args, "out")
+    if out:
+        Path(out).write_text(interim_output.format_report(report) + "\n", encoding="utf-8")
+        interim_output.print_written(out)
+
+    if get_arg_value(args, "cleanup") is not None:
+        status, name = video_service.cleanup_interim_video(
+            match_id,
+            filename=get_arg_value(args, "video"),
+            season=parse_int(get_arg_value(args, "season"), default=None),
+        )
+        video_output.print_interim_cleanup(status, name, match_id=match_id)
 
 
 def _handle_player(args):

@@ -200,3 +200,17 @@ def _mb(size: int) -> str:
     if not size:
         return "-"
     return f"{size / (1024 * 1024):.1f} MB"
+
+
+def print_interim_cleanup(status: str, name: str, *, match_id: int) -> None:
+    """The temporary recording is meant to disappear - the final standings video is not."""
+    if status == "DELETED":
+        print(f"🧹 '{name}' auf Nextcloud gelöscht, lokale Frames entfernt")
+    elif status == "REFUSED":
+        print(f"⚠️  '{name}' ist die reguläre Aufnahme von Match {match_id} - nicht gelöscht")
+    elif status == "NOT_FOUND":
+        print(f"⚠️  Keine Aufnahme zu Match {match_id} auf Nextcloud gefunden - nichts gelöscht")
+    elif status == "NO_MATCH":
+        print(f"⚠️  Match {match_id} existiert nicht - nichts gelöscht")
+    else:
+        print(f"❌ Delete of '{name}' failed")

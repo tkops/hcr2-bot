@@ -1,6 +1,6 @@
 ---
 name: chest-video
-description: Wochenkilometer aus dem Video der Team-Distanztruhe auslesen und nach distance schreiben. Nutzen, wenn Kilometer, Wochenleistung oder die Truhe abgeglichen werden sollen, egal wie formuliert ("/chest-video 34", "w34 ist hochgeladen", "Kilometer eintragen", "Wochentruhe auswerten", "wer ist wieviel gefahren"). Nicht verwechseln mit [[match-video]] (Match-Ergebnisse) oder [[player-video]] (Kader und Garage Power).
+description: Wochenkilometer aus dem Video der Team-Distanztruhe auslesen und nach distance schreiben. Nutzen, wenn Kilometer, Wochenleistung oder die Truhe abgeglichen werden sollen, egal wie formuliert ("/chest-video 34", "w34 ist hochgeladen", "Kilometer eintragen", "Wochentruhe auswerten", "wer ist wieviel gefahren"). Nicht verwechseln mit [[match-video]] (Match-Ergebnisse, Endstand) oder [[player-video]] (Kader und Garage Power).
 ---
 
 # Wochen-Truhe auswerten

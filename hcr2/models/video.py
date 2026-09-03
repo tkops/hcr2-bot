@@ -41,6 +41,10 @@ class VideoResults:
     entries: list[VideoEntry] = field(default_factory=list)
     opponent: str = ""
     event: str = ""
+    time_left: str = ""
+    """The countdown still shown in the header - the proof that the match was running
+    when the recording was made. Set means the reading is an interim one, and
+    `validate_results` refuses to write it as a final result."""
 
 
 @dataclass(frozen=True)
@@ -94,3 +98,50 @@ class ApplyOutcome:
     changed: int = 0
     failed: int = 0
     score_updated: bool = False
+
+
+# -------------------- Interim standings (match still running) --------------------
+
+@dataclass(frozen=True)
+class InterimPlayer:
+    """One roster player in the interim report.
+
+    ``ratio`` is the score against her own reference, divided by the team's pace at this
+    moment - without that division every number would only say how far the match has
+    progressed.
+    """
+
+    pid: int
+    name: str
+    score: int = 0
+    base: int = 0
+    base_label: str = ""
+    ratio: float | None = None
+    state: str = ""
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class InterimReport:
+    status: str
+    match_id: int = 0
+    opponent: str = ""
+    event_name: str = ""
+    position: int = 0
+    event_matches: int = 0
+    time_left: str = ""
+    reference: str = ""
+    pace: float | None = None
+    roster_size: int = 0
+    driven: int = 0
+    points_total: int = 0
+    score_ladys: int = 0
+    not_driven: list[InterimPlayer] = field(default_factory=list)
+    aborted: list[InterimPlayer] = field(default_factory=list)
+    improved: list[InterimPlayer] = field(default_factory=list)
+    newcomers: list[InterimPlayer] = field(default_factory=list)
+    aborted_more: int = 0
+    behind_more: int = 0
+    behind: list[InterimPlayer] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)

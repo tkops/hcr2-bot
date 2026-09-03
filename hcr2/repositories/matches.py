@@ -105,7 +105,8 @@ def get_match(match_id: int) -> MatchDetail | None:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent
+            SELECT m.id, m.start, m.season_number, m.opponent, t.name, m.score_ladys, m.score_opponent,
+                   m.teamevent_id
             FROM match m
             JOIN teamevent t ON m.teamevent_id = t.id
             WHERE m.id = ?
@@ -114,6 +115,24 @@ def get_match(match_id: int) -> MatchDetail | None:
         )
         row = cur.fetchone()
         return _detail_from_row(row) if row else None
+
+
+def matches_in_teamevent(teamevent_id: int) -> list[MatchSummary]:
+    """The event's matches oldest first - the same four tracks, so the earlier ones are
+    the only fair yardstick for a match that is still running."""
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT m.id, m.start, t.name, m.opponent
+            FROM match m
+            JOIN teamevent t ON m.teamevent_id = t.id
+            WHERE m.teamevent_id = ?
+            ORDER BY m.start, m.id
+            """,
+            (teamevent_id,),
+        )
+        return [_summary_from_row(row) for row in cur.fetchall()]
 
 
 def delete_match(match_id: int) -> None:
@@ -134,5 +153,6 @@ def _detail_from_row(row) -> MatchDetail:
         event_name=row[4],
         score_ladys=row[5],
         score_opponent=row[6],
+        teamevent_id=row[7] if len(row) > 7 else 0,
     )
 

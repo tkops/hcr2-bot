@@ -20,4 +20,5 @@ class MatchDetail:
     event_name: str
     score_ladys: int
     score_opponent: int
+    teamevent_id: int = 0
 

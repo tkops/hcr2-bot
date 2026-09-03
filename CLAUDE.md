@@ -262,6 +262,70 @@ start and a wrong excuse hides a real absence.
 in the JSON; it is then derived from the away dates instead of being forced to 0. Unlike
 `sheet player import`, nothing on Nextcloud is deleted.
 
+### Zwischenstand eines laufenden Matches
+
+`video interim --match <id>` liest dieselbe Aufnahme wie `video apply`, aber aus einem
+laufenden Match (`<id>-tmp.mp4` neben der späteren Endaufnahme) und **schreibt nie**.
+`hcr2/services/interim.py` hält das Modell, `hcr2/output/interim.py` die deutsche,
+postfertige Ausgabe, der Skill-Abschnitt „Modus Zwischenstand" in
+`.claude/skills/match-video/SKILL.md` die Leseanleitung. Es gibt **zwei Einstiege in
+dieselbe Anleitung**: `match-video` (entscheidet am Countdown selbst) und das dünne
+Skill `zwischenstand`, das nur die Weiche stellt und dorthin verweist — die
+Leseanleitung (Zeilenaufbau, gelb/blau, Transliteration, ähnliche Namen) steht
+absichtlich nur einmal, weil eine zweite Kopie von der ersten wegdriftet. Zweck ist Eingreifen statt
+Protokollieren: wer ist noch nicht gefahren, wer hängt weit zurück, wen kann man loben.
+
+- **Der Countdown ist der Beweis, nicht die Absicht.** Die Lesung trägt ihn als
+  `VideoResults.time_left`, und `validate_results` **verweigert** eine Lesung mit
+  `time_left` als Endergebnis (`--force` degradiert das zur Warnung). Ohne diese Sperre
+  wäre der teuerste Fehler ein einziger Tippfehler im Kommando: `video apply` schriebe
+  für jede noch nicht Gefahrene eine 0/0-Zeile, `absent` würde aus den Urlaubsdaten zu 0
+  abgeleitet — und damit steht sie in jedem Schnitt und in `stats broom` als
+  **unentschuldigtes Fehlen**, in der Probezeit sofort als Rauswurfkandidatin.
+- **Ab Match 2 eines Events ist der Maßstab der eigene Score aus Match 1 desselben
+  Events** (`matchscores.scores_in_teamevent`) — gleiche Strecken, also der einzige
+  faire Vergleich; der eventübergreifende Schnitt aus `recent_scores` misst andere
+  Strecken. Im ersten Match des Events gibt es diesen Maßstab nicht, dann fällt der
+  Bericht auf den Schnitt zurück (`reference == "history"`) und sinnvoll sind dort nur
+  „nicht gefahren" und „wirkt abgebrochen".
+- **Alles wird gegen das Tempo des Teams geteilt** (Median aus `score/base`), sonst
+  misst der Bericht nur, wie weit das Match ist. Zwei Zahlen dahinter sind an der
+  echten DB gemessen, nicht gewählt: innerhalb eines Events sind die späteren Matches
+  **systematisch besser** (Median 1,04× des ersten, Match-Mediane 0,99–1,14 über 8837
+  Zeilen seit 2025) — gegen glatte 100 % gemessen wäre „hat sich gesteigert" die halbe
+  Mannschaft. Und gegen dieses Tempo fällt ein vollständiger Lauf praktisch nie unter
+  0,6 (1,2 % von 1152 Zeilen, p1 = 0,58), also ist `ABORT_RATIO` dort die Grenze
+  zwischen „schwach" und „abgebrochen".
+- **Ein Riesensprung über eine kaputte Basis ist keine Steigerung.** Am echten Video
+  stand eine Spielerin mit +274 % oben — ihr Vergleichswert aus Match 809 war selbst ein
+  Abbruch (6.034). Sie hätte damit die beiden echten Steigerungen (+56 %, +33 %)
+  verdrängt und wäre gleichzeitig mit 22.584 in die „Luft nach oben"-Liste gehört.
+  `_base_was_broken` hält solche Fälle deshalb aus der Lobliste heraus.
+- **Der Bericht ist auf Handlungsfähigkeit getrimmt, nicht auf Vollständigkeit.** Je
+  Wertungsliste `TOP_LIMIT` (3) Namen plus Restzähler, absolute Scores statt Prozenten,
+  keine Erklärzeilen — ~700 Zeichen. Das ist Vorgabe der Teamleitung („die Leader sollen
+  nicht überfordert werden"), und deshalb steht die Kürzung im Service (`aborted_more`,
+  `behind_more`), nicht in der Ausgabe: sie ist Teil des Modells, nicht Kosmetik.
+- **Neuzugänge stehen immer im Bericht** (`_newcomers`, `NEWCOMER_MATCHES` = 3),
+  gefahren oder nicht. Sie ist keine Wertung, sondern eine Beobachtungsliste: eine Neue
+  hat im laufenden Event meist gar keinen Vergleichswert, käme also in keinem anderen
+  Block vor. `matchscores.driven_counts` holt die Zahlen für den ganzen Kader in einer
+  Abfrage.
+- **Eine Zeile, die sich nicht zuordnen lässt, gehört mit `"pid": 0` in die Lesung.**
+  Sie wird als Warnung gemeldet; ließe man sie weg, stünde die Spielerin, zu der sie
+  gehört, unter „noch nicht gefahren". Genau so fiel im ersten echten Lauf auf, dass
+  eine Neue („Elias18") im Video stand und eine Gekickte noch im Kader.
+- **`--season` an `list`/`pull`/`frames` löst das Ei-Henne-Problem**: der Gegner steht
+  erst im Videokopf, die Match-Zeile kann also noch fehlen. Ordner ist die Saison, nicht
+  das Match. Das Match wird danach mit `match add` angelegt — **ohne Ergebnisse**.
+- `--cleanup` löscht die `-tmp`-Aufnahme auf Nextcloud und die lokalen Frames wieder,
+  verweigert das aber bei einer Datei, die exakt `<id>.mp4` heißt: das ist die
+  Endstandsaufnahme, die einzige Kopie eines nicht wiederholbaren Ergebnisses.
+
+Die Punktsumme stimmt auch mitten im Match mit der Kopfsumme (an einem echten
+Zwischenstand geprüft: 46 Zeilen, exakt 589), taugt hier also weiter als
+Vollständigkeitsprobe — nur ist sie im Bericht eine Warnung, weil nichts geschrieben wird.
+
 ### Team screen video (player-video)
 
 `video player frames` / `video player apply` read `Ladys.mp4` from `Power-Ladys-Scores/Ladys/`

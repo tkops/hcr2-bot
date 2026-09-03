@@ -160,14 +160,17 @@ def pull_video(
     match_id: int,
     *,
     filename: str | None = None,
+    season: int | None = None,
     lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
     downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
 ) -> PullOutcome:
+    """``season`` skips the match lookup - an interim recording is read *before* the
+    match row exists, because the opponent only becomes known from the video header."""
     match = match_repo.get_match(match_id)
-    if match is None:
+    if match is None and season is None:
         return PullOutcome(status="NO_MATCH")
 
-    season = match.season_number
+    season = season if match is None else match.season_number
     candidates = list_candidates(season, lister=lister)
     if not candidates:
         return PullOutcome(status="NO_VIDEO", season=season)
@@ -247,6 +250,7 @@ def extract_frames(
     start: str | None = None,
     duration: str | None = None,
     filename: str | None = None,
+    season: int | None = None,
     lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
     downloader: Callable[[str, Path], Optional[Path]] = nextcloud.download_file,
     runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
@@ -256,7 +260,7 @@ def extract_frames(
     if executable is None:
         return FramesOutcome(status="FFMPEG_MISSING")
 
-    pull = pull_video(match_id, filename=filename, lister=lister, downloader=downloader)
+    pull = pull_video(match_id, filename=filename, season=season, lister=lister, downloader=downloader)
     return _cut_frames(
         pull,
         frames_dir(match_id),
@@ -525,6 +529,7 @@ def load_results(path: Path) -> tuple[VideoResults | None, list[str]]:
         entries=entries,
         opponent=str(payload.get("opponent") or "").strip(),
         event=str(payload.get("event") or "").strip(),
+        time_left=str(payload.get("time_left") or "").strip(),
     )
     return results, errors
 
@@ -667,6 +672,18 @@ def validate_results(
     if results.match_id and results.match_id != match_id:
         errors.append(f"results file is for match {results.match_id}, not {match_id}")
 
+    if results.time_left:
+        # The countdown was still running when the recording was made, so these scores
+        # are provisional: writing them would leave 0/0 rows reading as no-shows.
+        message = (
+            f"the reading carries time_left '{results.time_left}' - it is an interim standing, "
+            "not a result. Use 'video interim --match <id>' instead"
+        )
+        if force:
+            warnings.append(message + " [forced]")
+        else:
+            errors.append(message)
+
     match = match_repo.get_match(match_id)
     if match is not None:
         opponent_errors, opponent_warnings = _check_opponent(results, match.opponent, force=force)
@@ -720,6 +737,44 @@ def validate_results(
         warnings.append(f"{missing} roster player(s) without an entry - see the review below")
 
     return errors, warnings, rows
+
+
+def cleanup_interim_video(
+    match_id: int,
+    *,
+    filename: str | None = None,
+    season: int | None = None,
+    lister: Callable[[str], Sequence[nextcloud.RemoteEntry]] = nextcloud.list_directory,
+    deleter: Callable[[str], bool] = nextcloud.delete_file,
+) -> tuple[str, str]:
+    """Delete the temporary recording again - remotely and locally.
+
+    Guarded by the file name: only a suffixed name (``810-tmp.mp4``) is removed, never
+    the canonical ``810.mp4``. That one is the match's final standings and the only copy
+    of a result that cannot be re-recorded.
+    """
+    match = match_repo.get_match(match_id)
+    if match is None and season is None:
+        return "NO_MATCH", ""
+
+    folder_season = season if match is None else match.season_number
+    candidates = list_candidates(folder_season, lister=lister)
+    candidate = select_candidate(match_id, candidates, filename=filename)
+    if candidate is None:
+        return "NOT_FOUND", ""
+
+    stem = candidate.name.rsplit(".", 1)[0]
+    if stem == str(match_id):
+        return "REFUSED", candidate.name
+
+    deleted = deleter(candidate.remote_path)
+    local = local_dir(match_id) / candidate.name
+    if local.exists():
+        local.unlink()
+    for frame in frames_dir(match_id).glob(FRAME_GLOB):
+        frame.unlink()
+
+    return ("DELETED" if deleted else "DELETE_FAILED"), candidate.name
 
 
 # -------------------- Review: what does not fit --------------------

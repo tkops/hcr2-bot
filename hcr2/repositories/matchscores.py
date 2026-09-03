@@ -150,6 +150,47 @@ def recent_scores(player_id: int, *, exclude_match_id: int, limit: int = 5) -> l
         return [int(row[0]) for row in cur.fetchall()]
 
 
+def scores_in_teamevent(teamevent_id: int, *, exclude_match_id: int) -> dict[int, list[tuple[int, int]]]:
+    """Per player, her scoring rows in this team event, oldest match first.
+
+    The tracks of an event do not change between its matches, so a score from match 1
+    is directly comparable to one from match 3 - which no cross-event average is.
+    """
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT s.player_id, s.match_id, s.score
+            FROM matchscore s
+            JOIN match m ON m.id = s.match_id
+            WHERE m.teamevent_id = ? AND s.match_id <> ? AND s.score > 0
+            ORDER BY m.start, m.id
+            """,
+            (teamevent_id, exclude_match_id),
+        )
+        history: dict[int, list[tuple[int, int]]] = {}
+        for player_id, match_id, score in cur.fetchall():
+            history.setdefault(int(player_id), []).append((int(match_id), int(score)))
+        return history
+
+
+def driven_counts(*, exclude_match_id: int) -> dict[int, int]:
+    """Per player, in how many matches she has a scoring row - one query for the whole
+    roster, because the interim report asks it for everybody at once."""
+    with connect_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT player_id, COUNT(*)
+            FROM matchscore
+            WHERE score > 0 AND match_id <> ?
+            GROUP BY player_id
+            """,
+            (exclude_match_id,),
+        )
+        return {int(row[0]): int(row[1]) for row in cur.fetchall()}
+
+
 def has_ever_driven(player_id: int) -> bool:
     """Any scoring result at all, this match included.
 

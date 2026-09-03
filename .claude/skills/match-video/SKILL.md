@@ -1,14 +1,21 @@
 ---
 name: match-video
-description: Ergebnisse eines Team-Matches aus dem FINAL-STANDINGS-Video auslesen und als matchscore in die DB schreiben. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen").
+description: Ergebnisse eines Team-Matches aus dem Standings-Video auslesen - beim Endstand als matchscore in die DB, beim Zwischenstand (Uhr läuft noch) als Bericht ohne Schreiben. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen", "Zwischenstand", "wer ist noch nicht gefahren", "wer kann sich noch steigern").
 ---
 
 # Match-Video auswerten
 
-Liest den Endstand eines Team-Matches aus dem Video und schreibt Score und Points
+Liest den Stand eines Team-Matches aus dem Video und schreibt Score und Points
 direkt nach `matchscore` — ohne Excel-Umweg.
 
 Argument: die Match-ID.
+
+**Zuerst entscheiden, welcher der beiden Modi gilt** — das steht im Videokopf, nicht im
+Auftrag: läuft dort noch ein Countdown (`16 h 07 m`), ist es ein **Zwischenstand** →
+[Modus Zwischenstand](#modus-zwischenstand-die-uhr-läuft-noch), Schritte 1–5 gelten
+gleich, Schritt 6 und 7 sind andere. Kein Countdown = Endstand = der Ablauf unten.
+Im Zweifel nachfragen: eine Zwischenlesung als Endergebnis zu schreiben, macht aus
+„noch nicht gefahren" ein „unentschuldigt gefehlt".
 
 - **Fehlt sie**, `python3 hcr2.py match list` zeigen und nachfragen. Nicht raten — das
   Video landet sonst auf dem falschen Match.
@@ -181,6 +188,80 @@ bemerkt er nur, wenn dabei ein Score-Ausreißer entsteht.
 
 Kurz auflisten: unsichere Zuordnungen, 0/0-Fälle, und ob beide Gegenproben sauber waren.
 Danach die Auffälligkeiten aus Schritt 8 mit deiner Einschätzung.
+
+## Modus Zwischenstand (die Uhr läuft noch)
+
+Einstieg auch direkt über [[zwischenstand]] — das Skill enthält nur die Weiche und
+verweist für alles Weitere hierher.
+
+Zweck: **jetzt** noch etwas bewegen können — wer ist noch nicht gefahren, wer hängt
+weit hinter ihrem eigenen Score aus einem früheren Match desselben Events, und wen kann
+man loben. Es wird **nichts** in die DB geschrieben.
+
+Schritte 1–5 sind identisch (Frames, Kader, Lesen, Zuordnen, Nicht-Gefahrene). Dazu:
+
+- Das Video heißt hier üblicherweise `<id>-tmp.mp4` und liegt im selben S-Ordner.
+  `--file` setzen, sonst greift der Kandidat, den `select_candidate` für den neuesten
+  hält.
+- **Gibt es das Match noch nicht**, geht `video frames` trotzdem: `--season <n>` sagt,
+  in welchem Ordner gesucht wird. Erst aus dem Videokopf kommen Event und Gegner, dann
+  `match add` vorschlagen — nur Match, **keine Ergebnisse**.
+- Eine Zeile, die sich **nicht** zuordnen lässt (Name im Video, nicht im Kader), mit
+  `"pid": 0` und `name` aufnehmen statt weglassen. Sie erscheint dann als Warnung; wird
+  sie weggelassen, landet die Spielerin, zu der sie gehört, fälschlich unter „noch nicht
+  gefahren". Ob Umbenennung oder Neuzugang, klärt [[player-video]] oder die Teamleitung.
+
+### 6b. Lesung schreiben
+
+Gleiche Datei wie beim Endstand, nach `tmp/video/<id>/interim.json`, plus **ein Feld
+mehr**:
+
+```json
+{"match_id": 810, "time_left": "16h07m", "score_ladys": 589, "...": "..."}
+```
+
+`time_left` ist der Countdown aus dem Kopf und **Pflicht**: er ist der Beweis, dass das
+Match noch lief. `video apply` verweigert eine Lesung mit `time_left` als Ergebnis, und
+`video interim` fragt ohne ihn nach, ob das nicht doch der Endstand war.
+
+Die Punktsumme muss auch hier der Kopfsumme entsprechen — an einem echten Zwischenstand
+geprüft: 46 gefahrene Zeilen ergaben exakt die 589 aus dem Kopf. Stimmt sie nicht, fehlt
+eine Zeile.
+
+### 7b. Bericht erzeugen
+
+```bash
+python3 hcr2.py video interim --match <id> --file tmp/video/<id>/interim.json
+```
+
+Der Bericht ist deutsch, postfertig und **bewusst kurz** (~700 Zeichen): noch nicht
+gefahren, „wirkt abgebrochen", „Luft nach oben", „Steigerungen", „Neu im Team". Die
+drei Wertungslisten zeigen **höchstens drei Namen** und zählen den Rest, und sie zeigen
+**absolute Scores** statt Prozenten — die Leitung soll handeln, nicht rechnen. „Neu im
+Team" listet **alle** in ihren ersten drei Matches, gefahren oder nicht.
+
+- **Ab dem zweiten Match eines Events** ist der Maßstab der eigene Score aus dem ersten
+  Match des Events — gleiche Strecken. Im ersten Match gibt es den nicht, dann zählt der
+  eigene Schnitt, und sinnvoll sind dort nur „nicht gefahren" und „wirkt abgebrochen".
+- Jede Prozentzahl ist **gegen das Tempo des Teams** gerechnet, nicht gegen 100 %.
+  Deshalb heißt „67 %" nicht „schlechter als früher", sondern „weiter zurück als der
+  Rest gerade steht" — mitten im Match kann das auch heißen: sie fährt noch.
+- **Nicht als Vorwurf weitergeben.** „Noch nicht gefahren" ist eine Erinnerung, solange
+  die Uhr läuft.
+
+Mit `--out <pfad>` landet derselbe Text in einer Datei; posten mit
+`scripts/post_discord.py --mode prod --channel birthday --file <pfad>` (Leader-Chat).
+
+### 8b. Video wieder wegräumen
+
+Die `-tmp`-Aufnahme ist Wegwerfware:
+
+```bash
+python3 hcr2.py video interim --match <id> --cleanup [--video <name>]
+```
+
+Löscht sie auf Nextcloud und die lokalen Frames. Eine Datei, die exakt `<id>.mp4` heißt,
+wird **nicht** gelöscht — das ist die Endstandsaufnahme.
 
 ## Grenzen
 

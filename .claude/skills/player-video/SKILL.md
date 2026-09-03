@@ -1,6 +1,6 @@
 ---
 name: player-video
-description: Die PLTE-Spielerliste aus dem Team-Infos-Video (Ladys.mp4) aktualisieren - Garage Power, Namen, Zu- und Abgänge. Nutzen, wenn der Kader abgeglichen werden soll, egal wie formuliert ("/player-video", "Ladys.mp4 ist hochgeladen", "Kader aktualisieren", "neue Spielerliste", "Garage Power aktualisieren", "wer ist neu im Team"). Nicht verwechseln mit [[match-video]] (Ergebnisse eines Matches) oder [[chest-video]] (Wochen-Truhe).
+description: Die PLTE-Spielerliste aus dem Team-Infos-Video (Ladys.mp4) aktualisieren - Garage Power, Namen, Zu- und Abgänge. Nutzen, wenn der Kader abgeglichen werden soll, egal wie formuliert ("/player-video", "Ladys.mp4 ist hochgeladen", "Kader aktualisieren", "neue Spielerliste", "Garage Power aktualisieren", "wer ist neu im Team"). Nicht verwechseln mit [[match-video]] (Ergebnisse eines Matches, Endstand) oder [[chest-video]] (Wochen-Truhe).
 ---
 
 # Kader aus dem Team-Video aktualisieren

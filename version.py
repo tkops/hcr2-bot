@@ -1,6 +1,9 @@
-VERSION = "1.10.1"
+VERSION = "1.11.2"
 
 HISTORY = [
+    ("1.11.2", "2026-09-02", "video interim: Bericht gekuerzt - max 3 Namen je Liste, absolute Zahlen, Neuzugaenge der ersten 3 Matches immer gelistet"),
+    ("1.11.1", "2026-09-02", "Skill /zwischenstand als eigener Einstieg fuer den Zwischenstand eines laufenden Matches"),
+    ("1.11.0", "2026-09-02", "video interim: Zwischenstand eines laufenden Matches auswerten (wer fehlt noch, wer kann sich steigern), ohne in die DB zu schreiben"),
     ("1.10.1", "2026-09-01", "scripts/post_discord.py: post a message to a bot channel by hand"),
     ("1.10.0", "2026-09-01", "stats broom / Bot .B: Rauswurf-Kandidatinnen mit Begruendung je Kandidatin - sieben gewichtete Faktoren ueber die letzten 40 Matches, Schutz durch Zugehoerigkeit, Probezeit fuer die ersten 10 Matches, Rueckkehrer-Bonus"),
     ("1.9.2", "2026-08-17", "video: Spielerinnen, die erst nach dem Matchstart ins Team kamen, werden als 'Joined late' gemeldet statt als Nichtstarter"),
