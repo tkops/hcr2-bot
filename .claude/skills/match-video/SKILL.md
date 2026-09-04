@@ -20,8 +20,9 @@ Im Zweifel nachfragen: eine Zwischenlesung als Endergebnis zu schreiben, macht a
 - **Fehlt sie**, `python3 hcr2.py match list` zeigen und nachfragen. Nicht raten — das
   Video landet sonst auf dem falschen Match.
 - **Gibt es das Match noch nicht** (`❌ No match found.`), nicht selbst anlegen: melden
-  und `python3 hcr2.py match add ...` vorschlagen. Der Gegnername und das Event stehen im
-  Videokopf, das Datum aber nicht.
+  und `python3 hcr2.py match add ...` vorschlagen. Gegnername und Event stehen im
+  Videokopf. **Nach dem Datum nicht fragen** — ohne `--start` leitet `match add` es selbst
+  ab (letztes Match des Monats + 2 Tage, sonst Monatserster), und das ist das richtige.
 - Ist im Verzeichnis eine `results.json` von einem früheren Durchgang, wird sie bei
   Schritt 6 überschrieben — vorher kurz erwähnen, falls sie fremde Zahlen enthält.
 
@@ -205,7 +206,8 @@ Schritte 1–5 sind identisch (Frames, Kader, Lesen, Zuordnen, Nicht-Gefahrene).
   hält.
 - **Gibt es das Match noch nicht**, geht `video frames` trotzdem: `--season <n>` sagt,
   in welchem Ordner gesucht wird. Erst aus dem Videokopf kommen Event und Gegner, dann
-  `match add` vorschlagen — nur Match, **keine Ergebnisse**.
+  `match add` vorschlagen — nur Match, **keine Ergebnisse**, und **ohne `--start`**:
+  das Datum leitet sich selbst ab, eine Rückfrage danach ist überflüssig.
 - Eine Zeile, die sich **nicht** zuordnen lässt (Name im Video, nicht im Kader), mit
   `"pid": 0` und `name` aufnehmen statt weglassen. Sie erscheint dann als Warnung; wird
   sie weggelassen, landet die Spielerin, zu der sie gehört, fälschlich unter „noch nicht
