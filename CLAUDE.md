@@ -326,6 +326,13 @@ Protokollieren: wer ist noch nicht gefahren, wer hängt weit zurück, wen kann m
 - `--cleanup` löscht die `-tmp`-Aufnahme auf Nextcloud und die lokalen Frames wieder,
   verweigert das aber bei einer Datei, die exakt `<id>.mp4` heißt: das ist die
   Endstandsaufnahme, die einzige Kopie eines nicht wiederholbaren Ergebnisses.
+  **Bericht und Aufräumen sind zwei unabhängige Schritte** (`_print_interim_report`,
+  `_cleanup_interim`): das Aufräumen wird typisch später nachgeholt, wenn die Lesung
+  nicht mehr im Standardpfad liegt, und hing es am Lesen, brach `--cleanup` mit
+  `❌ results file not found` ab, ohne die Datei anzufassen. Eine fehlende Lesung ist bei
+  reinem Aufräumen deshalb still — ein ❌ würde über `status.py` den Exit-Code auf 1
+  setzen und ein geglücktes Löschen als Fehlschlag melden. Eine mit `--file` benannte oder
+  eine vorhandene, aber kaputte Lesung wird weiter gemeldet und hält das Löschen nicht auf.
 
 Die Punktsumme stimmt auch mitten im Match mit der Kopfsumme (an einem echten
 Zwischenstand geprüft: 46 Zeilen, exakt 589), taugt hier also weiter als

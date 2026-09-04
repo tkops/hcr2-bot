@@ -267,6 +267,10 @@ python3 hcr2.py video interim --match <id> --cleanup [--video <name>]
 Löscht sie auf Nextcloud und die lokalen Frames. Eine Datei, die exakt `<id>.mp4` heißt,
 wird **nicht** gelöscht — das ist die Endstandsaufnahme.
 
+Das Aufräumen hängt **nicht** am Lesen: der Befehl geht auch ohne `interim.json` durch,
+also auch dann, wenn du es Tage später nachholst. Nur wenn du eine Lesung mit `--file`
+benennst, muss sie da sein.
+
 ## Grenzen
 
 - **Welche DB getroffen wird, hängt am Checkout.** `hcr2/db/connection.py` nimmt das

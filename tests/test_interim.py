@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from unittest import mock
 
 from hcr2.models.video import VideoEntry, VideoResults
 from hcr2.output import interim as interim_output
 from hcr2.services import interim as interim_service
 from hcr2.services import videos as video_service
+from modules import video as video_module
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -254,6 +256,60 @@ class InterimReportTests(TemporaryDatabaseTestCase):
             totals = conn.execute("SELECT score_ladys, score_opponent FROM match WHERE id = 2").fetchone()
         self.assertEqual(rows, 0)
         self.assertEqual(tuple(totals), (0, 0))
+
+
+class InterimCleanupCommandTests(TemporaryDatabaseTestCase):
+    """Aufräumen und Berichten sind zwei Schritte. Das Aufräumen wird typisch später
+    nachgeholt, wenn die Lesung nicht mehr im Standardpfad liegt - hing es am Lesen,
+    brach `--cleanup` mit "results file not found" ab, ohne die Datei anzufassen."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.calls: list[str | None] = []
+        patch = mock.patch.object(
+            video_service, "cleanup_interim_video",
+            side_effect=lambda match_id, **kw: (self.calls.append(kw.get("filename")), ("DELETED", "1-tmp.mp4"))[1],
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+        # Der Standardpfad der Lesung liegt im Temp-Verzeichnis, nicht im Repo.
+        self.default = Path(self.tempdir.name) / "results.json"
+        path_patch = mock.patch.object(video_service, "results_path", return_value=self.default)
+        path_patch.start()
+        self.addCleanup(path_patch.stop)
+
+    def run_cli(self, *args) -> str:
+        return self.capture_stdout(video_module.handle_command, "interim", list(args))
+
+    def test_cleanup_runs_without_any_reading(self) -> None:
+        output = self.run_cli("--match", "1", "--cleanup", "--video", "1-tmp.mp4")
+
+        self.assertEqual(self.calls, ["1-tmp.mp4"])
+        # Kein ❌: main() macht daran den Exit-Code fest, ein geglücktes Aufräumen
+        # dürfte sonst als Fehlschlag enden.
+        self.assertNotIn("❌", output)
+        self.assertNotIn("results file not found", output)
+
+    def test_a_broken_reading_is_still_reported_and_does_not_stop_the_cleanup(self) -> None:
+        self.default.write_text("{not json", encoding="utf-8")
+
+        output = self.run_cli("--match", "1", "--cleanup")
+
+        self.assertIn("❌", output)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_a_missing_file_named_explicitly_is_still_an_error(self) -> None:
+        """Wer `--file` angibt, meint diese Datei - deren Fehlen ist ein echter Befund."""
+        output = self.run_cli("--match", "1", "--cleanup", "--file", "nope.json")
+
+        self.assertIn("❌", output)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_without_cleanup_a_missing_reading_stays_an_error(self) -> None:
+        output = self.run_cli("--match", "1")
+
+        self.assertIn("❌", output)
+        self.assertEqual(self.calls, [])
 
 
 class InterimGuardTests(TemporaryDatabaseTestCase):

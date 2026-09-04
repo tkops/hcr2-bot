@@ -1,6 +1,7 @@
-VERSION = "1.11.3"
+VERSION = "1.11.4"
 
 HISTORY = [
+    ("1.11.4", "2026-09-04", "video interim: --cleanup l\u00e4uft unabh\u00e4ngig von der Lesung"),
     ("1.11.3", "2026-09-04", "Zwischenstand: 'Luft nach oben' zeigt f\u00fcnf Namen statt drei, ohne Restz\u00e4hler"),
     ("1.11.2", "2026-09-02", "video interim: Bericht gekuerzt - max 3 Namen je Liste, absolute Zahlen, Neuzugaenge der ersten 3 Matches immer gelistet"),
     ("1.11.1", "2026-09-02", "Skill /zwischenstand als eigener Einstieg fuer den Zwischenstand eines laufenden Matches"),

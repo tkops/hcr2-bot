@@ -309,13 +309,34 @@ def _handle_apply(args):
 
 
 def _handle_interim(args):
-    """Read-only by design: the match is still running, so every score is provisional."""
+    """Read-only by design: the match is still running, so every score is provisional.
+
+    Bericht und Aufräumen sind **zwei unabhängige Schritte**. Das Aufräumen der
+    -tmp-Aufnahme wird typisch später nachgeholt, wenn die Lesung längst nicht mehr im
+    Standardpfad liegt - hing es am Lesen, brach `--cleanup` mit
+    "results file not found" ab, ohne die Datei anzufassen.
+    """
     match_id = _match_id_from(args, USAGE_INTERIM)
     if match_id is None:
         return
 
+    cleanup = get_arg_value(args, "cleanup") is not None
+    _print_interim_report(args, match_id, reading_optional=cleanup)
+    if cleanup:
+        _cleanup_interim(args, match_id)
+
+
+def _print_interim_report(args, match_id, *, reading_optional: bool) -> None:
+    """`reading_optional` heißt: es wurde nur aufgeräumt. Eine fehlende Lesung ist dann
+    keine Beschwerde wert - und darf vor allem kein ❌ drucken, weil `main()` daran den
+    Exit-Code festmacht und ein geglücktes Aufräumen sonst als Fehlschlag endet. Eine
+    *vorhandene, aber kaputte* Lesung wird weiter gemeldet: das ist ein echter Befund.
+    """
     raw_file = get_arg_value(args, "file")
     path = Path(raw_file) if raw_file else video_service.results_path(match_id)
+    if reading_optional and not raw_file and not path.exists():
+        return
+
     results, read_errors = video_service.load_results(path)
     if results is None or read_errors:
         video_output.print_results_errors(read_errors)
@@ -333,13 +354,14 @@ def _handle_interim(args):
         Path(out).write_text(interim_output.format_report(report) + "\n", encoding="utf-8")
         interim_output.print_written(out)
 
-    if get_arg_value(args, "cleanup") is not None:
-        status, name = video_service.cleanup_interim_video(
-            match_id,
-            filename=get_arg_value(args, "video"),
-            season=parse_int(get_arg_value(args, "season"), default=None),
-        )
-        video_output.print_interim_cleanup(status, name, match_id=match_id)
+
+def _cleanup_interim(args, match_id) -> None:
+    status, name = video_service.cleanup_interim_video(
+        match_id,
+        filename=get_arg_value(args, "video"),
+        season=parse_int(get_arg_value(args, "season"), default=None),
+    )
+    video_output.print_interim_cleanup(status, name, match_id=match_id)
 
 
 def _handle_player(args):
