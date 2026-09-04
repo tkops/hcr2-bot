@@ -141,7 +141,6 @@ class InterimReport:
     improved: list[InterimPlayer] = field(default_factory=list)
     newcomers: list[InterimPlayer] = field(default_factory=list)
     aborted_more: int = 0
-    behind_more: int = 0
     behind: list[InterimPlayer] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

@@ -236,11 +236,13 @@ eine Zeile.
 python3 hcr2.py video interim --match <id> --file tmp/video/<id>/interim.json
 ```
 
-Der Bericht ist deutsch, postfertig und **bewusst kurz** (~700 Zeichen): noch nicht
+Der Bericht ist deutsch, postfertig und **bewusst kurz** (~800 Zeichen): noch nicht
 gefahren, „wirkt abgebrochen", „Luft nach oben", „Steigerungen", „Neu im Team". Die
-drei Wertungslisten zeigen **höchstens drei Namen** und zählen den Rest, und sie zeigen
-**absolute Scores** statt Prozenten — die Leitung soll handeln, nicht rechnen. „Neu im
-Team" listet **alle** in ihren ersten drei Matches, gefahren oder nicht.
+Wertungslisten zeigen **absolute Scores** statt Prozenten — die Leitung soll handeln,
+nicht rechnen — und sind gekürzt: „wirkt abgebrochen" auf **drei Namen** plus Restzähler,
+„Steigerungen" auf drei ohne, **„Luft nach oben" auf fünf und ohne Restzähler**, weil das
+die Liste ist, auf die die Leitung tatsächlich zugeht. „Neu im Team" listet **alle**
+in ihren ersten drei Matches, gefahren oder nicht.
 
 - **Ab dem zweiten Match eines Events** ist der Maßstab der eigene Score aus dem ersten
   Match des Events — gleiche Strecken. Im ersten Match gibt es den nicht, dann zählt der

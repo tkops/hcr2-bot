@@ -125,16 +125,50 @@ class InterimReportTests(TemporaryDatabaseTestCase):
         # +900 % over a base of 5000 that was itself an outlier says "back to normal".
         self.assertEqual([player.pid for player in report.improved], [])
 
-    def test_each_list_holds_at_most_three_names_and_counts_the_rest(self) -> None:
-        entries = self.flat_run(factor=1.0)
-        for index in range(5):
-            entries[index] = VideoEntry(pid=self.pids[index], score=int(BASE * 0.8), points=5)
+    def wide_roster(self, *, low: int, factor: float):
+        """A roster big enough that the low group stays a minority - otherwise it *is* the
+        team's pace and by definition nobody is behind it."""
+        extra = list(range(20, 30))
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO players (id, name, alias, garage_power, active, team)
+                VALUES (?, ?, ?, 5000, 1, 'PLTE')
+                """,
+                [(pid, f"Lady{pid}", f"lady{pid}") for pid in extra],
+            )
+            conn.executemany(
+                "INSERT INTO matchscore (match_id, player_id, score, points) VALUES (1, ?, ?, 10)",
+                [(pid, BASE) for pid in extra],
+            )
+        pids = self.pids + extra
+        entries = [VideoEntry(pid=pid, score=BASE, points=10) for pid in pids]
+        for index in range(low):
+            entries[index] = VideoEntry(pid=pids[index], score=int(BASE * factor), points=5)
+        return entries
 
-        report = self.report(entries)
+    def section(self, text: str, heading: str) -> list[str]:
+        block = text.split(heading, 1)[1].split("\n\n", 1)[0]
+        return [line for line in block.splitlines() if line]
 
-        self.assertEqual(len(report.behind), interim_service.TOP_LIMIT)
-        self.assertEqual(report.behind_more, 2)
-        self.assertIn("und 2 weitere", interim_output.format_report(report))
+    def test_behind_holds_five_names_and_never_names_a_rest(self) -> None:
+        """Vorgabe der Teamleitung: "Luft nach oben" ist die Liste, auf die sie zugeht, also
+        fuenf Namen - und ohne Restzaehler, der nur Platz kostet."""
+        report = self.report(self.wide_roster(low=7, factor=0.8))
+        text = interim_output.format_report(report)
+
+        self.assertEqual(len(report.behind), interim_service.BEHIND_LIMIT)
+        self.assertEqual(len(self.section(text, "Luft nach oben**")), 5)
+        self.assertNotIn("weitere", text)
+        self.assertFalse(hasattr(report, "behind_more"))
+
+    def test_aborted_still_holds_three_names_and_counts_the_rest(self) -> None:
+        report = self.report(self.wide_roster(low=4, factor=0.4))
+        text = interim_output.format_report(report)
+
+        self.assertEqual(len(report.aborted), interim_service.TOP_LIMIT)
+        self.assertEqual(report.aborted_more, 1)
+        self.assertIn("und 1 weitere", text)
 
     def test_newcomers_are_listed_whether_they_drove_or_not(self) -> None:
         with sqlite3.connect(self.db_path) as conn:

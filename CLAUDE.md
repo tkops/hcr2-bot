@@ -302,10 +302,15 @@ Protokollieren: wer ist noch nicht gefahren, wer hängt weit zurück, wen kann m
   verdrängt und wäre gleichzeitig mit 22.584 in die „Luft nach oben"-Liste gehört.
   `_base_was_broken` hält solche Fälle deshalb aus der Lobliste heraus.
 - **Der Bericht ist auf Handlungsfähigkeit getrimmt, nicht auf Vollständigkeit.** Je
-  Wertungsliste `TOP_LIMIT` (3) Namen plus Restzähler, absolute Scores statt Prozenten,
-  keine Erklärzeilen — ~700 Zeichen. Das ist Vorgabe der Teamleitung („die Leader sollen
-  nicht überfordert werden"), und deshalb steht die Kürzung im Service (`aborted_more`,
-  `behind_more`), nicht in der Ausgabe: sie ist Teil des Modells, nicht Kosmetik.
+  Wertungsliste `TOP_LIMIT` (3) Namen — bei „wirkt abgebrochen" mit Restzähler
+  (`aborted_more`), bei „Steigerungen" ohne —, absolute Scores statt Prozenten,
+  keine Erklärzeilen — ~800 Zeichen. Das ist Vorgabe der Teamleitung („die Leader sollen
+  nicht überfordert werden"), und deshalb steht die Kürzung im Service (`aborted_more`),
+  nicht in der Ausgabe: sie ist Teil des Modells, nicht Kosmetik. **„Luft nach oben"
+  weicht ab** (`BEHIND_LIMIT` = 5, **kein** Restzähler): das ist die Liste, auf die die
+  Leitung im laufenden Match zugeht, drei Namen waren dafür zu wenig. Weil der Rest dort
+  nicht gemeldet wird, hat das Modell auch kein `behind_more` — ein Feld ohne Abnehmer
+  wäre nur eine Behauptung über die Ausgabe.
 - **Neuzugänge stehen immer im Bericht** (`_newcomers`, `NEWCOMER_MATCHES` = 3),
   gefahren oder nicht. Sie ist keine Wertung, sondern eine Beobachtungsliste: eine Neue
   hat im laufenden Event meist gar keinen Vergleichswert, käme also in keinem anderen

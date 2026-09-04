@@ -44,6 +44,10 @@ MIN_HISTORY = 3
 # Der Bericht geht an die Teamleitung, nicht in ein Archiv: drei Namen pro Liste sind
 # handhabbar, der Rest wird nur gezählt.
 TOP_LIMIT = 3
+# "Luft nach oben" ist die Liste, auf die die Leitung tatsächlich zugeht - deshalb nach
+# Vorgabe der Teamleitung fünf Namen statt drei, und ohne Restzähler: wer hier noch nicht
+# steht, ist ohnehin nicht der nächste Anruf, und die Zeile hat nur Platz gekostet.
+BEHIND_LIMIT = 5
 # Wer so wenige Matches gefahren hat, steht immer im Bericht - egal wie sie fährt.
 NEWCOMER_MATCHES = 3
 
@@ -184,8 +188,7 @@ def build_report(results: VideoResults, *, match_id: int) -> InterimReport:
         aborted=aborted[:TOP_LIMIT],
         aborted_more=max(0, len(aborted) - TOP_LIMIT),
         improved=improved[:TOP_LIMIT],
-        behind=behind[:TOP_LIMIT],
-        behind_more=max(0, len(behind) - TOP_LIMIT),
+        behind=behind[:BEHIND_LIMIT],
         newcomers=_newcomers(roster, entries, match_id=match_id),
         warnings=warnings,
         errors=errors,

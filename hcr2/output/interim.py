@@ -43,7 +43,8 @@ def print_written(path: str) -> None:
 def format_report(report: InterimReport) -> str:
     """Kurz halten ist hier eine Anforderung, keine Vorliebe: der Bericht wird mitten im
     Match gelesen und soll zu einer Handlung führen. Deshalb je Liste höchstens
-    `TOP_LIMIT` Namen, absolute Zahlen statt Prozenten und keine Erklärzeilen."""
+    `TOP_LIMIT` Namen (bei "Luft nach oben" `BEHIND_LIMIT`, und dort ohne Restzähler),
+    absolute Zahlen statt Prozenten und keine Erklärzeilen."""
     lines = [
         f"🏁 **Zwischenstand Match {report.match_id}** · {report.event_name} · gegen {report.opponent}",
         f"Match {report.position} von {report.event_matches}{_time_left(report)} · "
@@ -68,7 +69,6 @@ def format_report(report: InterimReport) -> str:
         lines.append("")
         lines.append("📉 **Luft nach oben**")
         lines.extend(_target_lines(report.behind, report))
-        lines.extend(_rest(report.behind_more))
 
     if report.improved:
         lines.append("")
