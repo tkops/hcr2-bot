@@ -1,6 +1,16 @@
-VERSION = "1.11.4"
+VERSION = "1.19.0"
 
 HISTORY = [
+    ("1.19.0", "2026-09-11", "broom: Zugehoerigkeit zieht feste Punkte ab statt prozentual zu wirken - der Multiplikator schuetzte die Schlechtesten am staerksten und haengte den Bonus ans Rohrisiko statt an die Matchzahl"),
+    ("1.18.0", "2026-09-11", "broom-Tabelle zeigt echte Werte statt Perzentile (Perf in k, Kilometer gesamt, Fehltermine, gefahrene Matches) und Wort-Spaltenkoepfe statt Emoji"),
+    ("1.17.0", "2026-09-11", "broom: im Topf reihen vier Dinge - unentschuldigtes Fehlen (35), Leistung (35), Kilometer (30) und die Zugehoerigkeit als Multiplikator"),
+    ("1.16.0", "2026-09-11", "broom vereinfacht: im Topf reihen nur noch Kilometer und Zugehoerigkeit, alles andere ist Begruendungszeile statt Gewicht; Probezeit ohne Aufschlag; Kohortenschwelle folgt der Fenstergroesse"),
+    ("1.15.0", "2026-09-11", "broom: Topf aus zwei Wegen - einmal unentschuldigt gefehlt reicht bedingungslos, der Rest wird nach Leistung auf 10 aufgefuellt; GP raus, Trend gegen den Kader, Sofortfaelle stehen neben dem Topf"),
+    ("1.14.0", "2026-09-11", "stats perf: der aktive PLTE-Kader ist jetzt der Default (der Bot schickte nie --active); --inactive holt Ausgetretene samt 20-Prozent-Huerde dazu, --active bleibt als No-op"),
+    ("1.13.1", "2026-09-11", "stats help: eigene Options-Sektion mit Erklaerung zu --active, --no-skip und --driven-only"),
+    ("1.13.0", "2026-09-11", "stats: avg und rank entfernt, perf ist die einzige Leistungsrangliste; neue Flags --no-skip (Kader auffuellen, impliziert --active) und --driven-only (unentschuldigtes Fehlen nicht als Null werten); .stats perf im Bot kennt jetzt noskip/active/driven"),
+    ("1.12.1", "2026-09-11", "broom: Kilometer kommen aus dem gewerteten Zeitraum (Saison) statt aus den letzten 8 Wochen; Kopfzeile nennt die Wochenzahl"),
+    ("1.12.0", "2026-09-11", "stats broom betrachtet jetzt die aktuelle Saison statt der letzten 40 Matches; --season <n> waehlt eine andere, --last <n> das alte Matchfenster, im Bot .B s<n>"),
     ("1.11.4", "2026-09-04", "video interim: --cleanup l\u00e4uft unabh\u00e4ngig von der Lesung"),
     ("1.11.3", "2026-09-04", "Zwischenstand: 'Luft nach oben' zeigt f\u00fcnf Namen statt drei, ohne Restz\u00e4hler"),
     ("1.11.2", "2026-09-02", "video interim: Bericht gekuerzt - max 3 Namen je Liste, absolute Zahlen, Neuzugaenge der ersten 3 Matches immer gelistet"),

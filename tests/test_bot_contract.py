@@ -182,6 +182,16 @@ class BroomShortcutTests(TemporaryDatabaseTestCase):
         bot = _import_bot()
         self.assertEqual(bot.broom_call([]), ["stats", "broom"])
 
+    def test_a_season_is_typed_as_s_plus_number(self) -> None:
+        """Der Zeitraum ist sonst immer die laufende Saison - ohne diese Form käme
+        eine abgeschlossene Saison in Discord gar nicht mehr an."""
+        bot = _import_bot()
+        self.assertEqual(bot.broom_call(["s63"]), ["stats", "broom", "--season", "63"])
+        self.assertEqual(
+            bot.broom_call(["s63", "3"]),
+            ["stats", "broom", "--season", "63", "--top", "3"],
+        )
+
     def test_unknown_arguments_are_passed_through(self) -> None:
         """So '--last 80' keeps working from Discord without a mapping per flag."""
         bot = _import_bot()

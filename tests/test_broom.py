@@ -5,6 +5,7 @@ import sqlite3
 from hcr2.db import connection
 from hcr2.output import broom as broom_output
 from hcr2.services import broom as broom_service
+from modules import stats as stats_module
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -16,6 +17,8 @@ class BroomTestCase(TemporaryDatabaseTestCase):
 
     ROSTER = 12
     MATCHES = 40
+    SEASON = 2                  # das Standardfenster - season 1 ist die Historie
+    KM_WEEKS = (2, 3, 4)        # Kilometerwochen innerhalb dieser Saison
     BASE_SCORE = 30000
 
     def setUp(self) -> None:
@@ -27,6 +30,17 @@ class BroomTestCase(TemporaryDatabaseTestCase):
             conn.executemany(
                 "INSERT INTO players (id, name, garage_power, active, team, is_leader) VALUES (?, ?, ?, 1, 'PLTE', ?)",
                 [(100 + i, f"P{i:02d}", 12000, 1 if i == 0 else 0) for i in range(self.ROSTER)],
+            )
+            # Die Saisonzeilen umspannen genau die Matches, die gleich angelegt werden -
+            # sonst liefe der Kilometerzeitraum über Jahre und die km-Tests bewiesen
+            # nichts. Saison 3 hat absichtlich kein Match: sie prüft nebenbei, dass
+            # current_season() auf die Saison zurückfällt, in der gespielt wird.
+            conn.executemany(
+                "UPDATE season SET start = ? WHERE number = ?",
+                [("2024-01-01", 1), ("2026-01-01", 2)],
+            )
+            conn.execute(
+                "INSERT INTO season (number, name, start, division) VALUES (3, 'Mar 26', '2026-03-01', 'CC')"
             )
             conn.executemany(
                 "INSERT INTO match (id, teamevent_id, season_number, start, opponent) VALUES (?, 1, 2, ?, 'Rivals')",
@@ -40,10 +54,12 @@ class BroomTestCase(TemporaryDatabaseTestCase):
                     for p in range(self.ROSTER)
                 ],
             )
+            # Wochen 2-4 von 2026 - sie liegen in der Saison, die gewertet wird. Broom
+            # nimmt die Kilometer des Wertungszeitraums, nicht die letzten N Wochen.
             for player_id in range(100, 100 + self.ROSTER):
                 conn.executemany(
                     "INSERT INTO distance (player_id, year, week, km) VALUES (?, 2026, ?, 200)",
-                    [(player_id, week) for week in (30, 31, 32)],
+                    [(player_id, week) for week in self.KM_WEEKS],
                 )
 
     # --- helpers ----------------------------------------------------------
@@ -59,11 +75,12 @@ class BroomTestCase(TemporaryDatabaseTestCase):
         )
 
     def _give_history(self, player_ids, count: int) -> None:
-        """Driven matches outside the window - raises driven_total without adding
-        window rows, which is exactly what a returner looks like."""
+        """Driven matches in the *previous* season - raises driven_total without
+        adding window rows, which is exactly what a returner looks like. The season
+        is what puts them outside the window, so they have to be in another one."""
         with sqlite3.connect(self.db_path) as conn:
             conn.executemany(
-                "INSERT OR IGNORE INTO match (id, teamevent_id, season_number, start, opponent) VALUES (?, 1, 2, ?, 'Alt')",
+                "INSERT OR IGNORE INTO match (id, teamevent_id, season_number, start, opponent) VALUES (?, 1, 1, ?, 'Alt')",
                 [(400 + i, f"2024-01-{1 + i:02d}") for i in range(count)],
             )
             conn.executemany(
@@ -72,24 +89,19 @@ class BroomTestCase(TemporaryDatabaseTestCase):
             )
 
     def _candidate(self, result, player_id: int):
-        return next(c for c in result.candidates if c.player_id == player_id)
+        """Über die Grundmenge, nicht über den Topf: die meisten Tests messen einen
+        Faktor, und ob die Spielerin damit in den Topf kommt, ist eine andere Frage."""
+        pool = list(result.all_rated) + list(result.immediate_cases)
+        return next(c for c in pool if c.player_id == player_id)
+
+    def _shortlisted(self, result, player_id: int) -> bool:
+        return any(c.player_id == player_id for c in result.candidates)
 
     def _factor(self, candidate, key: str):
         return next(f for f in candidate.factors if f.key == key).value
 
 
 class BroomVetoTests(BroomTestCase):
-    def test_repeated_episodes_max_out_reliability_without_vetoing_a_veteran(self) -> None:
-        """A veteran who carries the team in points is not removed over two of these,
-        so the axis maxes out and the rest of the model still gets to speak."""
-        self._no_show(101, 5, checkin=1)
-        self._no_show(101, 20, checkin=1)
-        candidate = self._candidate(broom_service.rank(), 101)
-        self.assertEqual(candidate.blocker_episodes, broom_service.BLOCKER_FLOOR_EPISODES)
-        self.assertEqual(self._factor(candidate, "reliability"), 1.0)
-        self.assertFalse(candidate.immediate)
-        self.assertTrue(any("voll ausgereizt" in reason for reason in candidate.reasons))
-
     def test_one_episode_vetoes_a_newcomer(self) -> None:
         self._give_history([101], 0)
         with sqlite3.connect(self.db_path) as conn:
@@ -143,17 +155,40 @@ class BroomVetoTests(BroomTestCase):
 
 
 class BroomLoyaltyTests(BroomTestCase):
-    def test_loyalty_protects_above_probation_and_accuses_inside_it(self) -> None:
+    def test_the_discount_grows_with_tenure_and_is_zero_on_probation(self) -> None:
         limit = broom_service.PROBATION_MATCHES
-        self.assertEqual(broom_service.loyalty_multiplier(1), broom_service.PROBATION_PENALTY)
-        self.assertEqual(broom_service.loyalty_multiplier(limit), broom_service.PROBATION_PENALTY)
-        self.assertEqual(broom_service.loyalty_multiplier(limit + 1), 1.0)
-        self.assertEqual(broom_service.loyalty_multiplier(49), 1.0)
-        self.assertEqual(broom_service.loyalty_multiplier(500), broom_service.LOYALTY_FLOOR)
+        self.assertEqual(broom_service.loyalty_discount(1), broom_service.PROBATION_DISCOUNT)
+        self.assertEqual(broom_service.loyalty_discount(limit), broom_service.PROBATION_DISCOUNT)
+        self.assertEqual(broom_service.loyalty_discount(limit + 1), 0)
+        self.assertEqual(broom_service.loyalty_discount(49), 0)
+        self.assertEqual(broom_service.loyalty_discount(500), broom_service.LOYALTY_MAX)
+        # Monoton: mehr Matches dürfen nie weniger Abzug bedeuten.
+        steps = [broom_service.loyalty_discount(n) for n in (49, 149, 299, 499, 500)]
+        self.assertEqual(steps, sorted(steps))
+
+    def test_the_discount_is_flat_not_proportional(self) -> None:
+        """Der Grund für den Umbau: ein Multiplikator koppelte den Bonus an das
+        Rohrisiko, also bekam die Schwächste den größten Schutz - und eine Spielerin
+        mit 304 Matches mehr als eine mit 493, weil deren Rohrisiko niedriger war."""
+        self._give_history([101, 102], 500)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE distance SET km = 10 WHERE player_id = 101")
+        result = broom_service.rank()
+        weak = self._candidate(result, 101)
+        strong = self._candidate(result, 102)
+        self.assertGreater(weak.raw_risk, strong.raw_risk)
+        self.assertEqual(weak.loyalty_discount, strong.loyalty_discount)
+        self.assertAlmostEqual(
+            weak.raw_risk - weak.risk, strong.raw_risk - strong.risk
+        )
         # Outside probation the multiplier can only ever lower a risk, so tenure alone
         # never pushes anybody up the list.
-        self.assertLessEqual(max(f for _, f in broom_service.LOYALTY_TIERS), 1.0)
-        self.assertGreater(broom_service.PROBATION_PENALTY, 1.0)
+        self.assertEqual(max(d for _, d in broom_service.LOYALTY_TIERS), 12)
+        self.assertGreater(broom_service.LOYALTY_MAX, 12)
+        # Kein Aufschlag mehr: er war fast der einzige Unterschied, seit nur noch
+        # Kilometer und Zugehörigkeit reihen, und setzte eine saubere Neue über eine
+        # Etablierte mit drei unentschuldigten Fehlterminen.
+        self.assertEqual(broom_service.PROBATION_DISCOUNT, 0)
 
     def test_the_shield_lowers_the_risk_but_not_the_raw_value(self) -> None:
         # History outside the window still counts toward loyalty - that is the point
@@ -171,9 +206,11 @@ class BroomLoyaltyTests(BroomTestCase):
         self._no_show(101, 4)
         candidate = self._candidate(broom_service.rank(), 101)
         self.assertEqual(candidate.driven_total, 58)
-        self.assertEqual(candidate.loyalty, 0.9)
+        self.assertEqual(candidate.loyalty_discount, 4)
         self.assertLess(candidate.risk, candidate.raw_risk)
-        self.assertAlmostEqual(candidate.risk, candidate.raw_risk * candidate.loyalty)
+        self.assertAlmostEqual(
+            candidate.risk, candidate.raw_risk - candidate.loyalty_discount
+        )
 
     def test_a_veteran_is_not_pushed_up_by_tenure_alone(self) -> None:
         """Loyalty is a multiplier, so an unremarkable veteran cannot outrank a
@@ -218,8 +255,11 @@ class BroomProbationTests(BroomTestCase):
         self.assertNotIn(101, [entry.player_id for entry in result.unrated])
 
     def test_a_clean_newcomer_is_not_pushed_to_the_top(self) -> None:
-        """The penalty must not turn 'new' by itself into a candidate - that was the
-        failure mode the protective multiplier was built to avoid."""
+        """'Neu' allein darf niemanden zur Kandidatin machen - der Fehlermodus, gegen
+        den der Schutzmultiplikator gebaut ist. Seit nur noch Kilometer und
+        Zugehörigkeit reihen, heißt das: nicht *über* einer Etablierten, die
+        unentschuldigt gefehlt hat. Gleichauf ist die Folge davon, dass die
+        Fehltermine den Eintritt in den Topf bestimmen und nicht die Reihung darin."""
         self._newcomer(101, 6)
         for index in (3, 4, 5):
             self._no_show(102, index)          # an established player with real gaps
@@ -227,21 +267,8 @@ class BroomProbationTests(BroomTestCase):
         newcomer = self._candidate(result, 101)
         established = self._candidate(result, 102)
         self.assertFalse(newcomer.immediate)
-        self.assertLess(newcomer.risk, established.risk)
-
-    def test_probation_is_measured_without_shrinkage(self) -> None:
-        """Same window, same absence - only the history differs. Shrinkage would call
-        one absence out of eleven 'about average'; on probation it is what it is."""
-        self._newcomer(101, broom_service.MIN_MATCHES + 1)
-        self._no_show(101, self.MATCHES - 1)
-        on_probation = self._factor(self._candidate(broom_service.rank(), 101), "reliability")
-
-        self._give_history([101], 15)           # same window, now long established
-        established = self._factor(self._candidate(broom_service.rank(), 101), "reliability")
-
-        rows = broom_service.MIN_MATCHES + 1
-        self.assertAlmostEqual(on_probation, 1 / rows / broom_service.UNEXCUSED_SCALE)
-        self.assertLess(established, on_probation)
+        self.assertLessEqual(newcomer.risk, established.risk)
+        self.assertEqual(established.pool_reason, "unexcused")
 
     def test_a_newcomer_never_moves_anybody_elses_yardstick(self) -> None:
         before = broom_service.rank()
@@ -249,7 +276,7 @@ class BroomProbationTests(BroomTestCase):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("UPDATE matchscore SET score = 1000 WHERE player_id = 101")
         after = broom_service.rank()
-        self.assertAlmostEqual(before.gp_slope, after.gp_slope)
+        self.assertAlmostEqual(before.team_unexcused_rate, after.team_unexcused_rate)
         self.assertAlmostEqual(
             self._candidate(before, 103).risk, self._candidate(after, 103).risk
         )
@@ -260,8 +287,10 @@ class BroomProbationTests(BroomTestCase):
         self._newcomer(102, 20)                 # newcomer, past probation
         self._no_show(102, self.MATCHES - 3, checkin=1)
         result = broom_service.rank()
-        self.assertTrue(all(c.immediate for c in result.candidates[:2]))
-        self.assertEqual(result.candidates[0].player_id, 101)
+        self.assertTrue(all(c.immediate for c in result.immediate_cases[:2]))
+        # Der Probezeitfall führt: gegen ihn gibt es keine Historie abzuwägen, und die
+        # Entscheidung ist die billigste auf der Liste.
+        self.assertEqual(result.immediate_cases[0].player_id, 101)
 
 
 class BroomReturnerTests(BroomTestCase):
@@ -294,12 +323,14 @@ class BroomReturnerTests(BroomTestCase):
         self._returned(101, window_rows=6, history=20)
         with_bonus = self._candidate(broom_service.rank(), 101)
         expected = (
-            broom_service.loyalty_multiplier(with_bonus.driven_total)
-            * broom_service.RETURNER_BONUS
+            broom_service.loyalty_discount(with_bonus.driven_total)
+            + broom_service.RETURNER_DISCOUNT
         )
-        self.assertAlmostEqual(with_bonus.loyalty, expected)
-        self.assertLess(with_bonus.loyalty, 1.0)
-        self.assertAlmostEqual(with_bonus.risk, with_bonus.raw_risk * with_bonus.loyalty)
+        self.assertEqual(with_bonus.loyalty_discount, expected)
+        self.assertGreater(with_bonus.loyalty_discount, 0)
+        self.assertAlmostEqual(
+            with_bonus.risk, with_bonus.raw_risk - with_bonus.loyalty_discount
+        )
         self.assertTrue(any("Rückkehrerin" in reason for reason in with_bonus.reasons))
 
     def test_an_established_player_is_no_returner_however_long_her_history(self) -> None:
@@ -309,32 +340,121 @@ class BroomReturnerTests(BroomTestCase):
         candidate = self._candidate(broom_service.rank(), 101)
         self.assertGreater(candidate.driven_total, 60)
         self.assertFalse(candidate.returner)
-        self.assertEqual(candidate.loyalty, broom_service.loyalty_multiplier(candidate.driven_total))
+        self.assertEqual(
+            candidate.loyalty_discount,
+            broom_service.loyalty_discount(candidate.driven_total),
+        )
 
     def test_a_returner_is_never_put_on_probation(self) -> None:
         self._returned(101, window_rows=4, history=20)
         candidate = self._candidate(broom_service.rank(), 101)
         self.assertFalse(candidate.probation)
-        self.assertLess(candidate.loyalty, 1.0)
+        self.assertGreater(candidate.loyalty_discount, 0)
+
+
+class BroomRankingTests(BroomTestCase):
+    """Im Topf reihen genau zwei Dinge: Kilometer und Zugehörigkeit."""
+
+    def test_four_things_rank_inside_the_pool(self) -> None:
+        """Drei gewichtete Achsen plus die Zugehörigkeit als Multiplikator - und
+        bewusst nicht mehr, damit ein Rauswurf in einem Satz begründbar bleibt."""
+        keys = {factor.key for factor in broom_service.rank().candidates[0].factors}
+        self.assertEqual(keys, {"reliability", "performance", "motivation"})
+        self.assertNotIn("drops", keys)
+        self.assertNotIn("trend", keys)
+
+    def test_unexcused_absence_ranks_and_not_only_admits(self) -> None:
+        """Ohne diese Achse wären drei Fehltermine und einer gleichwertig - beide
+        kämen nur in den Topf und würden dort nicht mehr unterschieden."""
+        self._give_history([101, 102], 40)
+        self._no_show(101, 1)
+        for index in (1, 2, 5):
+            self._no_show(102, index)
+        result = broom_service.rank()
+        once = self._candidate(result, 101)
+        thrice = self._candidate(result, 102)
+        self.assertEqual(once.pool_reason, "unexcused")
+        self.assertEqual(thrice.pool_reason, "unexcused")
+        self.assertLess(
+            self._factor(once, "reliability"), self._factor(thrice, "reliability")
+        )
+        self.assertLess(once.risk, thrice.risk)
+
+    def test_the_reliability_axis_maxes_out_at_the_cap(self) -> None:
+        self._give_history([101], 40)
+        for index in range(broom_service.UNEXCUSED_CAP + 2):
+            self._no_show(101, index)
+        self.assertEqual(
+            self._factor(self._candidate(broom_service.rank(), 101), "reliability"), 1.0
+        )
+
+    def test_performance_ranks_at_equal_kilometres(self) -> None:
+        """Der Grund, warum die Leistung wieder mitreiht: bei gleichen Kilometern muss
+        die Schwächere oben stehen, sonst reihte der Topf nur nach Kilometern."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE matchscore SET score = ? WHERE player_id = 101",
+                (self.BASE_SCORE - 12000,),
+            )
+        result = broom_service.rank()
+        weak = self._candidate(result, 101)
+        rest = self._candidate(result, 102)
+        self.assertEqual(weak.km_average, rest.km_average)
+        self.assertGreater(
+            self._factor(weak, "performance"), self._factor(rest, "performance")
+        )
+        self.assertGreater(weak.risk, rest.risk)
+
+    def test_fewer_kilometres_rank_worse(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE distance SET km = 20 WHERE player_id = 101")
+            conn.execute("UPDATE distance SET km = 900 WHERE player_id = 102")
+        result = broom_service.rank()
+        order = [c.player_id for c in result.candidates]
+        self.assertLess(order.index(101), order.index(102))
+
+    def test_tenure_can_only_lower_the_risk_outside_probation(self) -> None:
+        """Zwei gleiche Kilometerwerte, verschieden lange dabei - der Schutz entscheidet."""
+        self._give_history([101], 400)
+        result = broom_service.rank()
+        veteran = self._candidate(result, 101)
+        rookie = self._candidate(result, 102)
+        self.assertGreater(veteran.loyalty_discount, 0)
+        self.assertEqual(rookie.loyalty_discount, 0)
+        self.assertAlmostEqual(veteran.raw_risk, rookie.raw_risk)
+        self.assertLess(veteran.risk, rookie.risk)
+
+    def test_a_single_kilometre_week_is_enough_to_rank(self) -> None:
+        """In einer laufenden Saison ist eine Woche oft die einzige - die beste
+        vorhandene Zahl schlägt gar keine, und der Kopf nennt die Wochenzahl dazu."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance WHERE week > ?", (self.KM_WEEKS[0],))
+            conn.execute("UPDATE distance SET km = 20 WHERE player_id = 101")
+        result = broom_service.rank()
+        self.assertEqual(result.km_weeks, 1)
+        self.assertIsNotNone(self._factor(self._candidate(result, 101), "motivation"))
+
+    def test_without_kilometres_the_other_two_axes_carry_the_ranking(self) -> None:
+        """Ihr Gewicht wird umgelegt - ein Sonderweg ist dafür nicht nötig, und die
+        Ausgabe sagt, dass eine der drei Achsen fehlt."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance")
+            conn.execute(
+                "UPDATE matchscore SET score = ? WHERE player_id = 101",
+                (self.BASE_SCORE - 9000,),
+            )
+        result = broom_service.rank()
+        self.assertEqual(result.km_weeks, 0)
+        self.assertEqual(result.candidates[0].player_id, 101)
+        self.assertIsNone(self._factor(result.candidates[0], "motivation"))
+        text = self.capture_stdout(broom_output.print_result, result)
+        self.assertIn("Keine Kilometer im Zeitraum", text)
 
 
 class BroomShrinkageTests(BroomTestCase):
-    def test_a_small_sample_is_pulled_toward_the_team_rate(self) -> None:
-        """One absence out of twelve is 8%, and must not beat three out of forty."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM matchscore WHERE player_id = 101 AND match_id > ?", (211,))
-        self._no_show(101, 5)                    # 1 of 12
-        for index in (3, 4, 6):
-            self._no_show(102, index)            # 3 of 40
-
-        result = broom_service.rank()
-        newcomer = self._factor(self._candidate(result, 101), "reliability")
-        veteran = self._factor(self._candidate(result, 102), "reliability")
-        self.assertLess(newcomer, veteran)
-
-    def test_a_thin_window_is_rated_but_keeps_the_noisy_factors_out(self) -> None:
-        """Everybody in the team gets judged. The factors that a five-match sample
-        cannot carry opt out on their own, and their weight is redistributed."""
+    def test_a_thin_window_is_still_rated(self) -> None:
+        """Everybody in the team gets judged - eine dünne Stichprobe ist ein Grund,
+        genauer hinzusehen, kein Grund, jemanden gar nicht erst zu bewerten."""
         self._give_history([101], 15)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -345,24 +465,183 @@ class BroomShrinkageTests(BroomTestCase):
 
         self.assertEqual(candidate.window_driven, 5)
         self.assertEqual(result.unrated, [])
-        self.assertIsNone(self._factor(candidate, "trend"))
-        self.assertIsNone(self._factor(candidate, "drops"))
-        self.assertIsNotNone(self._factor(candidate, "reliability"))
+        self.assertIsNotNone(self._factor(candidate, "motivation"))
         # ... and she is not part of the cohort her own factors are measured against.
         self.assertEqual(result.cohort_size, self.ROSTER - 1)
 
-    def test_trend_and_drops_stay_unrated_below_the_minimum(self) -> None:
+
+class BroomShortlistTests(BroomTestCase):
+    """Zwei Stufen: der Topf ist die Leistung, die Reihung darin ist alles andere."""
+
+    def test_the_target_follows_the_roster_size(self) -> None:
+        """Es sollen immer TARGET_FREE_SLOTS Plätze frei werden - fehlen schon Leute,
+        müssen entsprechend weniger gehen."""
+        result = broom_service.rank()
+        expected = max(
+            0,
+            result.roster_size
+            - (broom_service.TEAM_CAPACITY - broom_service.TARGET_FREE_SLOTS),
+        )
+        self.assertEqual(result.slots_to_free, expected)
+
+    def test_a_full_roster_frees_exactly_the_target(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT INTO players (id, name, garage_power, active, team, is_leader) "
+                "VALUES (?, ?, 12000, 1, 'PLTE', 0)",
+                [(300 + i, f"F{i:02d}") for i in range(broom_service.TEAM_CAPACITY - self.ROSTER)],
+            )
+        result = broom_service.rank()
+        self.assertEqual(result.roster_size, broom_service.TEAM_CAPACITY)
+        self.assertEqual(result.slots_to_free, broom_service.TARGET_FREE_SLOTS)
+
+    def test_the_weakest_driver_can_end_up_last_in_the_pool(self) -> None:
+        """Der Kern der zweiten Stufe: im Topf entscheidet nicht mehr die Leistung.
+        Eine treue, zuverlässige Spielerin steht trotz Platz 1 der Schwächsten unten."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "DELETE FROM matchscore WHERE player_id = 101 AND match_id > ?",
-                (200 + broom_service.MIN_MATCHES,),
+                "UPDATE matchscore SET score = ? WHERE player_id = 101",
+                (self.BASE_SCORE - 12000,),
+            )
+        self._give_history([101], 400)          # lange dabei -> voller Schutz
+        self._no_show(102, 3)                   # eine andere im Topf fehlt unentschuldigt
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE matchscore SET score = ? WHERE player_id = 102 AND score > 0",
+                (self.BASE_SCORE - 8000,),
+            )
+        result = broom_service.rank()
+        weakest = self._candidate(result, 101)
+        self.assertEqual(weakest.performance_rank, 1)
+        order = [c.player_id for c in result.candidates]
+        self.assertLess(order.index(102), order.index(101))
+
+
+class BroomSeasonWindowTests(BroomTestCase):
+    """Der Zeitraum ist die Saison - das ist die Einheit, in der entschieden wird.
+
+    Am Saisonende verabschiedet sich die Leitung von einer Handvoll Spielerinnen, und
+    Belege aus der Saison davor gehören nicht in diese Entscheidung.
+    """
+
+    def _previous_season_matches(self, count: int) -> None:
+        """Matches in Saison 1 - dieselbe Historie, die der Kader vorher gefahren ist."""
+        self._give_history(list(range(100, 100 + self.ROSTER)), count)
+
+    def test_the_default_window_is_the_current_season(self) -> None:
+        self._previous_season_matches(12)
+        result = broom_service.rank()
+        self.assertEqual(result.season, self.SEASON)
+        self.assertEqual(result.matches, self.MATCHES)
+
+    def _short_season(self, length: int, history: int) -> None:
+        """Eine kurze laufende Saison neben einer längeren Vorsaison - genau die Lage,
+        in der ein fester Matchzähler über die Saisongrenze greifen würde."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM matchscore WHERE match_id >= ?", (200 + length,))
+            conn.execute("DELETE FROM match WHERE id >= ?", (200 + length,))
+        self._previous_season_matches(history)
+
+    def test_an_earlier_season_does_not_leak_into_the_window(self) -> None:
+        """Ein unentschuldigtes Fehlen der Vorsaison darf heute nichts mehr wiegen -
+        mit einem festen Matchzähler täte es das, sobald die Saison kürzer ist."""
+        self._short_season(length=15, history=25)
+        clean = self._candidate(broom_service.rank(), 101).unexcused
+        self._write(
+            "UPDATE matchscore SET score = 0, points = 0, absent = 0, checkin = 0 "
+            "WHERE player_id = ? AND match_id = ?",
+            (101, 400),
+        )
+        self.assertEqual(self._candidate(broom_service.rank(), 101).unexcused, clean)
+        # Dieselbe Zeile über ein 40er-Fenster: die Vorsaison ist wieder drin, und der
+        # Faktor bewegt sich - so war es vorher, und so ist es jetzt nur noch auf Ansage.
+        crossing = broom_service.rank(window=40)
+        self.assertEqual(crossing.matches, 40)
+        self.assertGreater(self._candidate(crossing, 101).unexcused, clean)
+
+    def test_a_named_season_is_read_instead_of_the_current_one(self) -> None:
+        self._previous_season_matches(12)
+        result = broom_service.rank(season=1)
+        self.assertEqual(result.season, 1)
+        self.assertEqual(result.matches, 12)
+
+    def test_last_overrides_the_season_and_crosses_its_boundary(self) -> None:
+        """--last ist die ausdrückliche saisonübergreifende Sicht, also gewinnt sie."""
+        self._previous_season_matches(12)
+        result = broom_service.rank(window=self.MATCHES + 5)
+        self.assertIsNone(result.season)
+        self.assertEqual(result.matches, self.MATCHES + 5)
+
+    def test_the_window_follows_the_season_length_not_the_default(self) -> None:
+        """``is_returner`` misst gegen die Fenstergröße - die muss die echte sein,
+        sonst hinge die Erkennung an einer Zahl, die das Fenster gar nicht hat."""
+        self._short_season(length=15, history=0)
+        result = broom_service.rank()
+        self.assertEqual(result.window, 15)
+        self.assertEqual(result.matches, 15)
+
+    def test_kilometres_come_from_the_season_not_from_the_last_weeks(self) -> None:
+        """Der Motivationsfaktor ist an denselben Zeitraum gebunden wie alles andere -
+        Wochen aus der Vorsaison dürfen eine schwache Saison nicht aufhübschen."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance WHERE player_id = 101")
+            # Ein starker Wert, aber aus einer Woche vor dieser Saison.
+            conn.execute(
+                "INSERT INTO distance (player_id, year, week, km) VALUES (101, 2025, 50, 900)"
+            )
+        result = broom_service.rank()
+        candidate = self._candidate(result, 101)
+        self.assertIsNone(self._factor(candidate, "motivation"))
+        self.assertEqual(candidate.km_weeks, 0)
+        # Und der Teamschnitt darf die fremde Woche ebenso wenig sehen.
+        self.assertAlmostEqual(result.team_km_average, 200.0)
+
+    def test_only_the_weeks_inside_the_window_are_averaged(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO distance (player_id, year, week, km) VALUES (101, 2026, 20, 800)"
             )
         candidate = self._candidate(broom_service.rank(), 101)
-        self.assertLess(candidate.window_driven, broom_service.MIN_TREND_MATCHES)
-        self.assertIsNone(self._factor(candidate, "trend"))
-        self.assertIsNone(self._factor(candidate, "drops"))
-        # The weight of an unrated factor is redistributed, not counted as zero.
-        self.assertGreater(candidate.raw_risk, 0.0)
+        self.assertEqual(candidate.km_weeks, len(self.KM_WEEKS))
+        self.assertAlmostEqual(candidate.km_average, 200.0)
+
+    def test_the_week_count_is_what_was_read_not_how_wide_the_window_is(self) -> None:
+        """Die Truhe wird nicht jede Woche gelesen - "aus 4 Wochen" wäre sonst eine
+        Behauptung über Daten, die niemand eingetragen hat."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance WHERE week > ?", (self.KM_WEEKS[0],))
+        result = broom_service.rank()
+        self.assertEqual(result.km_weeks, 1)
+        self.assertIn("aus 1 Woche", self.capture_stdout(broom_output.print_result, result))
+
+    def test_a_window_without_any_kilometre_week_says_so(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance")
+        text = self.capture_stdout(broom_output.print_result, broom_service.rank())
+        self.assertIn("keine Kilometer im Zeitraum", text)
+
+    def test_a_season_without_matches_is_reported_not_crashed(self) -> None:
+        result = broom_service.rank(season=99)
+        self.assertEqual(result.status, "NO_MATCHES")
+        text = self.capture_stdout(broom_output.print_result, result)
+        self.assertIn("Saison 99", text)
+
+    def test_season_and_last_together_are_refused_instead_of_one_winning(self) -> None:
+        """Sonst gewönne still einer von beiden, und welcher, stünde nur im Kopf."""
+        text = self.capture_stdout(
+            stats_module.handle_command, "broom", ["--season", "1", "--last", "40"]
+        )
+        self.assertIn("❌", text)
+        self.assertNotIn("🧹 Besen", text)
+
+    def test_the_header_names_the_season_it_was_computed_from(self) -> None:
+        """Eine Rangliste ohne ihren Zeitraum ist nicht überprüfbar."""
+        season = self.capture_stdout(broom_output.print_result, broom_service.rank())
+        self.assertIn(f"Saison {self.SEASON} ({self.MATCHES} Matches)", season)
+        window = self.capture_stdout(
+            broom_output.print_result, broom_service.rank(window=10)
+        )
+        self.assertIn("letzte 10 Matches", window)
 
 
 class BroomFactorTests(BroomTestCase):
@@ -381,12 +660,11 @@ class BroomFactorTests(BroomTestCase):
         self.assertIsNone(self._factor(candidate, "motivation"))
         self.assertIsNone(candidate.km_average)
 
-    def test_garage_power_shifts_the_expectation_not_the_raw_delta(self) -> None:
-        """A weak driver with a small garage is judged more mildly than the same
-        result from a big one - the slope comes from the roster itself."""
+    def test_garage_power_plays_no_part_at_all(self) -> None:
+        """Für einen freien Platz zählt, was eine Spielerin einfährt - nicht, ob ihre
+        Ausrüstung mehr hergegeben hätte. Zwei gleiche Ergebnisse, weit
+        auseinanderliegende Garagen: die Bewertung darf sich nicht unterscheiden."""
         with sqlite3.connect(self.db_path) as conn:
-            # Ten players carry a clean GP-to-score relation, so the regression has
-            # something to find - the slope is measured, never assumed.
             for index in range(10):
                 power = 9000 + index * 600
                 conn.execute("UPDATE players SET garage_power = ? WHERE id = ?", (power, 100 + index))
@@ -394,7 +672,6 @@ class BroomFactorTests(BroomTestCase):
                     "UPDATE matchscore SET score = ? WHERE player_id = ?",
                     (self.BASE_SCORE + (power - 12000), 100 + index),
                 )
-            # Two more at the very same score but far apart in garage power.
             conn.execute("UPDATE players SET garage_power = 9600 WHERE id = 110")
             conn.execute("UPDATE players SET garage_power = 14400 WHERE id = 111")
             conn.execute(
@@ -402,12 +679,11 @@ class BroomFactorTests(BroomTestCase):
                 (self.BASE_SCORE,),
             )
         result = broom_service.rank()
-        self.assertGreater(result.gp_slope, 0.5)
         small = self._candidate(result, 110)
         large = self._candidate(result, 111)
         self.assertAlmostEqual(small.raw_delta, large.raw_delta, places=6)
-        # Same result on paper, but the smaller garage was expected to deliver less.
-        self.assertGreater(small.performance, large.performance)
+        self.assertAlmostEqual(small.risk, large.risk, places=6)
+        self.assertFalse(hasattr(result, "gp_slope"))
 
     def test_excused_absence_changes_no_score_but_is_still_reported(self) -> None:
         """Excused absence correlates with nothing (r = -0.03 against kilometres), so
@@ -426,67 +702,97 @@ class BroomFactorTests(BroomTestCase):
         self.assertTrue(any("zählt nicht" in reason for reason in candidate.reasons))
 
     def test_the_weights_are_normalised_to_a_hundred(self) -> None:
-        self.assertEqual(sum(weight for _, _, weight, _, _ in broom_service.FACTORS), 100)
+        self.assertEqual(sum(weight for _, _, weight, _ in broom_service.FACTORS), 100)
         self.assertTrue(all(explanation and icon for *_, explanation, icon in broom_service.FACTORS))
 
-    def test_driving_well_now_and_then_beats_driving_every_match_badly(self) -> None:
-        """The leaders' own example: 1 point per match over a season is worth less to
-        the team than a handful of proper drives."""
+    def test_one_unexcused_absence_is_an_unconditional_ticket(self) -> None:
+        """Vorgabe der Teamleitung: nicht zu erscheinen ist der eine Fehler, über den
+        nicht verhandelt wird - auch nicht bei einer überdurchschnittlichen Fahrerin."""
         with sqlite3.connect(self.db_path) as conn:
-            # P01 drives every match for a single point.
-            conn.execute("UPDATE matchscore SET points = 1 WHERE player_id = 101")
-            # P02 misses most of them but scores properly when she drives.
-            conn.execute("UPDATE matchscore SET points = 0, score = 0 WHERE player_id = 102")
+            # P01 fährt deutlich über dem Feld und fehlt genau einmal.
             conn.execute(
-                "UPDATE matchscore SET points = 250, score = ? WHERE player_id = 102 AND match_id > ?",
-                (self.BASE_SCORE, 200 + self.MATCHES - 12),
+                "UPDATE matchscore SET score = ? WHERE player_id = 101",
+                (self.BASE_SCORE + 9000,),
+            )
+        self._give_history([101], 40)           # keine Probezeit, kein Sofortfall
+        self._no_show(101, 3)
+        result = broom_service.rank()
+        candidate = self._candidate(result, 101)
+        self.assertFalse(candidate.immediate)
+        self.assertGreater(candidate.raw_delta, 0)      # fährt über dem Median
+        self.assertTrue(self._shortlisted(result, 101))
+        self.assertEqual(candidate.pool_reason, "unexcused")
+
+    def test_the_pool_may_outgrow_the_target_size(self) -> None:
+        """SHORTLIST_SIZE ist die Zielgröße fürs Auffüllen, keine Obergrenze für die
+        Fehltermine - "einmal gefehlt kommt rein" ist bedingungslos."""
+        self._give_history(list(range(100, 100 + self.ROSTER)), 40)
+        for offset, player_id in enumerate(range(101, 100 + self.ROSTER)):
+            self._no_show(player_id, offset)
+        result = broom_service.rank()
+        by_absence = [c for c in result.candidates if c.pool_reason == "unexcused"]
+        self.assertEqual(len(by_absence), self.ROSTER - 1)
+        self.assertGreater(len(result.candidates), broom_service.SHORTLIST_SIZE)
+
+    def test_the_rest_is_filled_up_by_performance(self) -> None:
+        result = broom_service.rank()
+        reasons = {c.pool_reason for c in result.candidates}
+        self.assertEqual(reasons, {"performance"})      # niemand fehlt unentschuldigt
+        self.assertEqual(len(result.candidates), broom_service.SHORTLIST_SIZE)
+        ranks = [c.performance_rank for c in result.candidates]
+        self.assertEqual(sorted(ranks), list(range(1, broom_service.SHORTLIST_SIZE + 1)))
+
+    def test_a_player_who_never_drove_leads_the_shortlist(self) -> None:
+        """Ohne eine gefahrene Zeile gibt es keinen Abstand zum Median - sie hat dem
+        Team nichts eingebracht, und genau das füllt den Topf."""
+        self._give_history([101], 20)           # keine Probezeit, also kein Sofortfall
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE matchscore SET score = 0, points = 0 "
+                "WHERE player_id = 101 AND match_id BETWEEN 200 AND 299"
             )
         result = broom_service.rank()
-        every_match = self._candidate(result, 101)
-        now_and_then = self._candidate(result, 102)
+        candidate = self._candidate(result, 101)
+        self.assertIsNone(candidate.raw_delta)
+        self.assertFalse(candidate.immediate)
+        self.assertEqual(candidate.performance_rank, 1)
+        self.assertTrue(self._shortlisted(result, 101))
 
-        self.assertLess(every_match.points_total, now_and_then.points_total)
-        self.assertGreater(
-            self._factor(every_match, "contribution"),
-            self._factor(now_and_then, "contribution"),
-        )
-
-    def test_contribution_is_per_match_so_a_late_joiner_is_not_punished(self) -> None:
+    def test_being_signed_off_all_season_does_not_head_the_shortlist(self) -> None:
+        """Entschuldigtes Fehlen ist im ganzen Modell kein Vorwurf - über die
+        Topfauswahl würde es sonst doch einer, und zwar der schwerste von allen."""
+        self._give_history([101], 20)
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("UPDATE matchscore SET points = 100 WHERE player_id IN (101, 102)")
-            # P02 only joined for the last twelve matches.
             conn.execute(
-                "DELETE FROM matchscore WHERE player_id = 102 AND match_id < ?",
-                (200 + self.MATCHES - 12,),
+                "UPDATE matchscore SET score = 0, points = 0, absent = 1 "
+                "WHERE player_id = 101 AND match_id BETWEEN 200 AND 299"
             )
         result = broom_service.rank()
-        full = self._candidate(result, 101)
-        late = self._candidate(result, 102)
+        candidate = self._candidate(result, 101)
+        self.assertIsNone(candidate.raw_delta)
+        self.assertEqual(candidate.excused, self.MATCHES)
+        self.assertFalse(self._shortlisted(result, 101))
 
-        self.assertLess(late.points_total, full.points_total)
-        self.assertAlmostEqual(late.points_per_row, full.points_per_row)
-        self.assertEqual(
-            self._factor(late, "contribution"), self._factor(full, "contribution")
-        )
+    def test_the_shortlist_holds_exactly_the_weakest(self) -> None:
+        result = broom_service.rank()
+        self.assertEqual(len(result.candidates), broom_service.SHORTLIST_SIZE)
+        ranks = sorted(c.performance_rank for c in result.candidates)
+        self.assertEqual(ranks, sorted(ranks))
+        # Niemand außerhalb des Topfes fährt schwächer als die Schwächste darin.
+        outside = [c for c in result.all_rated if not self._shortlisted(result, c.player_id)]
+        self.assertTrue(all(c.performance_rank > max(ranks) for c in outside))
 
-    def test_a_strong_contributor_gets_a_line_in_her_favour(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("UPDATE matchscore SET points = 1")
-            conn.execute("UPDATE matchscore SET points = 280 WHERE player_id = 101")
-        candidate = self._candidate(broom_service.rank(), 101)
-        self.assertTrue(
-            any("trägt überdurchschnittlich" in reason for reason in candidate.reasons)
-        )
-
-    def test_too_few_available_matches_leaves_contribution_unrated(self) -> None:
+    def test_the_shortlist_entry_names_the_distance_to_the_median(self) -> None:
+        """Die Zahl, die sie in den Topf gebracht hat, muss in ihrer Begründung stehen -
+        sonst steht ein Name da, den niemand einordnen kann."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "DELETE FROM matchscore WHERE player_id = 101 AND match_id < ?",
-                (200 + self.MATCHES - (broom_service.MIN_CONTRIBUTION_ROWS - 1),),
+                "UPDATE matchscore SET score = ? WHERE player_id = 101",
+                (self.BASE_SCORE - 9000,),
             )
         candidate = self._candidate(broom_service.rank(), 101)
-        self.assertIsNone(self._factor(candidate, "contribution"))
-        self.assertIsNone(candidate.points_per_row)
+        self.assertTrue(self._shortlisted(broom_service.rank(), 101))
+        self.assertTrue(any("zum Match-Median" in reason for reason in candidate.reasons))
 
     def test_leaders_are_skipped_but_still_set_the_yardstick(self) -> None:
         with_leaders = broom_service.rank(include_leaders=True)
@@ -496,25 +802,30 @@ class BroomFactorTests(BroomTestCase):
         self.assertEqual(without.leaders_skipped, 1)
         self.assertNotIn(100, [u.player_id for u in without.unrated])
         # Same yardstick either way: the cohort statistics cover the whole roster.
-        self.assertAlmostEqual(without.gp_slope, with_leaders.gp_slope)
+        self.assertAlmostEqual(
+            without.team_unexcused_rate, with_leaders.team_unexcused_rate
+        )
         self.assertAlmostEqual(
             self._candidate(without, 101).risk, self._candidate(with_leaders, 101).risk
         )
 
 
 class BroomOutputTests(BroomTestCase):
-    def test_an_immediate_case_is_printed_without_a_risk_value(self) -> None:
+    def test_an_immediate_case_is_printed_outside_the_pool(self) -> None:
+        """Über einen Sofortfall wird nicht abgewogen, er steht also nicht im Topf -
+        aber er wird gezeigt, weil sein Platz auf die zu schaffenden zählt."""
+        self._no_show(101, 3)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "DELETE FROM matchscore WHERE player_id = 101 AND match_id < ?",
-                (200 + self.MATCHES - 6,),
+                "DELETE FROM matchscore WHERE player_id = 101 AND match_id > ?",
+                (200 + broom_service.PROBATION_MATCHES,),
             )
-        self._no_show(101, self.MATCHES - 1, checkin=1)
-        text = self.capture_stdout(broom_output.print_result, broom_service.rank())
+        result = broom_service.rank()
+        self.assertIn(101, [c.player_id for c in result.immediate_cases])
+        self.assertFalse(self._shortlisted(result, 101))
+        text = self.capture_stdout(broom_output.print_result, result)
+        self.assertIn("Sofortfälle", text)
         self.assertIn("Sofortfall", text)
-        self.assertIn("eingeloggt und nicht gefahren", text)
-        head = next(line for line in text.splitlines() if line.startswith(" 1 "))
-        self.assertNotIn(".", head.split()[2])
 
     def test_every_listed_candidate_carries_reasons(self) -> None:
         for index in (3, 4, 5):
@@ -539,11 +850,45 @@ class BroomOutputTests(BroomTestCase):
     def test_every_factor_is_explained_in_the_output(self) -> None:
         result = broom_service.rank()
         text = self.capture_stdout(lambda: broom_output.print_result(result))
-        self.assertIn("Faktoren (100 = schlechtester Wert im Kader)", text)
-        for _, label, weight, explanation, icon in broom_service.FACTORS:
-            self.assertIn(explanation, text)
-            self.assertIn(f"{label} {weight:>2}", text)
-        self.assertIn("Entschuldigtes Fehlen zählt nicht", text)
+        self.assertIn("Gereiht wird darin nach vier Dingen", text)
+        # Die Legende ist handgeschrieben, damit jede Zeile sagen kann, welche echte
+        # Zahl in ihrer Spalte steht - also wird geprüft, dass keine Achse fehlt.
+        for _, label, weight, _ in broom_service.FACTORS:
+            self.assertIn(f"{label:<8}{weight:>2}", text)
+        self.assertIn("die Spalten zeigen die echten Werte", text)
+        self.assertIn(broom_service.LOYALTY_LABEL, text)
+        self.assertIn("Entschuldigtes Fehlen zählt nirgends", text)
+        # Die Zugehörigkeit reiht mit, steht aber nicht in FACTORS - sie ist der
+        # Multiplikator. Fehlt sie in der Legende, sind es nur noch "zwei Dinge" im Text.
+        self.assertIn("Zugehörigkeit", text)
+
+    def test_the_table_shows_real_values_not_percentiles(self) -> None:
+        """Mit einer 87 kann im Gespräch niemand etwas anfangen - -23.2k, 820 km,
+        2 Fehltermine und 776 Matches schon."""
+        result = broom_service.rank()
+        candidate = result.candidates[0]
+        row = " ".join(broom_output._row(candidate, 1))
+        self.assertIn(f"{candidate.raw_delta / 1000:+.1f}k", row)
+        self.assertIn(str(candidate.km_total), row)
+        self.assertIn(str(candidate.driven_total), row)
+        # Der Abzug selbst steht nicht in der Zeile, nur die Matchzahl dahinter.
+        self.assertNotIn("x0.", row)
+
+    def test_the_performance_column_matches_stats_perf(self) -> None:
+        """Dieselbe Zahl wie 'stats perf --driven-only' - sonst hätte das Team zwei
+        Wahrheiten über dieselbe Spielerin."""
+        from modules import stats as stats_module
+
+        result = broom_service.rank()
+        text = self.capture_stdout(
+            stats_module.handle_command, "perf", [str(self.SEASON), "--driven-only"]
+        )
+        for candidate in result.candidates:
+            if candidate.raw_delta is None:
+                continue
+            self.assertIn(
+                f"{candidate.raw_delta / 1000:.1f}k".replace("-0.0k", "0.0k"), text
+            )
 
     def test_the_emoji_header_lines_up_with_the_numbers(self) -> None:
         """An emoji is two display columns but one character, so the header is padded
@@ -562,15 +907,19 @@ class BroomOutputTests(BroomTestCase):
         widths = {display_width(line) for line in lines[header : header + 4]}
         self.assertEqual(widths, {broom_output.WIDTH})
 
-    def test_every_icon_is_a_single_codepoint_emoji(self) -> None:
-        """Variation selectors, ZWJ sequences and skin tones render inconsistently -
-        and an icon that is sometimes one column wide breaks the alignment above."""
-        icons = [icon for *_, icon in broom_service.FACTORS]
-        icons += [broom_service.LOYALTY_ICON, broom_service.IMMEDIATE_ICON]
-        for icon in icons:
-            self.assertEqual(len(icon), 1, f"{icon!r} is more than one codepoint")
-            self.assertNotIn(ord(icon), (0xFE0E, 0xFE0F))
-        self.assertEqual(len(set(icons)), len(icons), "icons have to stay distinguishable")
+    def test_no_emoji_in_the_table_header(self) -> None:
+        """Ein Emoji ist zwei Anzeigespalten breit, für ``len()`` aber ein Zeichen, und
+        rendert je nach Discord-Client unterschiedlich - eine Tabelle, die nur manchmal
+        ausgerichtet ist, ist schlechter als eine ohne Symbole. Die Spaltenköpfe sind
+        deshalb Wörter, die außerdem gleich sagen, was in der Spalte steht."""
+        labels = [label for _, label, _, _ in broom_service.FACTORS]
+        labels.append(broom_service.LOYALTY_LABEL)
+        for label in labels:
+            self.assertTrue(label.isascii(), label)
+            self.assertTrue(label.replace(" ", "").isalnum(), label)
+        text = self.capture_stdout(broom_output.print_result, broom_service.rank())
+        header = next(line for line in text.splitlines() if "Spielerin" in line)
+        self.assertTrue(header.isascii(), header)
 
     def test_json_carries_the_factors_for_a_downstream_reader(self) -> None:
         import json
@@ -585,21 +934,37 @@ class BroomOutputTests(BroomTestCase):
         self.assertEqual(broom_service._percentile(5.0, [5.0] * 6, low_is_worse=True), 0.5)
         self.assertEqual(broom_service._percentile(5.0, [5.0] * 6, low_is_worse=False), 0.5)
         candidate = broom_service.rank().candidates[0]
-        self.assertEqual(self._factor(candidate, "performance"), 0.5)
+        self.assertEqual(self._factor(candidate, "motivation"), 0.5)
 
-    def test_a_candidate_without_a_stand_out_still_gets_a_line(self) -> None:
-        """A name with an empty block below it reads as a bug, so the strongest
-        factor is named even when nothing crossed a reporting threshold."""
-        result = broom_service.rank()
-        candidate = result.candidates[0]
-        self.assertEqual(len(candidate.reasons), 1)
-        self.assertIn("nichts sticht heraus", candidate.reasons[0])
-        self.assertNotIn("Mot ", candidate.reasons[0])
+    def test_every_candidate_names_the_kilometres_that_ranked_her(self) -> None:
+        """Ein Name mit leerem Block darunter liest sich als Fehler - und eine
+        Begründung, die das Reihungskriterium verschweigt, taugt für kein Gespräch.
+        Deshalb stehen die Kilometer immer da, nicht erst unter einer Schwelle."""
+        for candidate in broom_service.rank().candidates:
+            self.assertTrue(candidate.reasons)
+            self.assertTrue(
+                any("km im Zeitraum" in reason for reason in candidate.reasons),
+                candidate.reasons,
+            )
+
+    def test_without_kilometre_data_the_block_says_so(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM distance")
+        for candidate in broom_service.rank().candidates:
+            self.assertIn("keine Kilometer im Zeitraum gemeldet", candidate.reasons)
 
     def test_a_window_without_a_cohort_says_so_instead_of_looking_solid(self) -> None:
         """MIN_MATCHES no longer gates who is judged, only who sets the yardstick - so
         a short window still produces a ranking, and it has to admit what it is."""
-        result = broom_service.rank(window=broom_service.MIN_MATCHES - 1)
+        # Ein Fenster, in dem niemand die (fensterabhängige) Schwelle erreicht: alle
+        # fahren nur das älteste Match des Fensters.
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE matchscore SET score = 0, points = 0, absent = 1 "
+                "WHERE match_id BETWEEN ? AND ?",
+                (200 + self.MATCHES - 4, 200 + self.MATCHES - 1),
+            )
+        result = broom_service.rank(window=5)
         self.assertEqual(result.status, "OK")
         self.assertEqual(result.cohort_size, 0)
         text = self.capture_stdout(lambda: broom_output.print_result(result))

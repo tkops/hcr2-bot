@@ -164,6 +164,7 @@ def print_command_help(
     *,
     usage: str,
     commands: list[tuple[str, str]],
+    options: Optional[list[tuple[str, str]]] = None,
     examples: Optional[list[str]] = None,
     notes: Optional[list[str]] = None,
 ) -> None:
@@ -187,6 +188,13 @@ def print_command_help(
     print()
     print("Options:")
     print("  -h, --help                      Show this help and exit")
+    for flag, description in options or []:
+        # Mehrzeilige Beschreibungen bleiben unter ihrem Flag eingerückt, damit die
+        # Spalte nicht bricht - ein Flag ohne lesbare Erklärung ist keine Hilfe.
+        lines = description.split("\n")
+        print(f"  {flag:<30}  {lines[0]}")
+        for extra in lines[1:]:
+            print(f"  {'':<30}  {extra}")
 
     if notes:
         print()

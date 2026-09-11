@@ -558,7 +558,7 @@ async def send_admin_help(channel):
         value=help_field([
             (".v", "List vehicles"),
             (".d", "Donation index below 100"),
-            (".B [n|all|leaders]", "Removal candidates with reasons"),
+            (".B [n|s<season>|all|leaders]", "Removal candidates with reasons"),
             (".version", "Show bot version"),
             (".ph .th .sh .mh .xh", "Detailed admin helps"),
         ]),
@@ -664,11 +664,14 @@ async def on_ready():
 def is_public(cmd: str) -> bool:
     return cmd in PUBLIC_COMMANDS
 
+SEASON_ARG_RE = re.compile(r"s(\d{1,3})", re.IGNORECASE)
+
+
 def broom_call(args) -> list:
     """CLI-Aufruf für die Besen-Liste aus Discord-Argumenten.
 
-    Nobody types flags in Discord: '.B 10' means the top ten. Shared by '.B' and
-    '.stats broom' so the two entry points cannot drift apart.
+    Nobody types flags in Discord: '.B 10' means the top ten, '.B s63' the season.
+    Shared by '.B' and '.stats broom' so the two entry points cannot drift apart.
     """
     call = ["stats", "broom"]
     after_flag = False
@@ -679,6 +682,10 @@ def broom_call(args) -> list:
             call.append("--all")
         elif a.lower() in ("leaders", "leader"):
             call.append("--include-leaders")
+        elif SEASON_ARG_RE.fullmatch(a):
+            # Der Zeitraum ist sonst immer die laufende Saison - ohne diese Form käme
+            # eine abgeschlossene Saison in Discord gar nicht mehr an.
+            call += ["--season", a[1:]]
         else:
             call.append(a)
         # A digit right behind a flag is that flag's value, not the top limit -
@@ -1192,20 +1199,27 @@ async def on_message(message):
             call = ["stats", "bdayplot"] + rest
 
         elif sub == "perf":
-            # .stats perf [season] [noskip]
+            # .stats perf [season] [noskip] [inactive] [driven]
+            # Wortformen statt Flags, wie überall im Bot - in Discord tippt niemand "--".
+            # Der Kader ist der Default, 'inactive' holt die Ausgetretenen dazu.
             season = None
-            noskip = False
+            words = {
+                "noskip": "--no-skip",
+                "inactive": "--inactive",
+                "driven": "--driven-only",
+            }
+            flags = []
             for a in rest:
-                if a.lower() == "noskip":
-                    noskip = True
+                key = a.lower()
+                if key in words:
+                    flags.append(words[key])
                 elif season is None and a.isdigit():
                     season = a
 
             call = ["stats", "perf"]
             if season:
                 call.append(season)
-            if noskip:
-                call.append("--no-skip")
+            call += flags
 
         elif sub == "score":
             # .stats score [season] [noskip]

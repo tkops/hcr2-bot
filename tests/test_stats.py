@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from unittest import mock
 
@@ -10,8 +11,17 @@ from modules import stats
 from tests.support import TemporaryDatabaseTestCase
 
 
+def _perf_value(output: str, name: str) -> float:
+    """Die Perf-Zahl einer Spielerin aus der Tabelle - "12.3k" als Zahl."""
+    for line in output.splitlines():
+        match = re.match(rf"\s*\d+\.\s+{re.escape(name)}\s+(-?[\d.]+)k", line)
+        if match:
+            return float(match.group(1))
+    raise AssertionError(f"{name} steht nicht in der Tabelle:\n{output}")
+
+
 class StatsTests(TemporaryDatabaseTestCase):
-    def test_stats_score_points_rank_and_perf_outputs(self) -> None:
+    def test_stats_score_points_and_perf_outputs(self) -> None:
         score_output = self.capture_stdout(stats.handle_command, "score", ["2"])
         self.assertIn("📊Score Season 2 (Jun 21) DIV: DIV1", score_output)
         self.assertIn("Alice", score_output)
@@ -22,14 +32,109 @@ class StatsTests(TemporaryDatabaseTestCase):
         self.assertIn("Alice", points_output)
         self.assertIn("200", points_output)
 
-        rank_output = self.capture_stdout(stats.handle_command, "rank", ["2"])
-        self.assertIn("Lady", rank_output)
-        self.assertIn("Alice", rank_output)
-
         perf_output = self.capture_stdout(stats.handle_command, "perf", ["2"])
         self.assertIn("📈Performance Season 2 (Jun 21) DIV: DIV1", perf_output)
-        self.assertIn("ℹ️ Required matches: 1/1 (20%)", perf_output)
         self.assertIn("Alice", perf_output)
+        # Die 20%-Hürde gehört zu --inactive, nicht mehr zum Default.
+        self.assertNotIn("Required matches", perf_output)
+
+    def test_the_roster_is_the_default_and_inactive_widens_it(self) -> None:
+        """Umgedreht in 1.14.0: der laufende Betrieb fragt nach dem Kader, und genau
+        den zeigte der Bot bis dahin nicht - er schickte nie ein --active."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO players (id, name, garage_power, active, team) "
+                "VALUES (98, 'Gone', 9000, 0, 'PLTE')"
+            )
+            conn.execute(
+                "INSERT INTO matchscore (match_id, player_id, score, points, absent, checkin) "
+                "VALUES (1, 98, 40000, 150, 0, 0)"
+            )
+        default = self.capture_stdout(stats.handle_command, "perf", ["2"])
+        self.assertNotIn("Gone", default)
+        self.assertNotIn("Required matches", default)
+
+        widened = self.capture_stdout(stats.handle_command, "perf", ["2", "--inactive"])
+        self.assertIn("Gone", widened)
+        self.assertIn("Required matches", widened)
+
+    def test_no_skip_rules_out_inactive(self) -> None:
+        """Grundmenge ist der heutige Kader - Ausgetretene mit Wertung und Neue ohne
+        gehören nicht in dieselbe Tabelle."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO players (id, name, garage_power, active, team) "
+                "VALUES (98, 'Gone', 9000, 0, 'PLTE')"
+            )
+            conn.execute(
+                "INSERT INTO matchscore (match_id, player_id, score, points, absent, checkin) "
+                "VALUES (1, 98, 40000, 150, 0, 0)"
+            )
+        text = self.capture_stdout(stats.handle_command, "perf", ["2", "--inactive", "--no-skip"])
+        self.assertNotIn("Gone", text)
+
+    def test_every_perf_flag_is_explained_in_the_help(self) -> None:
+        """Ein Flag, das nur in der Usage-Zeile steht, ist keins - besonders --active,
+        das aussieht wie ein Default und keiner ist."""
+        text = self.capture_stdout(stats.print_help)
+        for flag in ("--inactive", "--no-skip", "--driven-only"):
+            self.assertIn(flag, text)
+            self.assertIn(flag, text.split("Options:")[1])
+        self.assertNotIn("--active", text)
+
+    def test_avg_and_rank_are_gone(self) -> None:
+        """Beide rechneten dasselbe wie perf - avg war sogar byte-identisch. Ein
+        zweiter Name für dieselbe Zahl ist der Weg, auf dem zwei Wahrheiten entstehen."""
+        for removed in ("avg", "rank"):
+            output = self.capture_stdout(stats.handle_command, removed, [])
+            self.assertIn("Usage", output)
+            self.assertNotIn("Lady", output)
+        help_text = self.capture_stdout(stats.print_help)
+        self.assertNotIn("avg [season]", help_text)
+        self.assertNotIn("rank [season]", help_text)
+
+    def test_no_skip_fills_the_list_with_today_s_roster(self) -> None:
+        """Grundmenge ist der heutige Kader, nicht die Saison - deshalb impliziert es
+        --active: sonst stünden Ex-Mitglieder mit Wertung und Neue ohne in einer Tabelle."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO players (id, name, garage_power, active, team) "
+                "VALUES (99, 'Newbie', 9000, 1, 'PLTE')"
+            )
+        without = self.capture_stdout(stats.handle_command, "perf", ["2"])
+        self.assertNotIn("Newbie", without)
+        with_all = self.capture_stdout(stats.handle_command, "perf", ["2", "--no-skip"])
+        self.assertIn("Newbie", with_all)
+        self.assertIn("Alice", with_all)
+
+    def test_driven_only_drops_the_unexcused_zero(self) -> None:
+        """Ohne das Flag ist eine unentschuldigte Null Absicht - sie bestraft. Mit dem
+        Flag beantwortet dieselbe Tabelle die andere Frage: wie fährt sie, wenn sie fährt."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO players (id, name, garage_power, active, team) "
+                "VALUES (99, 'Skipper', 9000, 1, 'PLTE')"
+            )
+            conn.execute(
+                "INSERT INTO match (id, teamevent_id, season_number, start, opponent) "
+                "VALUES (2, 1, 2, '2021-06-12', 'Rivals')"
+            )
+            conn.executemany(
+                "INSERT INTO matchscore (match_id, player_id, score, points, absent, checkin) "
+                "VALUES (?, ?, ?, ?, 0, 0)",
+                [(2, 1, 50000, 200), (2, 99, 40000, 100), (1, 99, 0, 0)],
+            )
+        default = self.capture_stdout(stats.handle_command, "perf", ["2"])
+        driven = self.capture_stdout(stats.handle_command, "perf", ["2", "--driven-only"])
+        self.assertIn("Skipper", default)
+        self.assertIn("Skipper", driven)
+        # Die Null zieht ihren Schnitt nach unten; ohne sie steht sie besser da.
+        self.assertNotEqual(
+            _perf_value(default, "Skipper"), _perf_value(driven, "Skipper")
+        )
+        self.assertGreater(
+            _perf_value(driven, "Skipper"), _perf_value(default, "Skipper")
+        )
 
     def test_stats_repository_loads_common_rows(self) -> None:
         self.assertEqual(stats_repo.get_season_meta(2), ("Jun 21", "DIV1"))

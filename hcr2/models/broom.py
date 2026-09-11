@@ -45,9 +45,9 @@ class BroomCandidate:
     player_id: int
     name: str
     garage_power: int
-    risk: float                  # 0..100, already multiplied by ``loyalty``
-    raw_risk: float              # before the loyalty shield
-    loyalty: float               # protective multiplier 0.6..1.0
+    risk: float                  # 0..100, nach Abzug der Zugehörigkeit
+    raw_risk: float              # davor
+    loyalty_discount: int        # Punkte, die die Zugehörigkeit abzieht
     driven_total: int            # matches driven ever - what loyalty is measured on
     window_rows: int
     window_driven: int
@@ -57,9 +57,9 @@ class BroomCandidate:
     blockers_earlier: int
     km_average: float | None
     km_weeks: int
+    km_total: int                # Summe im Wertungszeitraum - die Zahl für die Tabelle
     km_rank: int | None
-    performance: float | None    # GP-corrected delta to the match median
-    raw_delta: float | None      # same without the GP correction
+    raw_delta: float | None      # average distance to the match median - the shortlist
     points_total: int            # event points earned inside the window
     points_per_row: float | None # per roster match, absences counted as zero
     points_rank: int | None      # 1 = contributed least
@@ -69,6 +69,9 @@ class BroomCandidate:
     probation: bool              # first matches for the team: no weakness allowed
     returner: bool               # history outside the window - coming back is loyalty
     immediate: bool              # veto rule tripped - ranked above everything else
+    performance_rank: int = 0    # Platz im Kader nach Fahrleistung, 1 = schwächste
+    in_pool: bool = False        # im Topf - über Fehltermin oder über Leistung
+    pool_reason: str = ""        # "unexcused" | "performance" | "" 
     factors: list[BroomFactor] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
@@ -90,10 +93,19 @@ class BroomResult:
     status: str
     window: int = 0
     matches: int = 0
+    season: int | None = None    # None = ein Matchfenster statt einer Saison
+    km_weeks: int = 0            # Kilometerwochen, die das Fenster abdeckt
+    roster_size: int = 0
+    slots_to_free: int = 0       # wie viele Plätze frei werden sollen
+    shortlist_size: int = 0      # Größe des Leistungstopfes
+    immediate_cases: list[BroomCandidate] = field(default_factory=list)
+    # Alle bewerteten Spielerinnen nach Fahrleistung, schwächste zuerst. ``candidates``
+    # ist der Topf daraus - die Vollliste bleibt, weil eine Auswahl ohne die Grundmenge
+    # nicht nachprüfbar ist.
+    all_rated: list[BroomCandidate] = field(default_factory=list)
     candidates: list[BroomCandidate] = field(default_factory=list)
     unrated: list[BroomUnrated] = field(default_factory=list)
     cohort_size: int = 0         # players with MIN_MATCHES driven - the yardstick
-    gp_slope: float = 0.0
     team_unexcused_rate: float = 0.0
     team_km_average: float = 0.0
     leaders_skipped: int = 0

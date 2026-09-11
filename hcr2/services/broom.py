@@ -1,49 +1,44 @@
 """Candidates for removal from the team, ranked.
 
-The command computes, it does not decide - every number carries a readable reason
-so the ranking can be argued with instead of merely believed.
+The command computes, it does not decide - every number carries a readable reason so
+the ranking can be argued with instead of merely believed. Two steps, and deliberately
+no more than two: the leadership has to be able to say in one sentence why somebody is
+being let go.
 
-Four ideas hold the model together:
+1. **The pool.** Anyone who missed a match unexcused in the season is in, no matter how
+   well she drives - missing without a word is the one mistake that is not negotiated.
+   The rest is filled up to ``SHORTLIST_SIZE`` with the weakest drivers of the season,
+   measured as the plain distance to the match median over the matches she actually
+   drove. The pool can therefore grow past that size: it is a target for the filling,
+   not a cap on the absences.
+2. **The ranking inside it.** Exactly two things: kilometres from the weekly chest and
+   tenure, the latter as the ``loyalty`` multiplier rather than as a weighted axis.
+   Reliability and performance are absent on purpose - they filled the pool and must
+   not count a second time.
 
-- **Tenure protects at the top and accuses at the bottom.** Match count is almost the
-  same thing as tenure here, so a plain penalty would put the five newest members on
-  top of every list regardless of how they drive. Above ``PROBATION_MATCHES`` it is
-  therefore a multiplier below 1 that can only ever lower a risk. Inside the first
-  matches it is the opposite: a member still on probation has not earned any leeway,
-  so the multiplier goes above 1 and a single unexcused absence is a veto. The window
-  is deliberately short - at 13 driven matches a player is already out of it, so the
-  failure mode of "the newest are always on top" cannot return.
-- **Rates are shrunk toward the team rate - except on probation.** One unexcused
-  absence out of seven matches is 14% and would beat every veteran; with ``SHRINKAGE``
-  pseudo-observations it lands near the team average, which is what a sample that
-  small actually tells us. For a player on probation that reasoning is inverted on
-  purpose: over-reacting to the small sample *is* the policy, so she is measured raw.
-- **A check-in no-show vetoes a newcomer and maxes out everybody else.** Logging into
-  the event and not driving occupies a slot. It happens ~2.5 times a month across the
-  whole roster, so as a purely weighted axis it would be zero for nearly everyone.
-  Below ``NEWCOMER_MATCHES`` a single episode therefore ends the discussion. For an
-  established player it does not: ``BLOCKER_FLOOR_EPISODES`` episodes force the
-  reliability factor to its maximum, and the rest of the model - her contribution,
-  her tenure shield - decides where that leaves her. A veteran who carries the team
-  in points is not removed over two of these, and the model has to be able to say so.
-- **Absolute contribution counts, not only the per-match comparison.** Measured on
-  the live roster one player earned 56 event points from 38 driven matches (1.4 per
-  match) while another brought 2682 from 32 (67.0) - driving every match badly is
-  worth less to the team than driving well now and then. It is points per *roster*
-  match rather than a plain sum, so a member who joined mid-window is not punished
-  for the matches she could not be in, while absences still count as zero. The weight
-  is deliberately modest: ``corr(points, perf) = 0.78``, so it largely restates the
-  performance factor and must not count the same thing twice.
-- **Performance is corrected for garage power, by the roster's own regression.**
-  The slope is measured on every run rather than hardcoded, and it is small on its
-  own (GP explains under 10% of the spread) - which is exactly the small share the
-  correction should have, given that only *current* GP is known.
+Everything else the model knows - drops, check-in no-shows, excused absence, points -
+survives as a **reason line**, not as a weight: explaining yes, scoring no. A number
+that moves the ranking has to be one the leadership can defend in the conversation
+afterwards, and that is what keeps the model this small.
+
+- **Tenure lowers a risk by a fixed number of points, never by a percentage.** A
+  multiplier ties the bonus to how badly somebody scores rather than to how long she has
+  been around: on the live list a player with 304 matches was handed 16.4 points while
+  one with 493 got 14.8, and the weakest player of the pool collected the largest bonus
+  of all. A flat discount depends on tenure alone - and it can be said out loud:
+  "your 776 matches are worth 16 points off".
+- **Immediate cases stand beside the pool, not in it.** Nothing is weighed up about
+  them any more, so they are not ranked against anybody - but they are shown, because
+  the seat they free counts towards the target.
+- **A check-in no-show is logging into the event and not driving**, which occupies a
+  slot. Below ``NEWCOMER_MATCHES`` driven matches a single episode ends the discussion;
+  for an established player it is a reason line and nothing else.
 """
 from __future__ import annotations
 
 import statistics
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 from hcr2.models.broom import (
     BroomCandidate,
@@ -57,31 +52,59 @@ from hcr2.repositories import broom as broom_repo
 from hcr2.services.stats import is_unexcused_absence, linreg_slope, scaled_score
 
 
+# --- shortlist --------------------------------------------------------------
+# Zwei Stufen: erst der Topf, dann die Reihung darin. Der Topf ist rein die Leistung
+# der Saison - wer dem Team am wenigsten einfährt. Innerhalb des Topfes entscheiden
+# Zuverlässigkeit, Motivation und Zugehörigkeit, denn zwischen zwei schwachen
+# Spielerinnen ist das der Unterschied, über den man wirklich redet.
+SHORTLIST_SIZE = 10
+# Ein volles Team hat TEAM_CAPACITY Plätze, und die Leitung will am Saisonende
+# TARGET_FREE_SLOTS davon frei haben. Fehlen schon Leute, müssen entsprechend weniger
+# gehen: bei 48 Spielerinnen sind es drei, nicht fünf.
+TEAM_CAPACITY = 50
+TARGET_FREE_SLOTS = 5
+
 # --- window ----------------------------------------------------------------
+# A season is the default window, because a season is the unit the decision is made
+# in: at the end of one, five players are let go, and evidence from the season before
+# is not what that decision is about. Measured on the live roster a season holds 14-15
+# matches, and 46 of 50 members drive at least twelve of them - so the thresholds
+# below still have their sample, with none of the noise a fixed count drags in from
+# an older season. WINDOW_MATCHES stays as the explicit cross-season view (--last).
 WINDOW_MATCHES = 40          # ~10 weeks: enough for a trend, current enough for a kick
-MIN_MATCHES = 10             # driven matches needed to be rated at all
-MIN_TREND_MATCHES = 12       # a slope over fewer points is noise, not a trend
+MIN_MATCHES = 10             # driven matches that make a player part of the cohort
+COHORT_SHARE = 0.7           # Anteil des Fensters, der für die Kohorte reicht
 MIN_CONTRIBUTION_ROWS = 5    # fewer roster rows make the per-match figure noise
 
 # --- rates -----------------------------------------------------------------
-SHRINKAGE = 10               # pseudo-observations pulling small samples to the team rate
-UNEXCUSED_SCALE = 0.10       # unexcused share that maxes the reliability factor
-TREND_SCALE = 300.0          # slope (score per match) that maxes the trend factor
-STALE_SCALE = 8              # own matches missed in a row that max the recency factor
+# Unentschuldigtes Fehlen wird nicht mehr zu einer Quote verrechnet: es ist die
+# Eintrittskarte in den Topf, und zwar ab dem ersten Mal. Damit sind Shrinkage und
+# eine Zuverlässigkeits-Skala hinfällig - was sie austarierten, ist jetzt eine
+# Ja/Nein-Frage.
 DROP_THRESHOLD = 1000        # dip below one's own average that counts as a drop
+# Fehltermine, die den Zuverlässigkeitsfaktor ausreizen. Gezählt wird die Anzahl, nicht
+# eine Quote: alle im Topf messen sich an derselben Saison, und "dreimal unentschuldigt
+# gefehlt" ist ein Satz, den man in einem Gespräch sagen kann - "14,3 % Fehlquote gegen
+# eine Teamquote von 1,5 %" ist keiner.
+UNEXCUSED_CAP = 3
 
 # --- check-in no-shows -----------------------------------------------------
-BLOCKER_WEIGHT = 2           # counts double inside the reliability factor
 BLOCKER_EPISODE_DAYS = 4     # two events this close are one incident, not two
-BLOCKER_FLOOR_EPISODES = 2   # this many max out reliability - but do not veto
 NEWCOMER_MATCHES = 30        # below this, a single episode is an immediate case
 
 # --- probation --------------------------------------------------------------
-# The first matches for the team. Nothing has been earned yet, so nothing is
-# forgiven: rated even below MIN_MATCHES, measured without shrinkage, and a single
-# unexcused absence is a veto. A player who misses her very first match is out.
+# The first matches for the team. Nothing has been earned yet, so nothing is forgiven:
+# a single unexcused absence is an immediate case rather than a pool ticket.
+#
+# She gets **no protection, but no surcharge either** (multiplier exactly 1.0). It used
+# to be 1.3, which worked while reliability, drops and trend were weighted axes that
+# could speak for a clean newcomer. With the ranking down to kilometres and tenure the
+# surcharge became almost the only difference between two players, and a spotless
+# newcomer landed above an established player with three unexcused absences - exactly
+# the failure mode the protective multiplier exists to prevent. The sharpness of
+# probation lives in the immediate-case rule now, where it can be explained.
 PROBATION_MATCHES = 10
-PROBATION_PENALTY = 1.3
+PROBATION_DISCOUNT = 0
 
 # --- returners ---------------------------------------------------------------
 # Somebody who left and came back is loyal by the act of coming back, and she must
@@ -89,7 +112,7 @@ PROBATION_PENALTY = 1.3
 # rather than by dates: matches driven *outside* the window. Measured on the live
 # roster that separates the two groups perfectly - every newcomer has zero, every
 # returner at least nineteen.
-RETURNER_BONUS = 0.9
+RETURNER_DISCOUNT = 3        # Zusatzabzug, in derselben Einheit wie LOYALTY_TIERS
 
 # --- weights ---------------------------------------------------------------
 # Excused absence deliberately carries no weight: measured against the live roster it
@@ -98,34 +121,67 @@ RETURNER_BONUS = 0.9
 # Every icon is a single codepoint with emoji presentation by default - no variation
 # selectors, no ZWJ sequences, no skin tones. Those render inconsistently across
 # clients, and a table that only lines up in some of them is worse than a plain one.
-FACTORS: tuple[tuple[str, str, int, str, str], ...] = (
-    ("reliability", "Zuv", 27, "unentschuldigtes Fehlen, Einloggen ohne Fahren zählt doppelt", "🚫"),
-    ("motivation", "Mot", 18, "Kilometer pro Woche aus der Wochen-Truhe", "🚗"),
-    ("drops", "Aus", 16, "Einbrüche unter den eigenen Schnitt, quadratisch gewichtet", "📉"),
-    ("contribution", "Bei", 14, "Event-Punkte pro Kadermatch, Fehlen zählt als null", "🏆"),
-    ("performance", "Lei", 11, "Score zum Match-Median, um die Garage Power korrigiert", "🎯"),
-    ("trend", "Trd", 9, "Richtung der letzten Matches, fallend zählt schlecht", "📊"),
-    ("recency", "Akt", 5, "eigene Matches in Folge nicht gefahren", "💤"),
+# **Vier Dinge reihen den Topf**, und mehr sollen es nicht werden - der Grund ist nicht
+# Sparsamkeit, sondern das Gespräch danach: ein Rauswurf muss in einem Satz begründbar
+# sein. Drei davon sind gewichtete Achsen, die vierte ist die Zugehörigkeit als
+# Multiplikator ``loyalty``, weil sie ein Risiko nur senken können soll.
+#
+# Zuverlässigkeit und Leistung zählen hier, obwohl sie auch den Topf füllen. Das ist
+# Absicht: der Eintritt ist eine Ja/Nein-Frage (einmal gefehlt, oder unter den
+# Schwächsten), die Reihung eine Wie-stark-Frage. Ohne sie wären drei unentschuldigte
+# Fehltermine und einer gleichwertig, und die Schwächste des Kaders stünde unter einer,
+# die nur mehr Kilometer fährt.
+#
+# Alles andere (Einbrüche, Check-in-No-Shows, Beitrag, entschuldigtes Fehlen) ist
+# Begründungszeile geblieben, aber reiht nicht mit: erklären ja, mitrechnen nein.
+# Die Spaltenköpfe sind **Wörter, keine Emoji**. Ein Emoji ist zwei Anzeigespalten
+# breit, für ``len()`` aber ein Zeichen, und je nach Discord-Client rendert es mal so
+# mal so - eine Tabelle, die nur manchmal ausgerichtet ist, ist schlechter als eine
+# ohne Symbole. "Fehlt / Perf / km / Matches" sagt außerdem direkt, was in der Spalte
+# steht, und die Spalten tragen seit 1.18 die echten Werte statt Perzentile.
+FACTORS: tuple[tuple[str, str, int, str], ...] = (
+    ("reliability", "Fehlt", 35, "unentschuldigte Fehltermine der Saison"),
+    ("performance", "Perf", 35, "Score zum Match-Median, nur gefahrene Matches"),
+    ("motivation", "km", 30, "Kilometer im Zeitraum, gesamt"),
 )
 
-LOYALTY_ICON = "⏳"       # Zugehörigkeit - the multiplier, not a factor
-IMMEDIATE_ICON = "🔥"     # Sofortfall
+FACTOR_LABELS = {key: label for key, label, _, _ in FACTORS}
+FACTOR_WEIGHTS = {key: weight for key, _, weight, _ in FACTORS}
+
+LOYALTY_LABEL = "Matches"   # Zugehörigkeit - the multiplier, not a factor
+IMMEDIATE_ICON = "🔥"       # Sofortfall - keine Tabellenspalte, daher unkritisch
 
 # Wie ein Faktor im Satz heißt - die Spaltenköpfe sind zum Vorlesen zu kurz.
 FACTOR_PHRASES = {
-    "reliability": "Zuverlässigkeit",
+    "reliability": "unentschuldigten Fehlens",
+    "performance": "Leistung zum Match-Median",
     "motivation": "gefahrener Kilometer",
-    "drops": "Einbrüchen unter den eigenen Schnitt",
-    "contribution": "zu wenig eingefahrener Punkte",
-    "performance": "Leistung zur Garage Power",
-    "trend": "fallendem Trend",
-    "recency": "nicht gefahrenen Matches",
 }
 
-# Multiplier by matches driven ever - the strongest single lever in the model, able
-# to move a candidate several places on its own. Above 1 only inside probation.
-LOYALTY_TIERS: tuple[tuple[int, float], ...] = ((50, 1.0), (150, 0.9), (300, 0.8), (500, 0.7))
-LOYALTY_FLOOR = 0.6
+# Punkte, die die Zugehörigkeit vom Risiko abzieht, gestaffelt nach gefahrenen
+# Matches. **Additiv, nicht multiplikativ** - und das ist der Punkt: ein Faktor wirkt
+# prozentual, also hing der Bonus daran, wie schlecht jemand dasteht, statt daran, wie
+# lange sie dabei ist. An der echten Liste bekam eine Spielerin mit 304 Matches 16,4
+# Punkte geschenkt und eine mit 493 nur 14,8, weil deren Rohrisiko niedriger war; und
+# die in allen drei Achsen Schwächste kassierte mit 29,7 Punkten den größten Bonus
+# überhaupt. Ein fester Abzug hängt allein an der Zugehörigkeit - und ist ein Satz, den
+# man in einem Gespräch sagen kann: "deine 776 Matches bringen dir 16 Punkte Abzug".
+LOYALTY_TIERS: tuple[tuple[int, int], ...] = ((50, 0), (150, 4), (300, 8), (500, 12))
+LOYALTY_MAX = 16
+
+
+def cohort_threshold(window: int) -> int:
+    """Gefahrene Matches, ab denen eine Spielerin den Maßstab mitbestimmt.
+
+    ``MIN_MATCHES`` ist auf eine volle Saison gemünzt. In einer **laufenden** Saison
+    kann die Zahl niemand erreichen - nach vier Matches wäre die Kohorte leer, jeder
+    Perzentilfaktor unbewertet und die Rangliste eine alphabetische Liste mit lauter
+    Nullen. Deshalb ist die Schwelle ein Anteil des Fensters, gedeckelt auf
+    ``MIN_MATCHES``: bei 15 Matches bleibt es bei 10 wie bisher, bei 4 sind es 3.
+    """
+    if window <= 0:
+        return MIN_MATCHES
+    return max(1, min(MIN_MATCHES, round(window * COHORT_SHARE)))
 
 
 def on_probation(driven_total: int) -> bool:
@@ -144,13 +200,14 @@ def is_returner(*, driven_total: int, window_driven: int, window_rows: int, wind
     )
 
 
-def loyalty_multiplier(driven_total: int) -> float:
+def loyalty_discount(driven_total: int) -> int:
+    """Punkte, die die Zugehörigkeit vom Rohrisiko abzieht."""
     if on_probation(driven_total):
-        return PROBATION_PENALTY
-    for limit, factor in LOYALTY_TIERS:
+        return PROBATION_DISCOUNT
+    for limit, discount in LOYALTY_TIERS:
         if driven_total < limit:
-            return factor
-    return LOYALTY_FLOOR
+            return discount
+    return LOYALTY_MAX
 
 
 def blocker_episodes(dates: list[str]) -> int:
@@ -172,6 +229,56 @@ def blocker_episodes(dates: list[str]) -> int:
     return len(episodes)
 
 
+def window_weeks(first_day: str, last_day: str) -> list[tuple[int, int]]:
+    """The ISO weeks whose Thursday falls inside the period.
+
+    Thursday is the ISO anchor day: it decides which year - and here which season - a
+    week belongs to, so a week straddling the turn of the month lands in exactly one
+    of the two instead of counting for both. Measured on the live seasons that comes
+    out gapless and overlap-free: season 63 ends at week 31, season 64 starts at 32.
+    """
+    start = date.fromisoformat(first_day[:10])
+    end = date.fromisoformat(last_day[:10])
+    weeks: list[tuple[int, int]] = []
+    day = start
+    while day <= end:
+        iso = day.isocalendar()
+        thursday = date.fromisocalendar(iso.year, iso.week, 4)
+        if start <= thursday <= end and (iso.year, iso.week) not in weeks:
+            weeks.append((iso.year, iso.week))
+        day += timedelta(days=1)
+    return weeks
+
+
+def _km_weeks(season: int | None, match_ids: list[int]) -> list[tuple[int, int]]:
+    """The kilometre weeks the window covers.
+
+    One rule, two shapes of window: a season is bounded by the season table, a
+    ``--last`` run by its oldest and newest match. Either way the kilometres come from
+    the period being judged and from nowhere else.
+    """
+    bounds = broom_repo.season_bounds(season) if season is not None else None
+    if bounds is None:
+        # Auch der Saisonmodus landet hier, wenn die Saisonzeile fehlt - die Matches
+        # sind dann der einzige Beleg dafür, welcher Zeitraum gemeint war.
+        bounds = broom_repo.match_bounds(match_ids)
+    return window_weeks(*bounds) if bounds else []
+
+
+def _fills_the_pool(candidate: BroomCandidate) -> bool:
+    """Ob eine Spielerin für den Leistungstopf in Frage kommt.
+
+    Ohne eine gefahrene Zeile gibt es keine Leistung zu messen, und sie stünde allein
+    deshalb an der Spitze. Bei einer durchgehend abgemeldeten Spielerin wäre das
+    entschuldigtes Fehlen als Vorwurf - im ganzen Modell ist es ausdrücklich keiner.
+    War sie dagegen unentschuldigt weg oder hat einen Slot belegt, ohne zu fahren,
+    hat sie dem Team nichts eingebracht und gehört nach vorn.
+    """
+    if candidate.raw_delta is not None:
+        return True
+    return candidate.unexcused > 0 or candidate.blocker_episodes > 0
+
+
 def _percentile(value: float, values: list[float], *, low_is_worse: bool) -> float:
     """0..1 where 1 is the worst in the cohort.
 
@@ -184,18 +291,6 @@ def _percentile(value: float, values: list[float], *, low_is_worse: bool) -> flo
         return 0.5
     below = sum(1 for other in values if other < value) / (len(values) - 1)
     return (1.0 - below) if low_is_worse else below
-
-
-def _gp_slope(points: list[tuple[int, float]]) -> tuple[float, float]:
-    """Score per garage-power point, regressed on the current roster, plus the mean GP."""
-    if len(points) < 3:
-        return 0.0, (statistics.fmean(gp for gp, _ in points) if points else 0.0)
-
-    gp_mean = statistics.fmean(gp for gp, _ in points)
-    delta_mean = statistics.fmean(delta for _, delta in points)
-    numerator = sum((gp - gp_mean) * (delta - delta_mean) for gp, delta in points)
-    denominator = sum((gp - gp_mean) ** 2 for gp, _ in points)
-    return (numerator / denominator if denominator else 0.0), gp_mean
 
 
 class _Window:
@@ -240,20 +335,6 @@ class _Window:
     def average_delta(self) -> float | None:
         return statistics.fmean(delta for _, delta in self.deltas) if self.deltas else None
 
-    def semi_deviation(self) -> float | None:
-        """Downside spread against one's own average - the drop measure.
-
-        Only dips count, and they count quadratically, so one collapse weighs more
-        than a handful of slightly weak evenings.
-        """
-        average = self.average_delta
-        if average is None or self.driven < MIN_TREND_MATCHES:
-            return None
-        dips = [delta - average for _, delta in self.deltas if delta - average < -DROP_THRESHOLD]
-        if not dips:
-            return 0.0
-        return (sum(dip * dip for dip in dips) / self.driven) ** 0.5
-
     def drops(self) -> tuple[int, float | None]:
         average = self.average_delta
         if average is None:
@@ -261,12 +342,6 @@ class _Window:
         dips = [delta - average for _, delta in self.deltas if delta - average < -DROP_THRESHOLD]
         return len(dips), (min(dips) if dips else None)
 
-    def trend_slope(self) -> float | None:
-        if self.driven < MIN_TREND_MATCHES:
-            return None
-        # Window order counts down from the newest match, so oldest first is descending.
-        chronological = [delta for _, delta in sorted(self.deltas, reverse=True)]
-        return linreg_slope(chronological)
 
 
 def _collect(rows: list[BroomWindowRow], order: dict[int, int]) -> dict[int, _Window]:
@@ -316,29 +391,56 @@ def _collect(rows: list[BroomWindowRow], order: dict[int, int]) -> dict[int, _Wi
     return windows
 
 
-def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> BroomResult:
-    match_ids = broom_repo.window_match_ids(window)
+def rank(
+    *,
+    season: int | None = None,
+    window: int | None = None,
+    include_leaders: bool = False,
+) -> BroomResult:
+    """Rank the roster over one season, or over ``window`` matches if one is given.
+
+    ``window`` wins when both are passed - it is the explicit request for the
+    cross-season view, while the season is what you get by not asking.
+    """
+    if window is not None:
+        match_ids = broom_repo.window_match_ids(window)
+        season = None
+    else:
+        if season is None:
+            season = broom_repo.current_season()
+        match_ids = broom_repo.season_match_ids(season) if season is not None else []
+        # The window is what the data turned out to be, not what was asked for - every
+        # size-dependent rule below (is_returner above all) has to see the real count.
+        window = len(match_ids)
+
     if not match_ids:
-        return BroomResult(status="NO_MATCHES", window=window)
+        return BroomResult(status="NO_MATCHES", window=window, season=season)
 
     roster = broom_repo.fetch_roster()
     if not roster:
-        return BroomResult(status="NO_ROSTER", window=window, matches=len(match_ids))
+        return BroomResult(
+            status="NO_ROSTER", window=window, season=season, matches=len(match_ids)
+        )
 
     order = {match_id: index for index, match_id in enumerate(match_ids)}
     roster_ids = [member.player_id for member in roster]
+    min_cohort_matches = cohort_threshold(len(match_ids))
 
     # Medians come from every PLTE driver in the match, leaders included - dropping
     # them from the cohort would shift the yardstick everyone is measured against.
     rows = broom_repo.fetch_window_rows(match_ids, roster_ids)
     windows = _collect(rows, order)
 
-    km = broom_repo.fetch_km_averages(roster_ids)
+    km = broom_repo.fetch_km_for_weeks(roster_ids, _km_weeks(season, match_ids))
+    # Die Wochen, für die es Zahlen *gibt*, nicht die, die das Fenster breit ist: die
+    # Truhe wird erst seit KW 33 gelesen, und "aus 4 Wochen" wäre dann eine Behauptung
+    # über Daten, die niemand eingetragen hat.
+    km_weeks_read = max((weeks for _, weeks, _ in km.values()), default=0)
     driven_totals = broom_repo.fetch_driven_totals(roster_ids)
     earlier_blockers = broom_repo.count_blockers_before(match_ids, roster_ids)
 
     km_ranking = sorted(
-        (member.player_id for member in roster if km.get(member.player_id, (0.0, 0))[1] > 0),
+        (member.player_id for member in roster if km.get(member.player_id, (0.0, 0, 0))[1] > 0),
         key=lambda player_id: km[player_id][0],
     )
     team_km = statistics.fmean([km[pid][0] for pid in km_ranking]) if km_ranking else 0.0
@@ -360,7 +462,7 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
         # yardstick.
         if state is not None and state.rows >= 1:
             rated.append(member)
-            if state.driven >= MIN_MATCHES:
+            if state.driven >= min_cohort_matches:
                 cohort.append(member)
             continue
         if member.is_leader and not include_leaders:
@@ -381,30 +483,26 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
         return BroomResult(
             status="NO_DATA",
             window=window,
+            season=season,
+            km_weeks=km_weeks_read,
             matches=len(match_ids),
             unrated=unrated,
             leaders_skipped=leaders_skipped,
             team_km_average=team_km,
         )
 
-    slope, gp_mean = _gp_slope(
-        [(m.garage_power, windows[m.player_id].average_delta or 0.0) for m in cohort]
-    )
-
     total_rows = sum(windows[m.player_id].rows for m in cohort)
     team_unexcused = sum(windows[m.player_id].unexcused for m in cohort) / total_rows if total_rows else 0.0
 
-    def residual(member: RosterMember) -> float | None:
-        average = windows[member.player_id].average_delta
-        if average is None:
-            return None
-        return average - slope * (member.garage_power - gp_mean)
-
-    residuals = {m.player_id: residual(m) for m in rated}
-    deviations = {m.player_id: windows[m.player_id].semi_deviation() for m in rated}
-    cohort_residuals = [residuals[m.player_id] for m in cohort if residuals[m.player_id] is not None]
-    cohort_deviations = [deviations[m.player_id] for m in cohort if deviations[m.player_id] is not None]
-    cohort_km = [km[m.player_id][0] for m in cohort if km.get(m.player_id, (0.0, 0))[1] >= 2]
+    # Leistung ist der rohe Abstand zum Match-Median. Die Garage Power wird bewusst
+    # nicht mehr herausgerechnet: für einen freien Platz zählt, was eine Spielerin dem
+    # Team einbringt, nicht ob ihre Ausrüstung mehr hergegeben hätte. An der echten
+    # Saison 64 änderte die Korrektur ohnehin nur eine von zehn Personen im Topf.
+    residuals = {m.player_id: windows[m.player_id].average_delta for m in rated}
+    cohort_residuals = [
+        residuals[m.player_id] for m in cohort if residuals[m.player_id] is not None
+    ]
+    cohort_km = [km[m.player_id][0] for m in cohort if km.get(m.player_id, (0.0, 0, 0))[1] >= 1]
     cohort_points = [
         windows[m.player_id].points_per_row
         for m in cohort
@@ -421,55 +519,28 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
             continue
         state = windows[member.player_id]
         episodes = blocker_episodes(state.blocker_dates)
-        km_average, km_weeks = km.get(member.player_id, (None, 0))
+        km_average, km_weeks, km_total = km.get(member.player_id, (None, 0, 0))
         driven_total = driven_totals.get(member.player_id, 0)
 
         probation = on_probation(driven_total)
-        bad = state.unexcused + BLOCKER_WEIGHT * episodes
-        if probation:
-            # No shrinkage: over-reacting to the small sample is the point.
-            reliability = min(1.0, bad / state.rows / UNEXCUSED_SCALE) if state.rows else 0.0
-        else:
-            reliability = min(
-                1.0, (bad + SHRINKAGE * team_unexcused) / (state.rows + SHRINKAGE) / UNEXCUSED_SCALE
-            )
-        if episodes >= BLOCKER_FLOOR_EPISODES:
-            # Repeated check-in no-shows max out the axis they belong to instead of
-            # overriding the whole model - the rest of it still gets to speak.
-            reliability = 1.0
 
         values: dict[str, float | None] = {
-            "reliability": reliability,
+            "reliability": min(1.0, state.unexcused / UNEXCUSED_CAP),
             "performance": (
                 _percentile(residuals[member.player_id], cohort_residuals, low_is_worse=True)
                 if residuals[member.player_id] is not None and cohort_residuals
                 else None
             ),
-            "recency": min(1.0, (state.missed_since_driven or 0) / STALE_SCALE),
             "motivation": (
                 _percentile(km_average, cohort_km, low_is_worse=True)
-                if km_average is not None and km_weeks >= 2 and cohort_km
+                if km_average is not None and km_weeks >= 1 and cohort_km
                 else None
             ),
-            "contribution": (
-                _percentile(state.points_per_row, cohort_points, low_is_worse=True)
-                if state.points_per_row is not None and cohort_points
-                else None
-            ),
-            "drops": (
-                _percentile(deviations[member.player_id], cohort_deviations, low_is_worse=False)
-                if deviations[member.player_id] is not None and cohort_deviations
-                else None
-            ),
-            "trend": None,
         }
-        slope_own = state.trend_slope()
-        if slope_own is not None:
-            values["trend"] = max(0.0, min(1.0, -slope_own / TREND_SCALE + 0.5))
 
         factors = [
-            BroomFactor(key=key, label=label, weight=weight, value=values[key])
-            for key, label, weight, _, _ in FACTORS
+            BroomFactor(key=key, label=label, weight=weight, value=values.get(key))
+            for key, label, weight, _ in FACTORS
         ]
         available = [factor for factor in factors if factor.rated]
         weight_sum = sum(factor.weight for factor in available)
@@ -484,9 +555,9 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
             window_rows=state.rows,
             window=len(match_ids),
         )
-        loyalty = loyalty_multiplier(driven_total)
+        discount = loyalty_discount(driven_total)
         if returner:
-            loyalty *= RETURNER_BONUS
+            discount += RETURNER_DISCOUNT
         drop_count, worst_drop = state.drops()
 
         candidates.append(
@@ -494,9 +565,11 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
                 player_id=member.player_id,
                 name=member.name,
                 garage_power=member.garage_power,
-                risk=raw_risk * loyalty,
+                # Nie unter null: ein Abzug soll schützen, keine negativen Risiken
+                # erzeugen, die sich nicht mehr sinnvoll vergleichen lassen.
+                risk=max(0.0, raw_risk - discount),
                 raw_risk=raw_risk,
-                loyalty=loyalty,
+                loyalty_discount=discount,
                 driven_total=driven_total,
                 window_rows=state.rows,
                 window_driven=state.driven,
@@ -506,8 +579,8 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
                 blockers_earlier=earlier_blockers.get(member.player_id, 0),
                 km_average=km_average,
                 km_weeks=km_weeks,
+                km_total=km_total,
                 km_rank=(km_ranking.index(member.player_id) + 1) if member.player_id in km_ranking else None,
-                performance=residuals[member.player_id],
                 raw_delta=state.average_delta,
                 points_total=state.points,
                 points_per_row=state.points_per_row,
@@ -543,25 +616,76 @@ def rank(*, window: int = WINDOW_MATCHES, include_leaders: bool = False) -> Broo
         for candidate in candidates
     ]
 
-    # The veto ignores the loyalty shield on purpose: measured against the live roster
-    # the one immediate case has the highest raw risk of all and would still land
-    # sixth once her 536 matches are applied.
+    # Stufe 1: der Topf. Rein die Fahrleistung der Saison, schwächste zuerst. Wer im
+    # Zeitraum keine einzige Zeile gefahren hat, steht ganz vorn - sie hat dem Team
+    # nichts eingebracht, und das ist die Frage, die den Topf füllt.
+    by_performance = sorted(
+        candidates,
+        key=lambda c: (c.raw_delta is not None, c.raw_delta if c.raw_delta is not None else 0.0),
+    )
+    performance_rank = {c.player_id: index for index, c in enumerate(by_performance, start=1)}
+    candidates = [
+        replace(c, performance_rank=performance_rank[c.player_id]) for c in candidates
+    ]
+
+    # Sofortfälle werden unabhängig vom Topf entschieden, stehen also nicht darin: sie
+    # sind keine Abwägung mehr. Ihr Platz zählt trotzdem auf die zu schaffenden mit.
     immediate = sorted(
         (c for c in candidates if c.immediate),
         # Probation failures lead: there is no history to weigh against them and the
         # decision is the cheapest one on the list.
         key=lambda c: (not c.probation, -c.blocker_episodes, -c.raw_risk),
     )
-    ranked = sorted((c for c in candidates if not c.immediate), key=lambda c: -c.risk)
+    # Zwei Wege in den Topf, und der erste ist bedingungslos: **einmal unentschuldigt
+    # gefehlt genügt**, egal wie gut jemand fährt. Vorgabe der Teamleitung - nicht zu
+    # erscheinen ist der eine Fehler, über den nicht verhandelt wird. Der Topf kann
+    # dadurch über SHORTLIST_SIZE hinauswachsen; die Zahl ist eine Zielgröße für das
+    # Auffüllen, keine Obergrenze für die Zuverlässigkeitsfälle.
+    eligible = [c for c in candidates if not c.immediate]
+    by_absence = [c for c in eligible if c.unexcused > 0]
+    absent_ids = {c.player_id for c in by_absence}
+    fillers = [
+        c for c in eligible if c.player_id not in absent_ids and _fills_the_pool(c)
+    ]
+    fillers.sort(key=lambda c: performance_rank[c.player_id])
+    pool = by_absence + fillers[: max(0, SHORTLIST_SIZE - len(by_absence))]
+    pool_ids = {c.player_id for c in pool}
+    candidates = [
+        replace(
+            c,
+            in_pool=c.player_id in pool_ids,
+            pool_reason=(
+                "unexcused" if c.player_id in absent_ids
+                else ("performance" if c.player_id in pool_ids else "")
+            ),
+        )
+        for c in candidates
+    ]
+    # Fehlen die Kilometer, tragen Zuverlässigkeit und Leistung die Reihung weiter -
+    # ihr Gewicht wird umgelegt. Ein Sonderweg ist dafür nicht mehr nötig.
+    ranked = sorted(
+        (c for c in candidates if c.in_pool and not c.immediate), key=lambda c: -c.risk
+    )
+
+    # Ein volles Team hat TEAM_CAPACITY Plätze und die Leitung will TARGET_FREE_SLOTS
+    # davon frei haben - fehlen schon Leute, müssen entsprechend weniger gehen.
+    roster_size = len(roster)
+    slots_to_free = max(0, roster_size - (TEAM_CAPACITY - TARGET_FREE_SLOTS))
 
     return BroomResult(
         status="OK",
         window=window,
+        season=season,
+        km_weeks=km_weeks_read,
         matches=len(match_ids),
-        candidates=immediate + ranked,
+        roster_size=roster_size,
+        slots_to_free=slots_to_free,
+        shortlist_size=SHORTLIST_SIZE,
+        immediate_cases=immediate,
+        all_rated=sorted(candidates, key=lambda c: performance_rank[c.player_id]),
+        candidates=ranked,
         unrated=sorted(unrated, key=lambda u: u.window_driven),
         cohort_size=len(cohort),
-        gp_slope=slope,
         team_unexcused_rate=team_unexcused,
         team_km_average=team_km,
         leaders_skipped=leaders_skipped,
@@ -591,10 +715,9 @@ def _with_reasons(
     if candidate.probation and candidate.unexcused:
         reasons.append("in der Probezeit unentschuldigt gefehlt")
     if candidate.blocker_episodes:
-        line = f"{candidate.blocker_episodes}x eingeloggt und nicht gefahren (Slot belegt)"
-        if candidate.blocker_episodes >= BLOCKER_FLOOR_EPISODES and not candidate.immediate:
-            line += " – Zuverlässigkeit dadurch voll ausgereizt"
-        reasons.append(line)
+        reasons.append(
+            f"{candidate.blocker_episodes}x eingeloggt und nicht gefahren (Slot belegt)"
+        )
     if candidate.blockers_earlier:
         reasons.append(
             f"{candidate.blockers_earlier}x das Gleiche früher, außerhalb des Fensters"
@@ -610,16 +733,24 @@ def _with_reasons(
         reasons.append(
             f"{candidate.excused}x entschuldigt abwesend ({share:.0f}% des Fensters, zählt nicht)"
         )
-    if (
-        candidate.km_average is not None
-        and candidate.km_weeks >= 2
-        and team_km > 0
-        and candidate.km_average < team_km * 0.6
-    ):
+    # Die Kilometer stehen immer da, nicht erst unter einer Schwelle: sie sind die
+    # Zahl, die den Platz in dieser Liste bestimmt. Eine Begründung, die das
+    # Reihungskriterium verschweigt, taugt für kein Gespräch.
+    if candidate.km_average is not None and candidate.km_weeks >= 1:
         place = f", Platz {candidate.km_rank}/{roster_size}" if candidate.km_rank else ""
-        reasons.append(
-            f"{candidate.km_average:.0f} km/Woche{place} im Kader (Ø {team_km:.0f})"
-        )
+        # Dieselbe Zahl wie in der Tabelle: Gesamtkilometer des Zeitraums. Der
+        # Wochenschnitt steht nur dahinter, wenn es mehr als eine Woche war - sonst
+        # wiederholt er sich bloß selbst.
+        line = f"{candidate.km_total} km im Zeitraum{place} im Kader"
+        if candidate.km_weeks > 1:
+            line += f" ({candidate.km_average:.0f}/Woche, Ø {team_km:.0f})"
+        elif team_km > 0:
+            line += f" (Ø {team_km:.0f})"
+        if team_km > 0 and candidate.km_average >= team_km:
+            line += " – überdurchschnittlich"
+        reasons.append(line)
+    elif candidate.km_weeks == 0:
+        reasons.append("keine Kilometer im Zeitraum gemeldet")
     if candidate.points_per_row is not None:
         place = f", Platz {candidate.points_rank}/{points_cohort}" if candidate.points_rank else ""
         contribution = next(
@@ -637,17 +768,8 @@ def _with_reasons(
                 f"trägt überdurchschnittlich: {candidate.points_total} Punkte "
                 f"= {candidate.points_per_row:.1f} pro Kadermatch{place}"
             )
-    if candidate.performance is not None and candidate.raw_delta is not None:
-        if candidate.performance < -3000:
-            reasons.append(
-                f"{candidate.performance / 1000:+.1f}k unter Kadererwartung für "
-                f"{candidate.garage_power} GP (roh {candidate.raw_delta / 1000:+.1f}k)"
-            )
-        elif candidate.raw_delta < -3000:
-            reasons.append(
-                f"{candidate.raw_delta / 1000:+.1f}k zum Match-Median, durch GP erklärt "
-                f"({candidate.performance / 1000:+.1f}k bereinigt)"
-            )
+    if candidate.raw_delta is not None and candidate.raw_delta < -3000:
+        reasons.append(f"{candidate.raw_delta / 1000:+.1f}k zum Match-Median")
     if candidate.drops >= 3 and candidate.worst_drop is not None:
         reasons.append(
             f"{candidate.drops} Einbrüche unter den eigenen Schnitt, "
@@ -661,15 +783,14 @@ def _with_reasons(
         outside = candidate.driven_total - candidate.window_driven
         reasons.append(
             f"Rückkehrerin: {outside} Matches vor dieser Zeit gefahren, "
-            f"nur {candidate.window_rows} im Fenster im Kader"
+            f"nur {candidate.window_rows} im Fenster im Kader "
+            f"(+{RETURNER_DISCOUNT} Punkte Abzug)"
         )
-    if candidate.loyalty < 1.0:
+    if candidate.loyalty_discount:
         reasons.append(
             f"{candidate.driven_total} Matches für das Team gefahren -> "
-            f"Schutz x{candidate.loyalty:.2f}"
+            f"{candidate.loyalty_discount} Punkte Abzug"
         )
-    elif candidate.loyalty > 1.0:
-        reasons.append(f"kein Schutz durch Zugehörigkeit -> Aufschlag x{candidate.loyalty:.2f}")
 
     if not reasons:
         # Nothing crossed a reporting threshold, yet she is on the list - then the
