@@ -672,14 +672,17 @@ def broom_call(args) -> list:
 
     Nobody types flags in Discord: '.B 10' means the top ten, '.B s63' the season.
     Shared by '.B' and '.stats broom' so the two entry points cannot drift apart.
+
+    '.B all' ist weggefallen. Es stand für '--all' und steuerte, wie viele
+    Begründungsblöcke gedruckt werden - die gibt es nicht mehr, die Tabelle zeigt
+    ohnehin den ganzen Topf. Ein Wort, das stillschweigend nichts tut, ist schlechter
+    als keins: 'all' landet jetzt unverändert im Aufruf und die CLI zeigt die Usage.
     """
     call = ["stats", "broom"]
     after_flag = False
     for a in args:
         if a.isdigit() and not after_flag:
             call += ["--top", a]
-        elif a.lower() == "all":
-            call.append("--all")
         elif a.lower() in ("leaders", "leader"):
             call.append("--include-leaders")
         elif SEASON_ARG_RE.fullmatch(a):

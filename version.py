@@ -1,6 +1,19 @@
-VERSION = "1.19.0"
+VERSION = "1.27.1"
 
 HISTORY = [
+    ("1.27.1", "2026-09-13", "broom: Erklaerungen unter der Tabelle brechen auf deren Breite um, statt seitlich wegzulaufen"),
+    ("1.27.0", "2026-09-13", "broom: Saisonpunkte stehen als eigene Spalte in der Tabelle - der Tiebreaker ist damit direkt sichtbar"),
+    ("1.26.0", "2026-09-13", "broom: Rueckkehrbonus entfaellt - die Bedingung konnte seit der Umstellung aufs Saisonfenster nicht mehr zutreffen, die Matchzahl allein reicht"),
+    ("1.25.0", "2026-09-13", "broom: Fehlen kostet 3, belegter Slot 5 - flache Werte je Spalte, an der echten Liste kalibriert; Episoden-Zusammenfassung entfaellt"),
+    ("1.24.1", "2026-09-13", "broom: Legende sachlicher formuliert - bewertet wird die Fahrleistung, nicht die Person"),
+    ("1.24.0", "2026-09-13", "broom: Fehlt und Slot sind zwei getrennte Spalten - ein Vorfall zaehlt genau einmal; Zielzahl und Kadergroesse entfallen"),
+    ("1.23.2", "2026-09-13", "broom: Kopfzeile heisst Besenliste und traegt nur noch den Zeitraum - Kadergroesse und Zielzahl raus"),
+    ("1.23.1", "2026-09-12", "broom: --all entfaellt (tat nichts mehr), --include-leaders steht in der Kopfzeile, unbekannte Argumente werden abgelehnt statt ignoriert"),
+    ("1.23.0", "2026-09-12", "broom: Ausgabe auf Tabelle und Punktesystem reduziert - Begruendungsbl\u00f6cke und Kopfzeile raus, passt in eine Discord-Nachricht; Ausgabe sagt Ladys statt Spielerinnen"),
+    ("1.22.1", "2026-09-12", "broom: Perf-Punkte messen am Topf statt am Kader - zehn Plaetze, zehn Punktwerte, jeder genau einmal"),
+    ("1.22.0", "2026-09-12", "broom: Tabelle zeigt die echten Werte mit den Punkten in Klammern, Sofortfaelle und Probezeit entfallen, Legende ist eine Punktetabelle statt Fliesstext"),
+    ("1.21.0", "2026-09-12", "broom: Besenpunkte statt Risiko - ganze Zahlen, viele sind schlecht, jede selbst nachrechenbar; km aus den letzten 5 Wochen, Treue bleibt ein Minus, Gleichstand entscheiden die Saisonpunkte"),
+    ("1.20.0", "2026-09-12", "broom: Sofortfaelle stehen im Topf und werden darin gereiht - markiert mit '!' statt danebengestellt; daneben fielen sie aus der Rangliste heraus, samt ihres unentschuldigten Fehlens"),
     ("1.19.0", "2026-09-11", "broom: Zugehoerigkeit zieht feste Punkte ab statt prozentual zu wirken - der Multiplikator schuetzte die Schlechtesten am staerksten und haengte den Bonus ans Rohrisiko statt an die Matchzahl"),
     ("1.18.0", "2026-09-11", "broom-Tabelle zeigt echte Werte statt Perzentile (Perf in k, Kilometer gesamt, Fehltermine, gefahrene Matches) und Wort-Spaltenkoepfe statt Emoji"),
     ("1.17.0", "2026-09-11", "broom: im Topf reihen vier Dinge - unentschuldigtes Fehlen (35), Leistung (35), Kilometer (30) und die Zugehoerigkeit als Multiplikator"),

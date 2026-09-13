@@ -75,7 +75,7 @@ _hcr2_flags()
 
         stats:perf) echo "--inactive --no-skip --driven-only" ;;
         stats:score|stats:points) echo "--skip --no-skip" ;;
-        stats:broom) echo "--season --last --top --all --include-leaders --json" ;;
+        stats:broom) echo "--season --last --top --include-leaders --json" ;;
 
         video:list|video:roster) echo "--match" ;;
         video:pull) echo "--match --file" ;;

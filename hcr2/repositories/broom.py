@@ -140,14 +140,17 @@ def fetch_km_for_weeks(
     """Average per week, weeks read, and the total over exactly the weeks the window
     covers.
 
-    The average is what ranks - it stays fair when one player has fewer weeks on
-    record - while the total is what the table shows, because "820 km im Monat" is a
-    number a leader can hold against somebody and "205 km/Woche" is not.
+    The average is what the km points are read off, and it is an average over the weeks
+    that **have a row**, not over the width of the window: a missing week means the
+    chest was not read, not that she drove nothing. The total comes along because "495
+    km in vier Wochen" is a number a leader can hold against somebody and "124 km/Woche"
+    is not, and the count comes along because the header has to be able to say how many
+    weeks the average rests on.
 
-    Deliberately *not* the rolling ``DISTANCE_AVERAGE_WINDOW`` that ``player show``
-    and the kilometre ranking use: those describe current form across seasons, while
-    broom judges one season and every one of its numbers has to come from it. The
-    count is returned with the average because a single week is not a motivation.
+    Deliberately *not* the rolling ``DISTANCE_AVERAGE_WINDOW`` of ``player show`` and
+    the kilometre ranking, even though broom now reads a fixed window too: those are
+    eight weeks wide and follow the day they are called on, while broom's five end at
+    the close of the period being judged, so a finished season stays reproducible.
     """
     if not player_ids or not weeks:
         return {}

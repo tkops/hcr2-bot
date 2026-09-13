@@ -149,15 +149,54 @@ def _handle_player(args):
     show_player_last_matches(player_id, last_n=last_n)
 
 USAGE_BROOM = (
-    "Usage: stats broom [--season <n>] [--last <matches>] [--top <n>] [--all] "
+    "Usage: stats broom [--season <n>] [--last <matches>] [--top <n>] "
     "[--include-leaders] [--json]"
 )
+
+
+# Flags, die broom kennt, und ob sie einen Wert nach sich ziehen. Die Liste steht hier,
+# damit unbekannte Argumente auffallen können - siehe _handle_broom.
+BROOM_FLAGS = {
+    "--season": True,
+    "--last": True,
+    "--top": True,
+    "--include-leaders": False,
+    "--json": False,
+}
+
+
+def _unknown_broom_args(args) -> list[str]:
+    """Alles, was broom nicht kennt.
+
+    Ohne diese Prüfung verschwindet jedes unbekannte Argument stillschweigend: ein
+    getipptes ``--seson 64`` liefert kommentarlos die laufende Saison, und das
+    abgeschaffte ``all`` aus Discord täte so, als hätte es gewirkt. Ein Aufruf, der
+    etwas anderes tut als das, was dasteht, ist in einer Rauswurfliste das Letzte,
+    was man brauchen kann.
+    """
+    unknown: list[str] = []
+    expect_value = False
+    for arg in args:
+        if expect_value:
+            expect_value = False
+            continue
+        if arg in BROOM_FLAGS:
+            expect_value = BROOM_FLAGS[arg]
+            continue
+        unknown.append(arg)
+    return unknown
 
 
 def _handle_broom(args):
     window = None            # None = die Saison ist das Fenster
     season = None            # None = die aktuelle Saison
-    limit = None             # None = so viele wie Plätze frei werden sollen
+    limit = None             # None = der ganze Topf; --top kürzt die Tabelle
+
+    unknown = _unknown_broom_args(args)
+    if unknown:
+        print(f"❌ Unbekannt: {' '.join(unknown)}")
+        print(USAGE_BROOM)
+        return
 
     raw_window = get_arg_value(args, "--last")
     if raw_window is not None:
@@ -194,7 +233,7 @@ def _handle_broom(args):
     if "--json" in args:
         broom_output.print_json(result)
         return
-    broom_output.print_result(result, limit=limit, show_all="--all" in args)
+    broom_output.print_result(result, limit=limit)
 
 
 def print_help():
@@ -216,7 +255,7 @@ def print_help():
             ("score [season] [--skip|--no-skip]", "Show sum of scores per player in season"),
             ("points [season] [--skip|--no-skip]", "Show sum of points per player in season"),
             (
-                "broom [--season <n>] [--last <matches>] [--top <n>] [--all] "
+                "broom [--season <n>] [--last <matches>] [--top <n>] "
                 "[--include-leaders] [--json]",
                 "Rank candidates for removal, with reasons (German output)",
             ),
@@ -398,7 +437,7 @@ def show_average(season_number=None, include_inactive=False, list_all=False, dri
 
 
 def _append_players_without_scores(entries, player_scores):
-    """Aktive PLTE-Spielerinnen ohne Wertung in der Saison, alphabetisch ans Ende.
+    """Aktive PLTE-Ladys ohne Wertung in der Saison, alphabetisch ans Ende.
 
     Grundmenge ist der *heutige* Kader, nicht die Saison - das Flag beantwortet
     "wer aus dem Team fehlt hier", nicht "wer war damals dabei".

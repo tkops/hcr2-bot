@@ -17,7 +17,7 @@ import types
 from pathlib import Path
 from unittest import mock
 
-from modules import player
+from modules import player, stats
 from tests.support import TemporaryDatabaseTestCase
 
 
@@ -173,10 +173,21 @@ class BroomShortcutTests(TemporaryDatabaseTestCase):
 
     def test_words_map_to_the_flags_nobody_types_in_discord(self) -> None:
         bot = _import_bot()
-        self.assertEqual(bot.broom_call(["all"]), ["stats", "broom", "--all"])
         self.assertEqual(
             bot.broom_call(["leader"]), ["stats", "broom", "--include-leaders"]
         )
+        self.assertEqual(
+            bot.broom_call(["leaders"]), ["stats", "broom", "--include-leaders"]
+        )
+
+    def test_all_is_gone_instead_of_silently_doing_nothing(self) -> None:
+        """'.B all' stand für '--all', und das steuerte die Begründungsblöcke. Die gibt
+        es nicht mehr, die Tabelle zeigt ohnehin den ganzen Topf - das Flag tat also
+        nichts. Ein Wort, das stillschweigend nichts tut, ist schlechter als keins:
+        'all' geht jetzt unverändert durch und die CLI zeigt die Usage."""
+        bot = _import_bot()
+        self.assertEqual(bot.broom_call(["all"]), ["stats", "broom", "all"])
+        self.assertNotIn("--all", stats.USAGE_BROOM)
 
     def test_no_arguments_means_the_cli_default(self) -> None:
         bot = _import_bot()

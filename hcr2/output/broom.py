@@ -1,12 +1,31 @@
 """Ausgabe der Besen-Rangliste.
 
-Die Tabelle ist die Rangliste, die Blöcke darunter sind die Begründung. Jede
-gelistete Kandidatin bekommt ihre Zeilen, weil fünf Namen und eine Zahl nichts sind,
-womit eine Leitung in ein Gespräch gehen kann.
+**Der Ton ist sachlich, nicht wertend.** Die Liste geht in ein Gespräch, in dem
+jemand erfährt, dass sie gehen soll - Wörter wie "die Schwächsten" kommen dort nicht
+an, und sie sind auch gar nicht gemeint: bewertet wird eine Fahrleistung in einem
+Zeitraum, kein Mensch. Deshalb steht in der Legende "die geringste Fahrleistung" und
+nicht "die Schwächste", und der Gleichstand wird von unten erklärt ("wer mehr
+eingebracht hat, steht weiter unten") statt von oben.
+
+**Die Ausgabe sagt "Ladys", nicht "Spielerinnen".** Das Team heißt Power Ladys, aber
+es fahren auch Männer mit - die weibliche Form wäre also schlicht falsch, und
+"SpielerInnen" liest sich in einer Tabellenspalte wie ein Tippfehler. "Ladys" ist die
+Kurzform des Teamnamens und meint alle; so redet die Leitung auch im Channel.
+
+Die Tabelle ist die Rangliste, die Blöcke darunter sind die Begründung, die Legende
+am Ende ist das Punktesystem. Jede gelistete Lady bekommt ihre Zeile, weil
+fünf Namen und eine Zahl nichts sind, womit eine Leitung in ein Gespräch gehen kann.
+
+**Die Tabelle zeigt die Punkte, die Begründung die Zahlen dahinter.** Das ist die
+Arbeitsteilung, auf der der ganze Umbau von Risiko auf Besenpunkte steht: die vier
+Spalten müssen sich zur Gesamtzahl nachaddieren lassen (2+6+5-1 = 12), sonst kann
+niemand nachrechnen - und die Zahl, aus der ein Punktwert entstanden ist, steht
+darunter im Klartext, sonst kann niemand nachprüfen.
 """
 from __future__ import annotations
 
 import json
+import textwrap
 from dataclasses import asdict
 
 from hcr2.models.broom import BroomCandidate, BroomResult
@@ -17,31 +36,46 @@ from hcr2.services import broom as broom_service
 # Kopf und Daten sind reiner Text, also richten sie sich immer aneinander aus - die
 # frühere Emoji-Kopfzeile war zwei Anzeigespalten breit bei einem Zeichen Länge und
 # rutschte je nach Discord-Client.
-#
-# Die Spalten tragen **die echten Zahlen**, keine Perzentile: -23.2k ist der Wert aus
-# `stats perf --driven-only`, den jede Leaderin kennt, 820 sind die Kilometer des
-# Zeitraums, 2 sind zwei Fehltermine und 776 sind gefahrene Matches. Gerechnet wird
-# intern weiter mit Perzentilen - aber mit einer 87 in der Zeile kann im Gespräch
-# niemand etwas anfangen.
-COLUMN_WIDTHS = {"reliability": 5, "performance": 7, "motivation": 6}
-LOYALTY_WIDTH = 7
-# 2 + 14 + 6 + 5 + 7 + 6 + 7 Zellen plus sechs Trennzeichen
-WIDTH = 2 + 14 + 6 + 5 + 7 + 6 + 7 + 6
-DEFAULT_LIMIT = 5
+# Jede Achsenzelle trägt "<echter Wert> (<Punkte>)" - die breiteste ist Perf mit
+# "-20.8k (10)". Der echte Wert führt, weil eine Leaderin mit "124 km/Woche" in ein
+# Gespräch gehen kann und mit einer 2 nicht; die Punkte stehen daneben, damit sich die
+# Gesamtzahl trotzdem nachaddieren lässt.
+COLUMN_WIDTHS = {
+    "motivation": 8,
+    "performance": 11,
+    "reliability": 6,
+    "blocker": 5,
+    "loyalty": 8,
+}
+# Der Tiebreaker steht **mit in der Tabelle**, obwohl er nicht mitreiht: bei
+# Gleichstand entscheidet er den Platz, und dann muss man ihn sehen können, ohne die
+# Liste zu verlassen. Vier Stellen reichen - im Topf reichte der höchste gemessene
+# Wert bis 1465 (Saison 63).
+TIEBREAK_WIDTH = 6
+NAME_WIDTH = 13
+BESEN_WIDTH = 5
+# Neun Zellen (#, Name, Besen, fünf Achsen, Tiebreaker), also acht Trennzeichen.
+WIDTH = (
+    2 + NAME_WIDTH + BESEN_WIDTH + sum(COLUMN_WIDTHS.values()) + TIEBREAK_WIDTH + 8
+)
 # Ein zu kurzes Fenster macht aus dem Anhang eine Kaderliste, die nichts sagt, was
 # die Kopfzeile nicht schon gesagt hat.
 UNRATED_LIMIT = 10
-# Below this many yardstick players the comparative factors stop meaning much.
-MIN_COHORT = 8
 
-# Reihenfolge der Faktorspalten - dieselbe wie die Gewichtung.
-ORDER = tuple(key for key, _, _, _ in broom_service.FACTORS)
+# Reihenfolge der Punktespalten - dieselbe wie in der Legende.
+ORDER = tuple(key for key, _, _ in broom_service.FACTORS)
 
 
-def print_result(
-    result: BroomResult, *, limit: int | None = None, show_all: bool = False
-) -> None:
-    """``limit`` = None heißt: so viele Begründungen, wie Plätze frei werden sollen."""
+def print_result(result: BroomResult, *, limit: int | None = None) -> None:
+    """Tabelle und Punktesystem, sonst nichts.
+
+    Die Begründungsblöcke pro Person sind weg: die Tabelle trägt die echten Werte, das
+    Punktesystem darunter sagt, wie daraus Punkte werden, und damit steht jede Zeile
+    für sich. Was die Blöcke zusätzlich hatten (Quote gegen den Teamschnitt, Einbrüche,
+    Vorfälle vor dem Fenster), lebt in ``--json`` weiter - im Gespräch trägt die Zeile.
+
+    ``limit`` kürzt die Tabelle; ohne ihn steht der ganze Topf da.
+    """
     if result.status == "NO_MATCHES":
         if result.season is not None:
             print(f"⚠️ Keine Matches in Saison {result.season} gespeichert.")
@@ -49,70 +83,46 @@ def print_result(
             print("⚠️ Keine Matches gespeichert.")
         return
     if result.status == "NO_ROSTER":
-        print("⚠️ Keine aktiven PLTE-Spielerinnen.")
+        print("⚠️ Keine aktiven PLTE-Ladys.")
         return
     if result.status == "NO_DATA" or not result.candidates:
-        print(f"⚠️ Keine Kaderzeile in {_window_label(result)}, also ist niemand bewertbar.")
+        _print_wrapped(
+            f"⚠️ Keine Kaderzeile in {_window_label(result)}, also ist niemand bewertbar.",
+            emoji=1,
+        )
         return
 
-    # Die Begründungsblöcke gehen auf so viele Namen, wie Plätze frei werden sollen -
-    # das ist die Zahl der Entscheidungen, die tatsächlich anstehen. --top ersetzt sie,
-    # --all erklärt den ganzen Topf.
-    if show_all:
-        explained_count = len(result.candidates)
-    elif limit is not None:
-        explained_count = limit
-    else:
-        explained_count = max(1, min(result.slots_to_free or DEFAULT_LIMIT, len(result.candidates)))
-    explained = result.candidates[:explained_count]
+    rows = result.candidates if limit is None else result.candidates[:limit]
 
-    print(f"🧹 Besen – {_window_label(result)} · {_target_label(result)}")
-    header = [
-        f"Team unentschuldigt {result.team_unexcused_rate * 100:.1f}%",
-        _km_label(result),
-    ]
-    if result.leaders_skipped:
-        header.append(f"{result.leaders_skipped} Leader übersprungen")
-    print(" · ".join(header))
-    if result.cohort_size < MIN_COHORT:
-        # Without a yardstick population the comparative factors cannot be computed
-        # at all, and a ranking built on the rest reads far more solid than it is.
-        print(
-            f"⚠️ Nur {result.cohort_size} Spielerinnen mit {broom_service.MIN_MATCHES}+ "
-            f"gefahrenen Matches im Fenster – Vergleichsfaktoren sind unsicher."
-        )
-
-    _print_immediate(result)
-
+    print(f"🧹 Besenliste – {_window_label(result)}{_leader_note(result)}")
     print()
-    print(_pool_label(result))
+    # Auch diese beiden laufen über den Umbruch: der Topf kann viele Eintrittsgründe
+    # aufzählen, und eine Warnung, die breiter ist als die Tabelle, sieht aus wie ein
+    # Fehler in der Ausgabe.
+    _print_wrapped(_pool_label(result))
     if not result.km_weeks:
-        print("⚠️ Keine Kilometer im Zeitraum – gereiht nur nach Fehlen und Leistung.")
+        _print_wrapped(
+            "⚠️ Keine Kilometer im Zeitraum – alle bekommen die volle km-Strafe.",
+            emoji=1,
+        )
     print_table(
         headers=[
-            f"{'#':>2}", f"{'Spielerin':<14}", f"{'Risiko':>6}",
+            f"{'#':>2}",
+            f"{'Lady':<{NAME_WIDTH}}",
+            f"{broom_service.BESEN_LABEL:>{BESEN_WIDTH}}",
             *[
                 f"{label:>{COLUMN_WIDTHS[key]}}"
-                for key, label, _, _ in broom_service.FACTORS
+                for key, label, _ in broom_service.FACTORS
             ],
-            f"{broom_service.LOYALTY_LABEL:>{LOYALTY_WIDTH}}",
+            f"{broom_service.TIEBREAK_LABEL:>{TIEBREAK_WIDTH}}",
         ],
-        rows=[
-            _row(candidate, index)
-            for index, candidate in enumerate(result.candidates, start=1)
-        ],
+        rows=[_row(candidate, index) for index, candidate in enumerate(rows, start=1)],
         width=WIDTH,
     )
 
-    for candidate in explained:
-        print()
-        _print_reasons(candidate)
-
     _print_unrated(result)
-    # Legende zuletzt: sie ist Referenz, nicht Inhalt. Bei Ausgaben, die Discord auf
-    # zwei Nachrichten aufteilt, gehört in die erste die Rangliste mit ihren
-    # Begründungen - nicht die Erklärung der Spalten.
-    _print_legend()
+    # Die Legende steht am Ende: sie ist Referenz, nicht Inhalt.
+    _print_legend(result)
 
 
 def _pool_label(result: BroomResult) -> str:
@@ -120,7 +130,7 @@ def _pool_label(result: BroomResult) -> str:
 
     Ein unentschuldigter Fehltermin ist die bedingungslose Eintrittskarte, der Rest
     wird nach Leistung aufgefüllt. Wer das nicht danebenstehen sieht, liest die Liste
-    als reine Leistungsrangliste und wundert sich über die guten Fahrerinnen darin.
+    als reine Leistungsrangliste und wundert sich über die guten Ladys darin.
     """
     by_absence = sum(1 for c in result.candidates if c.pool_reason == "unexcused")
     by_performance = len(result.candidates) - by_absence
@@ -132,49 +142,14 @@ def _pool_label(result: BroomResult) -> str:
     return f"Topf ({len(result.candidates)}): " + ", ".join(parts or ["leer"])
 
 
-def _target_label(result: BroomResult) -> str:
-    """Wie viele Plätze frei werden sollen - die Zahl, um die es am Saisonende geht.
+def _leader_note(result: BroomResult) -> str:
+    """Ob die Leader mitgezählt wurden - sonst tut ``--include-leaders`` sichtbar nichts.
 
-    Sie folgt aus der Kadergröße: fehlen schon Leute, sind entsprechend weniger zu
-    verabschieden. Sofortfälle zählen mit, sie machen ja denselben Platz frei.
+    An Saison 65 wächst ``all_rated`` damit von 41 auf 50, und die Tabelle bleibt Zeile
+    für Zeile dieselbe: kein Leader ist schwach genug für den Topf. Wer das Flag tippt,
+    könnte ohne diesen Zusatz nicht erkennen, ob es angekommen ist.
     """
-    if not result.slots_to_free:
-        return f"Kader {result.roster_size} – kein Platz zu schaffen"
-    text = f"Kader {result.roster_size} → {result.slots_to_free} Plätze zu schaffen"
-    if result.immediate_cases:
-        rest = max(0, result.slots_to_free - len(result.immediate_cases))
-        text += (
-            f", davon {len(result.immediate_cases)} als Sofortfall, "
-            f"also {rest} aus dem Topf"
-        )
-    return text
-
-
-def _print_immediate(result: BroomResult) -> None:
-    """Sofortfälle stehen außerhalb des Topfes: über sie wird nicht abgewogen.
-
-    Sie werden trotzdem gezeigt, weil ihr Platz auf die zu schaffenden zählt - und
-    weil eine Entscheidung, die niemand mehr begründet bekommt, keine bleibt.
-    """
-    if not result.immediate_cases:
-        return
-    print()
-    print(
-        f"{broom_service.IMMEDIATE_ICON} Sofortfälle – unabhängig vom Topf, "
-        f"machen aber denselben Platz frei:"
-    )
-    for candidate in result.immediate_cases:
-        print()
-        _print_reasons(candidate)
-
-
-def _km_label(result: BroomResult) -> str:
-    """Ohne die Wochenzahl ist der Schnitt nicht einzuordnen: die Kilometer kommen aus
-    dem Wertungszeitraum, und der kann am Saisonanfang eine einzige Woche breit sein."""
-    if not result.km_weeks:
-        return "keine Kilometer im Zeitraum"
-    weeks = "1 Woche" if result.km_weeks == 1 else f"{result.km_weeks} Wochen"
-    return f"Ø {result.team_km_average:.0f} km/Woche aus {weeks}"
+    return " · mit Leadern" if result.include_leaders else ""
 
 
 def _window_label(result: BroomResult) -> str:
@@ -185,89 +160,128 @@ def _window_label(result: BroomResult) -> str:
     return f"Saison {result.season} ({result.matches} Matches)"
 
 
-def _print_legend() -> None:
+def _print_legend(result: BroomResult) -> None:
+    """Das Punktesystem als **Nachschlagetabelle**, nicht als Text.
+
+    Die Spalten der Rangliste tragen die echten Werte; hier steht nur, wie aus einem
+    Wert eine Punktzahl wird. Eine Zeile je Achse, in derselben Reihenfolge wie die
+    Spalten - damit man von einer Zelle geradeaus nach unten schauen kann.
+
+    **Nichts hier ist breiter als die Tabelle.** Der Umbruch wird gerechnet und nicht
+    von Hand gesetzt: sonst reicht ein Wort mehr in einer Schwelle, und die Erklärung
+    steht über die Liste hinaus - in einem Discord-Codeblock heißt das, dass die Zeile
+    seitlich wegläuft, während die Tabelle daneben ordentlich endet.
+    """
+    svc = broom_service
+    rows = [
+        (
+            svc.FACTOR_LABELS["motivation"],
+            _tier_line(svc.KM_TIERS, svc.KM_POINTS_MIN, "<=", "darüber"),
+        ),
+        (
+            svc.FACTOR_LABELS["performance"],
+            f"Platz im Topf: +{svc.PERF_POINTS_MAX} für die geringste Fahrleistung "
+            f"... +{svc.PERF_POINTS_MIN} für die höchste, jeder Wert genau einmal",
+        ),
+        (
+            svc.FACTOR_LABELS["reliability"],
+            f"gar nicht aufgetaucht: +{svc.UNEXCUSED_POINTS} je Mal",
+        ),
+        (
+            svc.FACTOR_LABELS["blocker"],
+            f"eingeloggt und nicht gefahren: +{svc.BLOCKER_POINTS} je Mal",
+        ),
+        (
+            svc.FACTOR_LABELS["loyalty"],
+            _tier_line(svc.TREUE_TIERS, svc.TREUE_MAX, "<", "ab"),
+        ),
+    ]
+    label_width = max(len(label) for label, _ in rows)
+
+    # Die gelesenen Wochen stehen dabei, wenn sie vom Fenster abweichen: die Truhe
+    # wird nicht jede Woche gelesen, und "Schnitt aus fünf Wochen" wäre dann eine
+    # Behauptung über Zahlen, die niemand eingetragen hat.
+    weeks = f"letzten {svc.KM_WINDOW_WEEKS} Wochen"
+    if result.km_weeks and result.km_weeks != svc.KM_WINDOW_WEEKS:
+        weeks += f" ({result.km_weeks} davon in der Truhe eingetragen)"
+
     print()
-    print("So kommt die Liste zustande – zwei Schritte, mehr nicht:")
-    print(
-        f"  1. In den Topf kommt, wer unentschuldigt gefehlt hat (immer, egal wie gut),"
+    _print_wrapped(
+        "Besenpunkte – je mehr Punkte, desto weiter oben steht man. In der Tabelle "
+        "steht der echte Wert, die Punkte daneben in Klammern. So kommen sie zusammen:"
     )
-    print(
-        f"     aufgefüllt auf {broom_service.SHORTLIST_SIZE} mit den Schwächsten der Saison."
+    for label, line in rows:
+        _print_wrapped(line, first=f"  {label:<{label_width}}  ")
+    print()
+    _print_wrapped(
+        f"Im Topf ist, wer unentschuldigt gefehlt hat – immer, egal wie gut. Aufgefüllt "
+        f"wird auf {svc.SHORTLIST_SIZE} nach der Fahrleistung der Saison. Entschuldigtes "
+        f"Fehlen zählt nirgends mit."
     )
-    print("  2. Gereiht wird darin nach vier Dingen – die Spalten zeigen die echten Werte:")
-    print(
-        f"     {'Fehlt':<8}{broom_service.FACTOR_WEIGHTS['reliability']:>2}  "
-        f"unentschuldigte Fehltermine der Saison "
-        f"(ab {broom_service.UNEXCUSED_CAP} voll gewertet)"
+    _print_wrapped(f"Kilometer sind der Wochenschnitt der {weeks}.")
+    _print_wrapped(
+        f"Bei Gleichstand entscheiden die {svc.TIEBREAK_LABEL} der Saison – wer mehr "
+        f"eingefahren hat, steht weiter unten."
     )
-    print(
-        f"     {'Perf':<8}{broom_service.FACTOR_WEIGHTS['performance']:>2}  "
-        f"Score zum Match-Median – dieselbe Zahl wie 'stats perf --driven-only'"
-    )
-    print(
-        f"     {'km':<8}{broom_service.FACTOR_WEIGHTS['motivation']:>2}  "
-        f"Kilometer im Zeitraum, gesamt"
-    )
-    print(
-        f"     {'Matches':<8}    Zugehörigkeit: gefahrene Matches insgesamt, ziehen bis "
-        f"zu {broom_service.LOYALTY_MAX} Punkte vom Risiko ab"
-    )
-    print("                 (in der Probezeit 0 – kein Schutz, aber auch keine Strafe)")
-    print("Gereiht wird über den Rang im Kader, nicht über die Rohwerte – Risiko ist 0-100.")
-    print(
-        f"Probezeit (bis {broom_service.PROBATION_MATCHES} Matches): ein unentschuldigtes "
-        f"Fehlen ist dort ein Sofortfall."
-    )
-    print(
-        f"Rückkehrerinnen: {broom_service.RETURNER_DISCOUNT} Punkte extra – "
-        f"zurückzukommen ist Loyalität."
-    )
-    print("Entschuldigtes Fehlen zählt nirgends, es wird nur als Kontext genannt.")
+
+
+def _print_wrapped(text: str, *, first: str = "", emoji: int = 0) -> None:
+    """Auf ``WIDTH`` umbrechen, Folgezeilen unter dem Textanfang.
+
+    ``first`` ist das Präfix der ersten Zeile (bei den Achsen ihr Spaltenname); die
+    Folgezeilen rücken genau so weit ein, damit die Erklärung einer Achse als ein
+    Block stehen bleibt und nicht unter ihren eigenen Namen rutscht.
+
+    ``emoji`` ist die Zahl der Emoji im Text. ``textwrap`` zählt in Zeichen, ein Emoji
+    belegt aber **zwei** Anzeigespalten - ohne die Korrektur wäre eine Warnzeile genau
+    um diese Differenz zu breit, und zwar nur manchmal.
+    """
+    for line in textwrap.wrap(
+        text,
+        width=WIDTH - emoji,
+        initial_indent=first,
+        subsequent_indent=" " * len(first),
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [first.rstrip()]:
+        print(line)
+
+
+def _tier_line(tiers, beyond: int, compare: str, beyond_word: str) -> str:
+    """Eine Staffel als Zeile: ``<=50 +3, <=150 +2, <=300 +1, darüber +0``.
+
+    Das Vergleichszeichen ist ein Parameter, weil die beiden Staffeln es verschieden
+    meinen: die Kilometerstufe greift bei ``<=`` (genau 50 km sind noch +3), die
+    Treuestufe bei ``<`` (genau 15 Matches sind schon -1). Eine Legende, die das
+    verwischt, ist an der Grenze falsch - und genau dort schaut jemand nach.
+    """
+    parts = [f"{compare}{limit} {points:+d}" for limit, points in tiers]
+    parts.append(f"{beyond_word} {tiers[-1][0]} {beyond:+d}" if beyond_word == "ab"
+                 else f"{beyond_word} {beyond:+d}")
+    return ", ".join(parts)
 
 
 def _row(candidate: BroomCandidate, index: int) -> list[str]:
-    delta = (
-        f"{candidate.raw_delta / 1000:+.1f}k" if candidate.raw_delta is not None else "-"
-    )
+    # Eine Achse ohne Wert und ohne Punkte bekommt nur den Strich: "- (0)" ist zehnmal
+    # dieselbe Null in einer Spalte, in der fast nie etwas steht.
     cells = {
-        # Derselbe Wert, den `stats perf --driven-only` zeigt - an der echten Saison
-        # geprüft, Zeile für Zeile.
-        "performance": f"{delta:>{COLUMN_WIDTHS['performance']}}",
-        "motivation": (
-            f"{candidate.km_total:>{COLUMN_WIDTHS['motivation']}}"
-            if candidate.km_weeks
-            else f"{'-':>{COLUMN_WIDTHS['motivation']}}"
-        ),
-        "reliability": f"{candidate.unexcused:>{COLUMN_WIDTHS['reliability']}}",
+        f.key: f.value if f.value == "-" and not f.points else f"{f.value} ({f.points})"
+        for f in candidate.factors
     }
     return [
         f"{index:>2}",
-        f"{_short(candidate.name):<14}",
-        f"{candidate.risk:>6.1f}",
-        *[cells[key] for key in ORDER],
-        # Gefahrene Matches statt des Multiplikators: die Zahl, aus der er entsteht.
-        f"{candidate.driven_total:>{LOYALTY_WIDTH}}",
+        f"{_short(candidate.name, NAME_WIDTH):<{NAME_WIDTH}}",
+        f"{candidate.besen:>{BESEN_WIDTH}}",
+        *[f"{cells.get(key, ''):>{COLUMN_WIDTHS[key]}}" for key in ORDER],
+        f"{candidate.points_total:>{TIEBREAK_WIDTH}}",
     ]
-
-
-def _print_reasons(candidate: BroomCandidate) -> None:
-    head = f"🧹 {candidate.name} ({candidate.player_id})"
-    if candidate.immediate:
-        head += " – Sofortfall"
-    else:
-        head += f" – Risiko {candidate.risk:.1f}"
-        if candidate.loyalty_discount:
-            head += f" (roh {candidate.raw_risk:.1f})"
-    print(head)
-    for reason in candidate.reasons:
-        print(f"   • {reason}")
 
 
 def _print_unrated(result: BroomResult) -> None:
     if not result.unrated:
         return
     print()
-    print("Nicht bewertet (zu wenige Matches im Fenster – Neue und Rückkehrerinnen):")
+    print("Nicht bewertet (keine Kaderzeile im Zeitraum):")
     for entry in result.unrated[:UNRATED_LIMIT]:
         print(
             f"   {_short(entry.name):<14} id {entry.player_id:<4} {entry.reason}, "
