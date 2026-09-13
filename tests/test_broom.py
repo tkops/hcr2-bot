@@ -350,14 +350,13 @@ class BroomProbationTests(BroomTestCase):
         self.assertLessEqual(newcomer.besen, established.besen)
         self.assertEqual(established.pool_reason, "unexcused")
 
-    def test_a_newcomer_moves_only_the_perf_scale_and_nothing_else(self) -> None:
-        """Drei Achsen sind **absolut** und bleiben stehen, egal wer dazukommt: die
-        Kilometer, das Fehlen und die Treue haben feste Schwellen.
+    def test_a_newcomer_moves_nobody_elses_points(self) -> None:
+        """**Alle vier Achsen sind absolut**, also bewegt ein Neuzugang gar nichts.
 
-        Die vierte ist der Preis dafür, dass jeder Perf-Wert von 1 bis 10 genau einmal
-        vorkommt: die Skala ist der Topf, also verschiebt jede, die hineinkommt, die
-        Punkte aller anderen darin. Das geht nicht anders, und es steht hier, damit es
-        eine Entscheidung bleibt und keine Überraschung.
+        Bis 1.23 war die Perf-Achse der Platz im Topf, und jede, die hineinkam,
+        verschob die Punkte aller anderen darin - eine bekannte und in Kauf genommene
+        Nebenwirkung. Mit der Staffel gibt es sie nicht mehr: eine Lady, die selbst
+        gleich gefahren ist, behält ihre Zahl.
         """
         before = broom_service.rank()
         self._newcomer(101, 3)
@@ -367,12 +366,11 @@ class BroomProbationTests(BroomTestCase):
         self.assertAlmostEqual(before.team_unexcused_rate, after.team_unexcused_rate)
 
         old, new = self._candidate(before, 103), self._candidate(after, 103)
-        for key in ("motivation", "reliability", "loyalty"):
+        for key in ("motivation", "performance", "reliability", "loyalty"):
             self.assertEqual(self._factor(old, key), self._factor(new, key), key)
-        # Die Neue fährt schwächer als alle und drängt sich damit an die Spitze des
-        # Topfes - jede andere rückt eine Perf-Stufe nach unten.
+        self.assertEqual(old.besen, new.besen)
+        # Die Neue fährt schwächer als alle und steht damit selbst im Topf.
         self.assertTrue(self._shortlisted(after, 101))
-        self.assertLess(self._factor(new, "performance"), self._factor(old, "performance"))
 
     def test_there_is_no_veto_tier_left(self) -> None:
         """Weder im Ergebnis noch in der Ausgabe. Eine Stufe, die jemanden aus der
@@ -513,33 +511,55 @@ class BroomRankingTests(BroomTestCase):
         span = service.PERF_POINTS_MAX - service.PERF_POINTS_MIN
         self.assertEqual(3 * service.UNEXCUSED_POINTS, span)
 
-    def test_every_perf_value_is_handed_out_exactly_once(self) -> None:
-        """Zehn Plätze, zehn Punktwerte. Die Skala ist der **Topf**, nicht der Kader:
-        "du bist die Schwächste von den zehn" ist eine Aussage, die im Gespräch trägt,
-        "du liegst im 38. Perzentil des Kaders" ist keine."""
-        # Jede fährt anders - bei echtem Gleichstand fiele ein Wert aus, und das ist
-        # eine andere Regel (siehe test_an_identical_field_gets_identical_points).
+    def test_perf_points_come_from_the_distance_not_from_the_place(self) -> None:
+        """Die Perf-Achse ist **absolut**, wie die drei anderen auch.
+
+        Eine Leiter mit fester Sprossenbreite: pro PERF_STEP unter dem Match-Median
+        ein Punkt mehr. Eine 4 heißt damit immer dasselbe, egal wer sonst in der Liste
+        steht - vorher war sie der Platz im Topf und hing an dessen Größe.
+        """
+        points = broom_service.perf_points
+        self.assertEqual(points(0), broom_service.PERF_TIERS[-1][1])
+        self.assertEqual(points(1.0), broom_service.PERF_POINTS_MIN)
+        self.assertEqual(
+            points(broom_service.PERF_TIERS[0][0]), broom_service.PERF_POINTS_MAX
+        )
+        self.assertEqual(
+            points(broom_service.PERF_TIERS[0][0] - 50_000),
+            broom_service.PERF_POINTS_MAX,
+        )
+        # Keine Zahl kostet den Höchstsatz - dieselbe Regel wie bei den Kilometern.
+        self.assertEqual(points(None), broom_service.PERF_POINTS_MAX)
+        # Jede Sprosse greift genau an ihrer Kante und eine Einheit darüber nicht mehr.
+        for limit, expected in broom_service.PERF_TIERS:
+            self.assertEqual(points(limit), expected, limit)
+            self.assertLess(points(limit + 1), expected, limit)
+
+    def test_the_pool_size_does_not_move_anybody_points(self) -> None:
+        """Der Grund, warum es die Staffel gibt: ``--top`` darf die Anzeige steuern,
+        aber nicht die Rechnung. Solange Perf am Topf hing, bekam dieselbe Lady in
+        einer 10er-Liste eine andere Zahl als in einer 50er."""
         with sqlite3.connect(self.db_path) as conn:
             for offset in range(self.ROSTER):
                 conn.execute(
                     "UPDATE matchscore SET score = ? WHERE player_id = ?",
                     (self.BASE_SCORE + offset * 1000, 100 + offset),
                 )
-        result = broom_service.rank()
-        self.assertEqual(len(result.candidates), broom_service.SHORTLIST_SIZE)
-        values = sorted(self._factor(c, "performance") for c in result.candidates)
+        small = broom_service.rank(size=3)
+        large = broom_service.rank(size=self.ROSTER)
+        self.assertEqual(len(small.candidates), 3)
         self.assertEqual(
-            values,
-            list(range(broom_service.PERF_POINTS_MIN, broom_service.PERF_POINTS_MAX + 1)),
+            [(c.name, c.besen) for c in small.candidates],
+            [(c.name, c.besen) for c in large.candidates[:3]],
         )
-        # Die Schwächste oben, die Beste unten - und beide an den Enden der Skala.
-        by_delta = sorted(result.candidates, key=lambda c: c.raw_delta)
-        self.assertEqual(
-            self._factor(by_delta[0], "performance"), broom_service.PERF_POINTS_MAX
-        )
-        self.assertEqual(
-            self._factor(by_delta[-1], "performance"), broom_service.PERF_POINTS_MIN
-        )
+        # Auch die Punkte jeder einzelnen Achse, nicht nur die Summe.
+        for a, b in zip(small.all_rated, large.all_rated):
+            self.assertEqual(a.player_id, b.player_id)
+            self.assertEqual(
+                [(f.key, f.points) for f in a.factors],
+                [(f.key, f.points) for f in b.factors],
+                a.name,
+            )
 
     def test_performance_ranks_at_equal_kilometres(self) -> None:
         """Der Grund, warum die Leistung wieder mitreiht: bei gleichen Kilometern muss
@@ -792,12 +812,19 @@ class BroomSeasonWindowTests(BroomTestCase):
         ``all`` aus Discord täte so, als hätte es gewirkt."""
         from modules import stats as stats_module
 
-        for args in (["--all"], ["all"], ["--seson", "64"], ["--top", "3", "x"]):
+        for args in (
+            ["--all"],
+            ["all"],
+            ["--include-leaders"],
+            ["leader"],
+            ["--seson", "64"],
+            ["--top", "3", "x"],
+        ):
             text = self.capture_stdout(lambda: stats_module._handle_broom(args))
             self.assertIn("Unbekannt", text, args)
             self.assertIn("Usage", text, args)
         # Und die gültigen gehen weiter durch.
-        for args in ([], ["--top", "3"], ["--include-leaders"], ["--season", "2"]):
+        for args in ([], ["--top", "3"], ["--season", "2"]):
             self.assertEqual(stats_module._unknown_broom_args(args), [], args)
 
     def test_season_and_last_together_are_refused_instead_of_one_winning(self) -> None:
@@ -905,16 +932,43 @@ class BroomFactorTests(BroomTestCase):
         self.assertTrue(self._shortlisted(result, 101))
         self.assertEqual(candidate.pool_reason, "unexcused")
 
-    def test_the_pool_may_outgrow_the_target_size(self) -> None:
-        """SHORTLIST_SIZE ist die Zielgröße fürs Auffüllen, keine Obergrenze für die
-        Fehltermine - "einmal gefehlt kommt rein" ist bedingungslos."""
+    def test_the_pool_never_outgrows_its_size(self) -> None:
+        """Die Topfgröße ist eine **harte Obergrenze**, keine Zielgröße mehr.
+
+        Früher wuchs der Topf über SHORTLIST_SIZE hinaus, sobald mehr Ladys gefehlt
+        hatten als Plätze da waren - "zeig mir zehn" lieferte dann dreizehn.
+        """
         self._give_history(list(range(100, 100 + self.ROSTER)), 40)
         for offset, player_id in enumerate(range(101, 100 + self.ROSTER)):
             self._no_show(player_id, offset)
         result = broom_service.rank()
-        by_absence = [c for c in result.candidates if c.pool_reason == "unexcused"]
-        self.assertEqual(len(by_absence), self.ROSTER - 1)
-        self.assertGreater(len(result.candidates), broom_service.SHORTLIST_SIZE)
+        self.assertEqual(len(result.candidates), broom_service.SHORTLIST_SIZE)
+        # Und alle darin sind über das Fehlen hereingekommen: der bedingungslose Weg
+        # wird zuerst bedient, aufgefüllt wird nur, was danach noch frei ist.
+        self.assertEqual(
+            {c.pool_reason for c in result.candidates}, {"unexcused"}
+        )
+
+    def test_a_full_pool_keeps_whom_the_absence_costs_most(self) -> None:
+        """Passen nicht alle Fehlenden hinein, entscheiden die Fehlen-Punkte.
+
+        Dieselbe Währung wie in der Tabelle, also nachvollziehbar, ohne eine zweite
+        Regel zu lernen: wer am wenigsten gefehlt hat, fällt heraus.
+        """
+        self._give_history(list(range(100, 100 + self.ROSTER)), 40)
+        for offset, player_id in enumerate(range(101, 100 + self.ROSTER)):
+            self._no_show(player_id, offset)
+        # Eine fehlt ein zweites Mal, eine andere bleibt bei ihrem einen Termin.
+        self._no_show(101, self.MATCHES - 1)
+        result = broom_service.rank(size=2)
+        self.assertEqual(len(result.candidates), 2)
+        self.assertIn(101, [c.player_id for c in result.candidates])
+        top = self._candidate(result, 101)
+        self.assertEqual(top.unexcused, 2)
+        # Jede im Topf hat mindestens so oft gefehlt wie jede draußen.
+        inside = min(c.unexcused for c in result.candidates)
+        outside = [c for c in result.all_rated if not c.in_pool and c.unexcused]
+        self.assertTrue(all(c.unexcused <= inside for c in outside))
 
     def test_the_rest_is_filled_up_by_performance(self) -> None:
         result = broom_service.rank()
@@ -978,20 +1032,16 @@ class BroomFactorTests(BroomTestCase):
         perf = next(f for f in candidate.factors if f.key == "performance")
         self.assertIn("zum Match-Median", perf.detail)
 
-    def test_leaders_are_skipped_but_still_set_the_yardstick(self) -> None:
-        with_leaders = broom_service.rank(include_leaders=True)
-        without = broom_service.rank()
-        self.assertNotIn(100, [c.player_id for c in without.candidates])
-        self.assertIn(100, [c.player_id for c in with_leaders.candidates])
-        self.assertEqual(without.leaders_skipped, 1)
-        self.assertNotIn(100, [u.player_id for u in without.unrated])
-        # Same yardstick either way: the cohort statistics cover the whole roster.
-        self.assertAlmostEqual(
-            without.team_unexcused_rate, with_leaders.team_unexcused_rate
-        )
-        self.assertEqual(
-            self._candidate(without, 101).besen, self._candidate(with_leaders, 101).besen
-        )
+    def test_leaders_are_rated_like_everybody_else(self) -> None:
+        """Leader stehen immer in der Grundmenge.
+
+        Ein Leader im Topf soll nicht vorkommen - und wenn doch, ist genau das die
+        Nachricht. Ihn herauszufiltern hieße, die Frage gar nicht erst zu stellen. An
+        Saison 63 der echten DB steht tatsächlich einer drin.
+        """
+        result = broom_service.rank()
+        self.assertIn(100, [c.player_id for c in result.all_rated])
+        self.assertNotIn(100, [u.player_id for u in result.unrated])
 
 
 class BroomOutputTests(BroomTestCase):
@@ -1056,17 +1106,35 @@ class BroomOutputTests(BroomTestCase):
         text = self.capture_stdout(lambda: broom_output.print_result(result))
         self.assertLess(len(text), max_discord_msg_len)
 
-    def test_top_shortens_the_table_itself(self) -> None:
-        """``--top`` kürzte früher die Begründungsblöcke. Die gibt es nicht mehr, also
-        kürzt es jetzt die Tabelle - das ist auch die Lesart, die `.B 5` im Bot nahelegt."""
-        result = broom_service.rank()
-        full = self.capture_stdout(lambda: broom_output.print_result(result))
-        short = self.capture_stdout(lambda: broom_output.print_result(result, limit=3))
+    def test_top_sizes_the_pool_and_the_table_shows_all_of_it(self) -> None:
+        """``--top`` ist der Regler für den **Topf**, und die Tabelle zeigt ihn ganz.
+
+        Ein zweiter Regler in der Ausgabe würde eine Tabelle zeigen, die kürzer ist
+        als das, worüber die Zeile darüber spricht ("Topf (10)" über drei Zeilen).
+        """
         rows = lambda text: [l for l in text.splitlines() if l[:2].strip().isdigit()]
-        self.assertEqual(len(rows(full)), len(result.candidates))
+        full = self.capture_stdout(
+            lambda: broom_output.print_result(broom_service.rank())
+        )
+        short = self.capture_stdout(
+            lambda: broom_output.print_result(broom_service.rank(size=3))
+        )
+        self.assertEqual(len(rows(full)), broom_service.SHORTLIST_SIZE)
         self.assertEqual(len(rows(short)), 3)
+        self.assertIn("Topf (3)", short)
         # Das Punktesystem bleibt, auch gekürzt - ohne es ist die Tabelle nicht lesbar.
         self.assertIn("Besenpunkte", short)
+
+    def test_top_can_open_the_list_to_the_whole_roster(self) -> None:
+        """Der Zweck des Umbaus: eine Besenliste über alle. Möglich, seit die Achsen
+        absolut sind - die Topfgröße verschiebt niemandem mehr die Punkte."""
+        rows = lambda text: [l for l in text.splitlines() if l[:2].strip().isdigit()]
+        result = broom_service.rank(size=self.ROSTER * 2)
+        text = self.capture_stdout(lambda: broom_output.print_result(result))
+        self.assertEqual(len(rows(text)), len(result.all_rated))
+        # Die angeforderte Größe steht **nicht** in der Legende: sie ist größer als das
+        # Feld, "aufgefüllt wird auf 100" stünde über einer Liste mit 20 Zeilen.
+        self.assertNotIn(str(self.ROSTER * 2), self._flat(text))
 
     def test_the_wording_judges_the_driving_and_not_the_person(self) -> None:
         """Vorgabe der Teamleitung. Die Liste geht in ein Gespräch, in dem jemand
@@ -1079,7 +1147,9 @@ class BroomOutputTests(BroomTestCase):
         )
         for word in ("schwäch", "schlecht", "versag", "faul", "mies"):
             self.assertNotIn(word, text.lower(), word)
-        self.assertIn("geringste Fahrleistung", text)
+        # Die Perf-Achse benennt die gemessene Größe, nicht die Person dahinter.
+        self.assertIn("Abstand zum Match-Median", text)
+        self.assertIn("nach der Fahrleistung der Saison aufgefüllt", text)
         # Der Gleichstand wird von unten erklärt, nicht von oben.
         self.assertIn("wer mehr eingefahren hat", text)
 
@@ -1098,13 +1168,12 @@ class BroomOutputTests(BroomTestCase):
             )
 
         # Ein Kader mit vielen Fehlterminen macht die Topf-Zeile lang, ein Fenster
-        # ohne Truhe fügt die Warnzeile hinzu, --include-leaders den Kopfzusatz.
+        # ohne Truhe fügt die Warnzeile hinzu.
         for index in range(3, 9):
             self._no_show(101 + index, index)
         cases = [
             ({}, broom_service.rank()),
-            ({"limit": 3}, broom_service.rank()),
-            ({}, broom_service.rank(include_leaders=True)),
+            ({}, broom_service.rank(size=3)),
         ]
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM distance")
@@ -1132,6 +1201,10 @@ class BroomOutputTests(BroomTestCase):
             self.assertIn(f"<={limit} {points:+d}", text)
         for limit, points in svc.TREUE_TIERS:
             self.assertIn(f"<{limit} {points:+d}", text)
+        # Die Perf-Staffel in der k-Schreibweise der Tabelle: die Zelle zeigt "-19.5k",
+        # eine Legende mit "<=-16000" verlangte beim Nachschlagen eine Umrechnung.
+        for limit, points in svc.PERF_TIERS:
+            self.assertIn(f"<={limit // 1000}k {points:+d}", text)
         self.assertIn(f"ab {svc.TREUE_TIERS[-1][0]} {svc.TREUE_MAX:+d}", text)
         self.assertIn(f"darüber {svc.KM_POINTS_MIN:+d}", text)
         self.assertIn(f"+{svc.UNEXCUSED_POINTS} je Mal", text)
@@ -1272,14 +1345,16 @@ class BroomOutputTests(BroomTestCase):
         result = broom_service.rank(window=5)
         self.assertEqual(result.status, "OK")
         self.assertEqual(result.cohort_size, 0)
-        # Ohne Kohorte gibt es keinen Maßstab für die Perf-Achse, also zahlt sie für
-        # alle den Höchstsatz - das ist ehrlicher als ein Perzentil aus dem Nichts,
-        # und die drei anderen Achsen reihen weiter.
+        # **Die Kohorte trägt die Perf-Achse nicht mehr.** Der Abstand wird gegen den
+        # Match-Median gemessen, und den gibt es auch ohne sie - seit die Achse eine
+        # absolute Staffel ist, reiht die Liste hier unverändert weiter. Die Kohorte
+        # trägt nur noch die Teamquote im Kopf des JSON.
         text = self.capture_stdout(lambda: broom_output.print_result(result))
         self.assertIn("Besenpunkte", text)
         for candidate in result.candidates:
             self.assertEqual(
-                self._factor(candidate, "performance"), broom_service.PERF_POINTS_MAX
+                self._factor(candidate, "performance"),
+                broom_service.perf_points(candidate.raw_delta),
             )
 
     def test_a_window_without_any_roster_row_is_reported(self) -> None:

@@ -173,12 +173,15 @@ class BroomShortcutTests(TemporaryDatabaseTestCase):
 
     def test_words_map_to_the_flags_nobody_types_in_discord(self) -> None:
         bot = _import_bot()
-        self.assertEqual(
-            bot.broom_call(["leader"]), ["stats", "broom", "--include-leaders"]
-        )
-        self.assertEqual(
-            bot.broom_call(["leaders"]), ["stats", "broom", "--include-leaders"]
-        )
+        self.assertEqual(bot.broom_call(["s63"]), ["stats", "broom", "--season", "63"])
+
+    def test_leader_is_gone_instead_of_silently_doing_nothing(self) -> None:
+        """Leader stehen jetzt immer in der Grundmenge, also gibt es nichts mehr
+        einzuschließen. Das Wort landet unverändert im Aufruf, damit die CLI die Usage
+        zeigt, statt so zu tun, als hätte es gewirkt."""
+        bot = _import_bot()
+        for word in ("leader", "leaders"):
+            self.assertEqual(bot.broom_call([word]), ["stats", "broom", word])
 
     def test_all_is_gone_instead_of_silently_doing_nothing(self) -> None:
         """'.B all' stand für '--all', und das steuerte die Begründungsblöcke. Die gibt

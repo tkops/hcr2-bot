@@ -66,7 +66,7 @@ UNRATED_LIMIT = 10
 ORDER = tuple(key for key, _, _ in broom_service.FACTORS)
 
 
-def print_result(result: BroomResult, *, limit: int | None = None) -> None:
+def print_result(result: BroomResult) -> None:
     """Tabelle und Punktesystem, sonst nichts.
 
     Die Begründungsblöcke pro Person sind weg: die Tabelle trägt die echten Werte, das
@@ -74,7 +74,9 @@ def print_result(result: BroomResult, *, limit: int | None = None) -> None:
     für sich. Was die Blöcke zusätzlich hatten (Quote gegen den Teamschnitt, Einbrüche,
     Vorfälle vor dem Fenster), lebt in ``--json`` weiter - im Gespräch trägt die Zeile.
 
-    ``limit`` kürzt die Tabelle; ohne ihn steht der ganze Topf da.
+    Die Liste ist **immer der ganze Topf**. Wie groß der ist, entscheidet ``--top``
+    schon beim Rechnen - ein zweiter Regler hier würde nur eine Tabelle zeigen, die
+    kürzer ist als das, worüber die Kopfzeile spricht.
     """
     if result.status == "NO_MATCHES":
         if result.season is not None:
@@ -92,9 +94,9 @@ def print_result(result: BroomResult, *, limit: int | None = None) -> None:
         )
         return
 
-    rows = result.candidates if limit is None else result.candidates[:limit]
+    rows = result.candidates
 
-    print(f"🧹 Besenliste – {_window_label(result)}{_leader_note(result)}")
+    print(f"🧹 Besenliste – {_window_label(result)}")
     print()
     # Auch diese beiden laufen über den Umbruch: der Topf kann viele Eintrittsgründe
     # aufzählen, und eine Warnung, die breiter ist als die Tabelle, sieht aus wie ein
@@ -142,16 +144,6 @@ def _pool_label(result: BroomResult) -> str:
     return f"Topf ({len(result.candidates)}): " + ", ".join(parts or ["leer"])
 
 
-def _leader_note(result: BroomResult) -> str:
-    """Ob die Leader mitgezählt wurden - sonst tut ``--include-leaders`` sichtbar nichts.
-
-    An Saison 65 wächst ``all_rated`` damit von 41 auf 50, und die Tabelle bleibt Zeile
-    für Zeile dieselbe: kein Leader ist schwach genug für den Topf. Wer das Flag tippt,
-    könnte ohne diesen Zusatz nicht erkennen, ob es angekommen ist.
-    """
-    return " · mit Leadern" if result.include_leaders else ""
-
-
 def _window_label(result: BroomResult) -> str:
     """Woraus die Liste gerechnet ist - im Kopf, weil eine Rangliste ohne ihren
     Zeitraum nicht überprüfbar ist."""
@@ -180,8 +172,9 @@ def _print_legend(result: BroomResult) -> None:
         ),
         (
             svc.FACTOR_LABELS["performance"],
-            f"Platz im Topf: +{svc.PERF_POINTS_MAX} für die geringste Fahrleistung "
-            f"... +{svc.PERF_POINTS_MIN} für die höchste, jeder Wert genau einmal",
+            "Abstand zum Match-Median: "
+            + _tier_line(svc.PERF_TIERS, svc.PERF_POINTS_MIN, "<=", "darüber",
+                         fmt=_thousands),
         ),
         (
             svc.FACTOR_LABELS["reliability"],
@@ -213,10 +206,15 @@ def _print_legend(result: BroomResult) -> None:
     for label, line in rows:
         _print_wrapped(line, first=f"  {label:<{label_width}}  ")
     print()
+    # **Keine Zahl in dieser Zeile.** Die angeforderte Größe (--top 50) und die echte
+    # (49 Ladys im Kader) fallen auseinander, sobald der Topf größer ist als das
+    # Feld - "aufgefüllt wird auf 50" stünde dann über einer Liste mit 49 Zeilen. Wie
+    # groß der Topf wirklich ist, sagt die Zeile über der Tabelle.
     _print_wrapped(
-        f"Im Topf ist, wer unentschuldigt gefehlt hat – immer, egal wie gut. Aufgefüllt "
-        f"wird auf {svc.SHORTLIST_SIZE} nach der Fahrleistung der Saison. Entschuldigtes "
-        f"Fehlen zählt nirgends mit."
+        "Im Topf ist, wer unentschuldigt gefehlt hat – immer, egal wie gut. Der Rest "
+        "wird nach der Fahrleistung der Saison aufgefüllt; passen nicht alle "
+        "Fehltermine hinein, bleibt drin, wen das Fehlen am meisten kostet. "
+        "Entschuldigtes Fehlen zählt nirgends mit."
     )
     _print_wrapped(f"Kilometer sind der Wochenschnitt der {weeks}.")
     _print_wrapped(
@@ -247,17 +245,29 @@ def _print_wrapped(text: str, *, first: str = "", emoji: int = 0) -> None:
         print(line)
 
 
-def _tier_line(tiers, beyond: int, compare: str, beyond_word: str) -> str:
+def _thousands(value: int) -> str:
+    """Scores in der k-Schreibweise der Tabelle: ``-16000`` wird ``-16k``.
+
+    Die Perf-Zelle zeigt ``-19.5k``; stünde in der Legende darunter ``<=-16000``,
+    müsste man beim Nachschlagen umrechnen - genau an der Stelle, an der jemand
+    nachrechnet.
+    """
+    return f"{value // 1000}k" if value % 1000 == 0 else f"{value / 1000:g}k"
+
+
+def _tier_line(tiers, beyond: int, compare: str, beyond_word: str, *, fmt=str) -> str:
     """Eine Staffel als Zeile: ``<=50 +3, <=150 +2, <=300 +1, darüber +0``.
 
-    Das Vergleichszeichen ist ein Parameter, weil die beiden Staffeln es verschieden
+    Das Vergleichszeichen ist ein Parameter, weil die Staffeln es verschieden
     meinen: die Kilometerstufe greift bei ``<=`` (genau 50 km sind noch +3), die
     Treuestufe bei ``<`` (genau 15 Matches sind schon -1). Eine Legende, die das
     verwischt, ist an der Grenze falsch - und genau dort schaut jemand nach.
+
+    ``fmt`` schreibt die Schwelle so, wie sie auch in der Tabelle steht.
     """
-    parts = [f"{compare}{limit} {points:+d}" for limit, points in tiers]
-    parts.append(f"{beyond_word} {tiers[-1][0]} {beyond:+d}" if beyond_word == "ab"
-                 else f"{beyond_word} {beyond:+d}")
+    parts = [f"{compare}{fmt(limit)} {points:+d}" for limit, points in tiers]
+    parts.append(f"{beyond_word} {fmt(tiers[-1][0])} {beyond:+d}"
+                 if beyond_word == "ab" else f"{beyond_word} {beyond:+d}")
     return ", ".join(parts)
 
 

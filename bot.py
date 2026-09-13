@@ -673,18 +673,17 @@ def broom_call(args) -> list:
     Nobody types flags in Discord: '.B 10' means the top ten, '.B s63' the season.
     Shared by '.B' and '.stats broom' so the two entry points cannot drift apart.
 
-    '.B all' ist weggefallen. Es stand für '--all' und steuerte, wie viele
-    Begründungsblöcke gedruckt werden - die gibt es nicht mehr, die Tabelle zeigt
-    ohnehin den ganzen Topf. Ein Wort, das stillschweigend nichts tut, ist schlechter
-    als keins: 'all' landet jetzt unverändert im Aufruf und die CLI zeigt die Usage.
+    '.B all' und '.B leader' sind weggefallen. 'all' steuerte die Begründungsblöcke,
+    die es nicht mehr gibt; Leader stehen jetzt immer in der Grundmenge, also gibt es
+    nichts mehr einzuschließen. Ein Wort, das stillschweigend nichts tut, ist
+    schlechter als keins: beide landen unverändert im Aufruf und die CLI zeigt die
+    Usage.
     """
     call = ["stats", "broom"]
     after_flag = False
     for a in args:
         if a.isdigit() and not after_flag:
             call += ["--top", a]
-        elif a.lower() in ("leaders", "leader"):
-            call.append("--include-leaders")
         elif SEASON_ARG_RE.fullmatch(a):
             # Der Zeitraum ist sonst immer die laufende Saison - ohne diese Form käme
             # eine abgeschlossene Saison in Discord gar nicht mehr an.

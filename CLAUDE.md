@@ -474,9 +474,9 @@ begründet jede Zeile. `hcr2/services/broom.py` hält das Modell,
 `hcr2/output/broom.py` die Ausgabe, `hcr2/repositories/broom.py` das SQL. Im Bot gibt
 es zwei Einstiege, `.B` und `.stats broom`, die sich `bot.broom_call()` teilen — dort
 werden Discord-Argumente auf Flags übersetzt (`.B 10` → `--top 10`, `s63` →
-`--season 63`, `leader` → `--include-leaders`), weil in Discord niemand Flags tippt.
-Eine Ziffer direkt hinter einem Flag ist dessen Wert und nicht das Top-Limit, sonst wird
-`.B --last 80` zu `--last --top 80`.
+`--season 63`), weil in Discord niemand Flags tippt. Eine Ziffer direkt hinter einem
+Flag ist dessen Wert und nicht die Topfgröße, sonst wird `.B --last 80` zu
+`--last --top 80`.
 
 **Unbekannte Argumente werden abgelehnt** (`_unknown_broom_args`), statt still zu
 verschwinden. Ohne die Prüfung liefert ein getipptes `--seson 64` kommentarlos die
@@ -486,20 +486,35 @@ Rauswurfliste das Letzte, was man brauchen kann. `--all` und `.B all` sind damit
 gibt es nicht mehr — die Tabelle zeigt ohnehin den ganzen Topf. Ein Wort, das
 stillschweigend nichts tut, ist schlechter als keins.
 
-**`--include-leaders` steht in der Kopfzeile** (`· mit Leadern`). `leaders_skipped == 0`
-beantwortet die Frage nicht, denn das ist es auch ohne Leader im Kader; deshalb trägt
-`BroomResult.include_leaders` das Flag selbst. Ohne die Anzeige tut das Flag sichtbar
-nichts, solange kein Leader schwach genug für den Topf ist — an Saison 65 wächst
-`all_rated` von 41 auf 50, und die Tabelle bleibt Zeile für Zeile dieselbe.
+**Leader stehen immer in der Grundmenge**, `--include-leaders` und `.B leader` sind
+weggefallen (sie laufen jetzt wie `--all` in die Usage-Zeile). Ein Leader im Topf soll
+nicht vorkommen — und wenn doch, ist genau das die Nachricht, über die zu reden ist;
+ihn herauszufiltern hieße, die Frage gar nicht erst zu stellen. Der Fall ist nicht
+hypothetisch: an Saison 63 der echten DB steht einer drin und verdrängt Allan. In S64
+und S65 bleibt die Tabelle Zeile für Zeile dieselbe, `all_rated` wächst von 40 auf 49.
 
 **Zwei Schritte, und bewusst nicht mehr als zwei** — Vorgabe der Teamleitung, und der
 Grund ist das Gespräch danach: ein Rauswurf muss in einem Satz begründbar sein.
 
 1. **Der Topf.** Wer in der Saison **einmal unentschuldigt gefehlt** hat, ist drin —
    bedingungslos, egal wie gut sie fährt. Der Rest wird mit den Leistungsschwächsten auf
-   `SHORTLIST_SIZE` (10) aufgefüllt; Leistung ist der schlichte Abstand zum Match-Median
-   über die **tatsächlich gefahrenen** Matches. Die Zahl ist eine **Zielgröße fürs
-   Auffüllen, keine Obergrenze**: fehlen mehr als zehn unentschuldigt, wächst der Topf.
+   die Topfgröße aufgefüllt (`SHORTLIST_SIZE` = 10 als Voreinstellung, `--top <n>`
+   setzt sie); Leistung ist der schlichte Abstand zum Match-Median über die
+   **tatsächlich gefahrenen** Matches.
+
+   **Die Größe ist eine harte Obergrenze**, seit die Achsen absolut sind. Vorher war
+   sie eine Zielgröße fürs Auffüllen und der Topf wuchs darüber hinaus, sobald mehr
+   Ladys gefehlt hatten als Plätze da waren — „zeig mir zehn" lieferte dann dreizehn.
+   Passen nicht alle Fehlenden hinein, entscheiden die **Fehlen-Punkte**: wer am
+   wenigsten gefehlt hat, fällt heraus (`_absence_points`, bei Gleichstand der
+   Besenstand, dann die Saisonpunkte). Vorgabe der Teamleitung, und es ist dieselbe
+   Währung wie in der Tabelle — es gibt also keine zweite Regel zu lernen.
+
+   **`--top 50` öffnet die Liste auf den ganzen Kader** (in S65 49 Zeilen, in älteren
+   Saisons weniger, weil manche damals keine Kaderzeile hatten). Das geht erst, seit
+   die Topfgröße niemandem mehr die Punkte verschiebt — siehe die Perf-Achse unten.
+   Der Default bleibt 10 und passt in eine Discord-Nachricht; `--top 50` splittet über
+   `codeblock_chunks` in drei.
 2. **Die Reihung darin: Besenpunkte.** Ganze Zahlen, viele sind schlecht, und **jede
    davon kann eine Spielerin selbst nachsehen** — das ist der ganze Zweck. Vier Achsen,
    die sich zur Gesamtzahl addieren:
@@ -507,7 +522,7 @@ Grund ist das Gespräch danach: ein Rauswurf muss in einem Satz begründbar sein
    | Achse | Punkte | woher |
    |---|---|---|
    | `km/W` | 3 / 2 / 1 / 0 | Schnitt pro Woche über `KM_WINDOW_WEEKS` (5), Stufen bei 50 / 150 / 300 |
-   | `Perf` | 10 … 1 | Platz **im Topf**: Schwächste 10, Beste 1, jeder Wert genau einmal |
+   | `Perf` | 10 … 1 | Abstand zum Match-Median, `PERF_TIERS`: je `PERF_STEP` (2k) darunter ein Punkt mehr, ab −16k die 10 |
    | `Fehlt` | +3 je Mal | gar nicht aufgetaucht, ohne Obergrenze |
    | `Slot` | +5 je Mal | eingeloggt und nicht gefahren, ohne Obergrenze |
    | `Matches` | 0 / −1 / −2 / −3 | gefahrene Matches, Stufen bei 15 / 50 / 150 |
@@ -577,30 +592,47 @@ die Liste zu verlassen. Der Spaltenkopf heißt `Punkte`, weil sie im Team so hei
 die Besen-Spalte daneben heißt `Besen` und nicht `Besenpunkte`, also stehen sich die
 beiden Wörter nicht im Weg.
 
-**Drei Achsen sind absolut, nur `Perf` ist eine Rangliste** — und das darf sie sein,
-weil der Bot die Zahl nach jedem Match öffentlich postet (`.stats` steht in
-`PUBLIC_COMMANDS`), jede also ihren Platz kennt. Die festen Schwellen halten, weil die
-Verteilungen über Saisons hinweg kaum wandern (km/Woche-Quartile S64 87/152/294, S65
-91/172/294).
+**Alle vier Achsen sind absolut**, seit 1.24 auch `Perf`. Die festen Schwellen halten,
+weil die Verteilungen über Saisons hinweg kaum wandern (km/Woche-Quartile S64
+87/152/294, S65 91/172/294; Match-Median S63/64/65 −1,7k / −1,7k / −1,4k).
 
-**`Perf` misst am Topf, nicht am Kader**: zehn Plätze, zehn Punktwerte, **jeder genau
-einmal**. Vorgabe der Teamleitung, und der Grund ist wieder das Gespräch danach — „du
-bist die Schwächste von den zehn" ist eine Aussage, „du liegst im 38. Perzentil des
-Kaders" ist keine. Deshalb stehen die Perf-Punkte im Code **nach** der Topf-Auswahl:
-vorher kann der Maßstab nicht feststehen. Der Preis ist bekannt und in Kauf genommen —
-die Skala ist damit **relativ zur Liste**, also verschiebt jede, die in den Topf kommt,
-die Punkte aller anderen darin (`--include-leaders` ändert sie, eine Neue, die sich
-hineinfährt, auch). Das geht nicht anders, wenn jede Zahl genau einmal vorkommen soll,
-und zwei Tests pinnen beide Hälften: dass die Werte 1…10 vollständig vergeben werden,
-und dass die drei absoluten Achsen dabei stehen bleiben. Gleichauf heißt gleiche Punkte
-— gezählt wird, wie viele im Topf *echt* schwächer fahren, nicht ein laufender Index,
-der je nach Sortierstabilität zwei gleiche Fahrerinnen verschieden bewertet hätte; bei
-echtem Gleichstand fällt ein Wert deshalb aus. Wächst der Topf über zehn hinaus, wird
-dieselbe Gerade über die größere Liste gelegt, dann wiederholen sich Werte.
+**`Perf` ist eine Leiter mit fester Sprossenbreite, kein Platz in einer Liste**
+(`PERF_TIERS`, generiert aus `PERF_STEP` = 2000): pro 2k unter dem Match-Median ein
+Punkt mehr, ab −16k die volle 10, über dem Median `PERF_POINTS_MIN`. Eine 4 heißt damit
+immer „unter −4k, aber nicht unter −6k" — unabhängig davon, wer sonst in der Liste
+steht und wie lang sie ist.
 
-Wer **nicht** im Topf steht, bekommt `PERF_POINTS_MIN`: sie fährt per Konstruktion
-besser als die Schwächsten, über die geredet wird, und ihr Punktestand ist ohnehin keine
-Ranglistenzahl — er taucht nur in `all_rated` und im JSON auf, nie in der Liste.
+Bis 1.23 war es die einzige **Rangliste**, gemessen am Topf: zehn Plätze, zehn Werte,
+jeder genau einmal, Schwächste 10. Der Satz dazu trug im Gespräch („du bist die
+Schwächste von den zehn"), aber die Zahl hing daran, wer sonst im Topf stand — und
+damit an `--top`. **Dieselbe Lady bekam in einer 10er-Liste eine 1 und in einer 49er
+eine 7** (Fox, S65, −5,6k), ohne einen Meter anders gefahren zu sein. Eine Besenliste
+über den ganzen Kader ist so nicht zu haben: der Regler für die Anzeige veränderte
+still die Rechnung. Das ist der eigentliche Grund für den Umbau, nicht die Optik.
+
+Der Preis ist der Satz im Gespräch: statt „du bist die Schwächste von den zehn" heißt
+es jetzt „du liegst 19,5k unter dem Match-Median, das sind 10 Punkte" — nachrechenbar
+wie vorher, aber ohne die Liste als Beleg zu brauchen. Der Bot postet die Zahl nach
+jedem Match öffentlich (`.stats` steht in `PUBLIC_COMMANDS`), jede kann sie also selbst
+nachsehen.
+
+Die Sprossen sind an der Verteilung gelegt, nicht geraten: zehn à 2k von 0 bis −16k
+decken das beobachtete Feld ab (Median −1,5k, Schwächste −15,4k bis −19,5k) und treffen
+mit der 10 in S65 drei Ladys, in S64 zwei. **Alle über dem Median stehen auf 1** (in
+S65 26 von 49), und das ist Absicht: die Achse soll unten auflösen. Die Leiter nach
+oben weiterlaufen zu lassen, brachte gemessen nichts — ab etwa +6k hängen ohnehin alle
+am Deckel, die Liste verschob sich nur gleichmäßig ins Minus.
+
+**Die Punkte stehen im Code jetzt vor der Topf-Auswahl**, nicht mehr dahinter — das ist
+die Umkehr, die den Rest möglich macht: die Auswahl kann die Punkte benutzen (siehe
+`_absence_points` beim zu vollen Topf), und eine Neue, die dazukommt, bewegt niemandem
+mehr eine Zahl. Zwei Tests pinnen beides: dass jede Sprosse genau an ihrer Kante greift,
+und dass `--top 3` und `--top <Kader>` für jede Lady dieselben Achsenpunkte liefern.
+
+**Die Kohorte trägt die Perf-Achse nicht mehr.** Der Abstand wird gegen den Match-Median
+gemessen, und den gibt es auch ohne sie; sie trägt nur noch die Teamquote im JSON. Ein
+Fenster ohne Kohorte reiht damit unverändert weiter, statt für alle den Höchstsatz zu
+kosten.
 
 **Keine Zahl ist kein Freifahrtschein.** Fehlt die Kilometerwoche, kostet die Achse den
 Höchstsatz. Früher fiel sie als „unbewertet" heraus und ihr Gewicht wurde umgelegt — in
@@ -611,16 +643,19 @@ pro Person mehr, keine Kopfzeile mit Teamquote und Leaderzahl, keine Kadergröß
 keine Zahl der zu schaffenden Plätze. Die Titelzeile trägt nur noch den Namen und den
 Zeitraum (`🧹 Besenliste – Saison 65 (5 Matches)`), weil eine Rangliste ohne ihren
 Zeitraum nicht überprüfbar ist und alles andere die Tabelle sagt. Die Ausgabe ist damit
-von ~3900 auf **~1550 Zeichen** gefallen und passt in **eine** Discord-Nachricht statt
-zwei; ein Test pinnt das.
+von ~3900 auf **~1930 Zeichen** gefallen und passt in **eine** Discord-Nachricht statt
+zwei; ein Test pinnt das. Die Marge ist seit 1.24 dünn (1990 ist die Grenze): die
+Perf-Legende braucht als Staffel drei Zeilen statt einer. Wer dort noch etwas anfügt,
+kippt den Default in zwei Nachrichten.
 
 **Die Tabelle zeigt den echten Wert, die Punkte stehen in Klammern daneben.** Mit „124
 km/Woche" kann eine Leitung in ein Gespräch gehen, mit einer 2 nicht — deshalb führt der
 Wert. Die Klammer sorgt dafür, dass sich die Gesamtzahl trotzdem nachaddieren lässt
 (`2 +7 +5 -1 = 13`, zwei Tests pinnen es). Eine Achse ohne Wert und ohne Punkte zeigt
-nur `-`; `- (0)` wäre zehnmal dieselbe Null. `--top <n>` kürzt seit dem Wegfall der
-Blöcke die **Tabelle** (vorher die Blöcke) — die Lesart, die `.B 5` im Bot ohnehin
-nahelegt.
+nur `-`; `- (0)` wäre zehnmal dieselbe Null. **Die Tabelle zeigt immer den ganzen
+Topf**: wie groß der ist, entscheidet `--top` schon beim Rechnen. Ein zweiter Regler in
+der Ausgabe würde eine Tabelle zeigen, die kürzer ist als das, worüber die Zeile
+darüber spricht (`Topf (10)` über drei Zeilen).
 
 `BroomFactor` trägt die Zahl weiter **zweimal**: `value` kurz für die Zelle (`124`,
 `-4.4k`, `1+1`), `detail` ausgeschrieben. `detail` und `_with_reasons()` werden nicht
@@ -699,11 +734,10 @@ eines gewinnen zu lassen, denn welches gewonnen hätte, stünde nur im Kopf der 
 (`cohort_threshold()`): `MIN_MATCHES` = 10 ist auf eine volle Saison gemünzt, und in
 einer **laufenden** kann das niemand erreichen — nach vier Matches wäre die Kohorte
 leer. Deshalb ist die Schwelle `COHORT_SHARE` (70 %) des Fensters, gedeckelt auf
-`MIN_MATCHES`: bei 15 Matches bleibt es bei 10 wie bisher, bei 4 sind es 3. Seit dem
-Umstieg auf Besenpunkte trägt die Kohorte nur noch zwei Dinge: den Maßstab der
-`Perf`-Achse und die Teamquote im Kopf. Ist sie leer, kostet `Perf` für alle den
-Höchstsatz — ehrlicher als ein Maßstab aus dem Nichts, und die drei anderen Achsen
-reihen weiter.
+`MIN_MATCHES`: bei 15 Matches bleibt es bei 10 wie bisher, bei 4 sind es 3. Seit `Perf`
+eine absolute Staffel ist, trägt die Kohorte **nur noch die Teamquote im JSON** — den
+Maßstab der Perf-Achse hat sie damit verloren, und ein Fenster ohne Kohorte reiht
+unverändert weiter, statt für alle den Höchstsatz zu kosten.
 
 **Die Kilometer kommen aus den letzten `KM_WINDOW_WEEKS` (5) Wochen, nicht aus den
 Wochen der Saison** (`last_weeks()`) — und das ist seit 1.21 umgedreht. Der Grund ist

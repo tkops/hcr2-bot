@@ -120,9 +120,3 @@ class BroomResult:
     cohort_size: int = 0         # players with MIN_MATCHES driven - the yardstick
     team_unexcused_rate: float = 0.0
     team_km_average: float = 0.0
-    leaders_skipped: int = 0
-    # Ob --include-leaders gesetzt war. ``leaders_skipped == 0`` beantwortet das nicht:
-    # es ist auch dann null, wenn es gar keine Leader gibt. Die Ausgabe muss den
-    # Unterschied zeigen können - sonst tut das Flag sichtbar nichts, solange kein
-    # Leader schwach genug für den Topf ist.
-    include_leaders: bool = False

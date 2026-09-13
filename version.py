@@ -1,6 +1,7 @@
-VERSION = "1.27.1"
+VERSION = "1.28.0"
 
 HISTORY = [
+    ("1.28.0", "2026-09-13", "broom: Perf als absolute Staffel statt Platz im Topf, --top setzt die Topfgroesse (--top 50 = ganzer Kader), Leader immer dabei, --include-leaders entfaellt"),
     ("1.27.1", "2026-09-13", "broom: Erklaerungen unter der Tabelle brechen auf deren Breite um, statt seitlich wegzulaufen"),
     ("1.27.0", "2026-09-13", "broom: Saisonpunkte stehen als eigene Spalte in der Tabelle - der Tiebreaker ist damit direkt sichtbar"),
     ("1.26.0", "2026-09-13", "broom: Rueckkehrbonus entfaellt - die Bedingung konnte seit der Umstellung aufs Saisonfenster nicht mehr zutreffen, die Matchzahl allein reicht"),

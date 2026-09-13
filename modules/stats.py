@@ -149,8 +149,7 @@ def _handle_player(args):
     show_player_last_matches(player_id, last_n=last_n)
 
 USAGE_BROOM = (
-    "Usage: stats broom [--season <n>] [--last <matches>] [--top <n>] "
-    "[--include-leaders] [--json]"
+    "Usage: stats broom [--season <n>] [--last <matches>] [--top <n>] [--json]"
 )
 
 
@@ -160,7 +159,6 @@ BROOM_FLAGS = {
     "--season": True,
     "--last": True,
     "--top": True,
-    "--include-leaders": False,
     "--json": False,
 }
 
@@ -190,7 +188,7 @@ def _unknown_broom_args(args) -> list[str]:
 def _handle_broom(args):
     window = None            # None = die Saison ist das Fenster
     season = None            # None = die aktuelle Saison
-    limit = None             # None = der ganze Topf; --top kürzt die Tabelle
+    size = broom_service.SHORTLIST_SIZE   # --top: wie viele in den Topf kommen
 
     unknown = _unknown_broom_args(args)
     if unknown:
@@ -218,22 +216,18 @@ def _handle_broom(args):
             print(USAGE_BROOM)
             return
 
-    raw_limit = get_arg_value(args, "--top")
-    if raw_limit is not None:
-        limit = parse_int(raw_limit, default=None)
-        if limit is None or limit < 1:
+    raw_size = get_arg_value(args, "--top")
+    if raw_size is not None:
+        size = parse_int(raw_size, default=None)
+        if size is None or size < 1:
             print(USAGE_BROOM)
             return
 
-    result = broom_service.rank(
-        season=season,
-        window=window,
-        include_leaders="--include-leaders" in args,
-    )
+    result = broom_service.rank(season=season, window=window, size=size)
     if "--json" in args:
         broom_output.print_json(result)
         return
-    broom_output.print_result(result, limit=limit)
+    broom_output.print_result(result)
 
 
 def print_help():
@@ -255,8 +249,7 @@ def print_help():
             ("score [season] [--skip|--no-skip]", "Show sum of scores per player in season"),
             ("points [season] [--skip|--no-skip]", "Show sum of points per player in season"),
             (
-                "broom [--season <n>] [--last <matches>] [--top <n>] "
-                "[--include-leaders] [--json]",
+                "broom [--season <n>] [--last <matches>] [--top <n>] [--json]",
                 "Rank candidates for removal, with reasons (German output)",
             ),
         ],

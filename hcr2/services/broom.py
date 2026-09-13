@@ -108,9 +108,10 @@ DROP_THRESHOLD = 1000        # dip below one's own average that counts as a drop
 # Minus, und das ist die beste Nachricht, die diese Liste zu vergeben hat - das alte
 # Risiko schnitt sie bei null ab und warf sie damit weg.
 #
-# Alle Achsen sind **absolut**, nur die Performance ist eine Rangliste. Das geht, weil
-# die Verteilungen über Saisons hinweg kaum wandern (km/Woche-Quartile S64 87/152/294,
-# S65 91/172/294) - feste Schwellen veralten also nicht zwischen zwei Saisons.
+# **Alle vier Achsen sind absolut.** Das geht, weil die Verteilungen über Saisons
+# hinweg kaum wandern (km/Woche-Quartile S64 87/152/294, S65 91/172/294; Match-Median
+# S63/64/65 -1,7k/-1,7k/-1,4k) - feste Schwellen veralten also nicht zwischen zwei
+# Saisons.
 
 # Kilometer: Schnitt pro Woche über KM_WINDOW_WEEKS, Stufen am echten Kader gemessen.
 # Der Team-Schnitt liegt bei ~240 km/Woche, deshalb liegen die Schwellen dort und
@@ -128,10 +129,36 @@ KM_TIERS: tuple[tuple[int, int], ...] = ((50, 3), (150, 2), (300, 1))
 KM_POINTS_MAX = 3            # <= erste Stufe: gar nichts gefahren
 KM_POINTS_MIN = 0            # über der letzten Stufe
 
-# Performance: die einzige Rangliste, und sie darf eine sein - der Bot postet die
-# Zahl nach jedem Match, also kennt jede ihren Platz. Schwächste 10, beste 1.
+# Performance: eine **Leiter mit fester Sprossenbreite**, kein Platz in einer Liste.
+# Pro PERF_STEP unter dem Match-Median ein Punkt mehr, ab PERF_TIERS[0] die volle 10,
+# über dem Median PERF_POINTS_MIN.
+#
+# **Bis 1.23 war das die einzige Rangliste**, gemessen am Topf: zehn Plätze, zehn
+# Werte, die Schwächste bekam 10. Der Satz dazu ("du bist die Schwächste von den
+# zehn") trug im Gespräch, aber die Zahl hing daran, wer sonst in der Liste stand -
+# und damit an ``--top``. Dieselbe Lady bekam in einer 10er-Liste eine 1 und in einer
+# 49er eine 7, ohne einen Meter anders gefahren zu sein (Fox, S65, -5,6k). Eine
+# Besenliste über den ganzen Kader ist mit einer solchen Achse nicht zu haben: der
+# Regler für die Anzeige veränderte still die Rechnung.
+#
+# Absolut gemessen heißt 10 immer dasselbe. Die Sprossen sind an der Verteilung
+# gelegt, nicht geraten: der Match-Median liegt über S63/64/65 bei -1,5k, die
+# Schwächste bei -15,4k bis -19,5k. Zehn Sprossen à 2k von 0 bis -16k decken das ab
+# und treffen mit der 10 in S65 drei Ladys, in S64 zwei.
+#
+# Dass damit **alle über dem Median auf 1 stehen** (in S65 26 von 49), ist Absicht und
+# kein Verlust: die Achse soll unten auflösen. Die Leiter nach oben weiterlaufen zu
+# lassen, brachte gemessen nichts - ab etwa +6k hängen ohnehin alle am Deckel, die
+# Liste verschob sich nur gleichmäßig ins Minus.
 PERF_POINTS_MAX = 10
 PERF_POINTS_MIN = 1
+PERF_STEP = 2000             # Sprossenbreite in Score-Punkten
+# Sprosse 8 (-16k) trägt die 10, Sprosse 0 (am Median) die 2, darüber greift
+# PERF_POINTS_MIN. Streng zuerst, damit die Staffel wie KM_TIERS von oben gelesen wird.
+PERF_TIERS: tuple[tuple[int, int], ...] = tuple(
+    (-PERF_STEP * step, PERF_POINTS_MIN + 1 + step)
+    for step in range(PERF_POINTS_MAX - PERF_POINTS_MIN - 1, -1, -1)
+)
 
 # Fehlen. **Ein flacher Wert je Spalte**, nicht ein Grundsatz plus Aufschlag: unter
 # "Fehlt" stehen die Male, bei denen sie gar nicht aufgetaucht ist, unter "Slot" die
@@ -214,28 +241,24 @@ def km_points(km_per_week: float | None) -> int:
     return KM_POINTS_MIN
 
 
-def perf_points(key: tuple[bool, float], pool_keys: list[tuple[bool, float]]) -> int:
-    """Besenpunkte für die Fahrleistung, gemessen **am Topf**.
+def perf_points(raw_delta: float | None) -> int:
+    """Besenpunkte für die Fahrleistung - **absolut**, wie die drei anderen Achsen.
 
-    Bei ``SHORTLIST_SIZE`` (10) Plätzen und zehn Punktwerten wird jede Zahl von
-    ``PERF_POINTS_MIN`` bis ``PERF_POINTS_MAX`` genau einmal vergeben: die Schwächste
-    der Liste bekommt den Höchstwert, die Beste den Kleinsten, dazwischen linear. Das
-    ist die Aussage, die im Gespräch trägt - "du bist die Schwächste von den zehn",
-    nicht "du liegst im 38. Perzentil".
+    Eine Leiter mit fester Sprossenbreite: pro ``PERF_STEP`` unter dem Match-Median
+    ein Punkt mehr, ab ``PERF_TIERS[0]`` die volle ``PERF_POINTS_MAX``, über dem
+    Median ``PERF_POINTS_MIN``. Eine 4 heißt damit immer dasselbe - "sie liegt unter
+    -4k, aber nicht unter -6k" -, unabhängig davon, wer sonst in der Liste steht und
+    wie lang die Liste ist.
 
-    Gezählt wird, wie viele im Topf **echt schwächer** fahren, nicht ein laufender
-    Index: der vergäbe je nach Sortierstabilität verschiedene Punkte an zwei
-    Spielerinnen mit demselben Abstand zum Match-Median. Bei echtem Gleichstand fällt
-    ein Wert deshalb aus - der Preis dafür, dass gleiche Leistung gleich bewertet wird.
-
-    Wächst der Topf über zehn hinaus (mehr als zehn unentschuldigte Fehltermine), wird
-    dieselbe Gerade über die größere Liste gelegt; dann wiederholen sich Werte.
+    ``None`` heißt: im Zeitraum keine Zeile gefahren. Das kostet den Höchstsatz, denn
+    keine Zahl ist kein Freifahrtschein - dieselbe Regel wie bei den Kilometern.
     """
-    if len(pool_keys) < 2:
+    if raw_delta is None:
         return PERF_POINTS_MAX
-    weaker = bisect_left(pool_keys, key)
-    span = PERF_POINTS_MAX - PERF_POINTS_MIN
-    return round(PERF_POINTS_MAX - span * weaker / (len(pool_keys) - 1))
+    for limit, points in PERF_TIERS:
+        if raw_delta <= limit:
+            return points
+    return PERF_POINTS_MIN
 
 
 def plain_absences(unexcused: int, blocker_rows: int) -> int:
@@ -347,6 +370,18 @@ def _performance_key(raw_delta: float | None) -> tuple[bool, float]:
     dem Team gar nichts eingebracht - und das ist die Frage, die der Topf stellt.
     """
     return (raw_delta is not None, raw_delta if raw_delta is not None else 0.0)
+
+
+def _absence_points(candidate: BroomCandidate) -> int:
+    """Was das Fehlen dieser Lady kostet - beide Spalten zusammen.
+
+    Die Währung, in der über einen zu vollen Topf entschieden wird: passen nicht alle
+    unentschuldigt Fehlenden hinein, fällt heraus, wen es am wenigsten kostet.
+    """
+    return (
+        plain_absence_points(candidate.unexcused, candidate.blocker_rows)
+        + blocked_slot_points(candidate.blocker_rows)
+    )
 
 
 def _fills_the_pool(candidate: BroomCandidate) -> bool:
@@ -471,12 +506,17 @@ def rank(
     *,
     season: int | None = None,
     window: int | None = None,
-    include_leaders: bool = False,
+    size: int = SHORTLIST_SIZE,
 ) -> BroomResult:
     """Rank the roster over one season, or over ``window`` matches if one is given.
 
     ``window`` wins when both are passed - it is the explicit request for the
     cross-season view, while the season is what you get by not asking.
+
+    ``size`` ist die Größe des Topfes und eine **harte Obergrenze** - ``--top`` im
+    CLI. Groß genug gewählt (``--top 50``) steht der ganze Kader in der Liste; das
+    geht, seit alle vier Achsen absolut sind und die Größe des Topfes die Punkte
+    niemandem mehr verschiebt.
     """
     if window is not None:
         match_ids = broom_repo.window_match_ids(window)
@@ -541,8 +581,6 @@ def rank(
             if state.driven >= min_cohort_matches:
                 cohort.append(member)
             continue
-        if member.is_leader and not include_leaders:
-            continue
         unrated.append(
             BroomUnrated(
                 player_id=member.player_id,
@@ -553,8 +591,6 @@ def rank(
             )
         )
 
-    leaders_skipped = sum(1 for m in roster if m.is_leader) if not include_leaders else 0
-
     if not rated:
         return BroomResult(
             status="NO_DATA",
@@ -563,8 +599,6 @@ def rank(
             km_weeks=km_weeks_read,
             matches=len(match_ids),
             unrated=unrated,
-            leaders_skipped=leaders_skipped,
-            include_leaders=include_leaders,
             team_km_average=team_km,
         )
 
@@ -588,8 +622,6 @@ def rank(
 
     candidates: list[BroomCandidate] = []
     for member in rated:
-        if member.is_leader and not include_leaders:
-            continue
         state = windows[member.player_id]
         blocker_rows = len(state.blocker_dates)
         km_average, km_weeks, km_total = km.get(member.player_id, (None, 0, 0))
@@ -649,19 +681,38 @@ def rank(
         replace(c, performance_rank=performance_rank[c.player_id]) for c in candidates
     ]
 
+    # Die Punkte hängen an **keiner** Auswahl mehr: alle vier Achsen sind absolut, also
+    # ist die Zahl einer Lady dieselbe, ob sie im Topf steht oder nicht und wie groß
+    # der Topf ist. Genau das macht eine Liste über den ganzen Kader erst möglich -
+    # solange Perf am Topf hing, veränderte ``--top`` still die Rechnung. Und weil die
+    # Punkte jetzt **vor** der Auswahl feststehen, kann die Auswahl sie benutzen.
+    candidates = [
+        _with_points(c, team_km=team_km, roster_size=len(km_ranking))
+        for c in candidates
+    ]
+
     # **Zwei Wege in den Topf, und der erste ist bedingungslos: einmal unentschuldigt
     # gefehlt genügt**, egal wie gut jemand fährt. Vorgabe der Teamleitung - nicht zu
-    # erscheinen ist der eine Fehler, über den nicht verhandelt wird. Der Topf kann
-    # dadurch über SHORTLIST_SIZE hinauswachsen; die Zahl ist eine Zielgröße für das
-    # Auffüllen, keine Obergrenze für die Fehltermine.
-    by_absence = [c for c in candidates if c.unexcused > 0]
+    # erscheinen ist der eine Fehler, über den nicht verhandelt wird.
+    #
+    # ``size`` ist dabei eine **harte Obergrenze**, keine Zielgröße mehr. Früher wuchs
+    # der Topf über SHORTLIST_SIZE hinaus, sobald mehr Ladys gefehlt hatten als Plätze
+    # da waren - "zeig mir zehn" lieferte dann dreizehn. Passen nicht alle hinein,
+    # entscheiden jetzt die **Fehlen-Punkte**: wer am wenigsten gefehlt hat, fällt
+    # heraus. Vorgabe der Teamleitung, und es ist dieselbe Währung wie in der Tabelle,
+    # also nachvollziehbar, ohne eine zweite Regel zu lernen. Bei Gleichstand zählt der
+    # gesamte Besenstand, dann die Saisonpunkte - wie in der Reihung darunter auch.
+    by_absence = sorted(
+        (c for c in candidates if c.unexcused > 0),
+        key=lambda c: (-_absence_points(c), -c.besen, c.points_total),
+    )[:size]
     absent_ids = {c.player_id for c in by_absence}
     fillers = [
         c for c in candidates if c.player_id not in absent_ids and _fills_the_pool(c)
     ]
     fillers.sort(key=lambda c: performance_rank[c.player_id])
     pool_ids = absent_ids | {
-        c.player_id for c in fillers[: max(0, SHORTLIST_SIZE - len(absent_ids))]
+        c.player_id for c in fillers[: max(0, size - len(absent_ids))]
     }
     candidates = [
         replace(
@@ -671,29 +722,6 @@ def rank(
                 "unexcused" if c.player_id in absent_ids
                 else ("performance" if c.player_id in pool_ids else "")
             ),
-        )
-        for c in candidates
-    ]
-
-    # **Die Perf-Punkte messen sich am Topf, nicht am Kader** - deshalb stehen sie hier
-    # und nicht vor der Auswahl. Zehn Plätze, zehn Punktwerte, jeder genau einmal: die
-    # Beste der Liste bekommt PERF_POINTS_MIN, die Schwächste PERF_POINTS_MAX. Vorgabe
-    # der Teamleitung, und der Grund ist wieder das Gespräch: "du bist die Schwächste
-    # von den zehn" ist eine Aussage, "du liegst im 38. Perzentil des Kaders" nicht.
-    #
-    # Der Preis ist bekannt: die Skala ist damit **relativ zur Liste**. Wer in den Topf
-    # kommt, verschiebt die Punkte aller anderen darin - `--include-leaders` ändert sie
-    # also, und eine Neue, die sich hineinfährt, auch. Das ist die Kehrseite davon, dass
-    # jede Zahl von 1 bis 10 genau einmal vorkommt, und geht nicht anders.
-    pool_keys = sorted(
-        _performance_key(c.raw_delta) for c in candidates if c.in_pool
-    )
-    candidates = [
-        _with_points(
-            c,
-            pool_keys=pool_keys,
-            team_km=team_km,
-            roster_size=len(km_ranking),
         )
         for c in candidates
     ]
@@ -726,22 +754,19 @@ def rank(
         km_weeks=km_weeks_read,
         matches=len(match_ids),
         roster_size=roster_size,
-        shortlist_size=SHORTLIST_SIZE,
+        shortlist_size=size,
         all_rated=sorted(candidates, key=lambda c: performance_rank[c.player_id]),
         candidates=ranked,
         unrated=sorted(unrated, key=lambda u: u.window_driven),
         cohort_size=len(cohort),
         team_unexcused_rate=team_unexcused,
         team_km_average=team_km,
-        leaders_skipped=leaders_skipped,
-        include_leaders=include_leaders,
     )
 
 
 def _with_points(
     candidate: BroomCandidate,
     *,
-    pool_keys: list[tuple[bool, float]],
     team_km: float,
     roster_size: int,
 ) -> BroomCandidate:
@@ -757,11 +782,7 @@ def _with_points(
     # Konstruktion besser als die Schwächsten, über die geredet wird, also bekommt sie
     # den kleinsten Wert. Ihr Punktestand ist ohnehin keine Ranglistenzahl - sie taucht
     # nur in `all_rated` und im JSON auf, nie in der Liste.
-    perf = (
-        perf_points(_performance_key(candidate.raw_delta), pool_keys)
-        if candidate.in_pool
-        else PERF_POINTS_MIN
-    )
+    perf = perf_points(candidate.raw_delta)
     plain = plain_absence_points(candidate.unexcused, candidate.blocker_rows)
     blocked = blocked_slot_points(candidate.blocker_rows)
     loyalty = candidate.loyalty_points
@@ -796,18 +817,12 @@ def _with_points(
 
     details = {
         "motivation": km_detail,
+        # Kein "Platz im Topf" mehr: die Punkte kommen aus dem Abstand selbst, ein
+        # Platz daneben wäre eine zweite, andere Zahl für dieselbe Achse.
         "performance": (
             f"{candidate.raw_delta / 1000:+.1f}k zum Match-Median"
             if candidate.raw_delta is not None
             else "im Zeitraum nicht gefahren"
-        )
-        + (
-            # Der Platz **im Topf**, denn daraus entstehen die Punkte. Der Platz im
-            # Kader stünde daneben und wäre eine andere Zahl.
-            f", Platz {bisect_left(pool_keys, _performance_key(candidate.raw_delta)) + 1}"
-            f"/{len(pool_keys)} im Topf"
-            if candidate.in_pool and pool_keys
-            else ""
         ),
         "reliability": plain_detail,
         "blocker": blocked_detail,
