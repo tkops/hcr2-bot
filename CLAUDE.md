@@ -281,7 +281,7 @@ Protokollieren: wer ist noch nicht gefahren, wer hängt weit zurück, wen kann m
   wäre der teuerste Fehler ein einziger Tippfehler im Kommando: `video apply` schriebe
   für jede noch nicht Gefahrene eine 0/0-Zeile, `absent` würde aus den Urlaubsdaten zu 0
   abgeleitet — und damit steht sie in jedem Schnitt und in `stats broom` als
-  **unentschuldigtes Fehlen**, in der Probezeit sofort als Rauswurfkandidatin.
+  **unentschuldigtes Fehlen**, was dort bedingungslos in den Topf führt.
 - **Ab Match 2 eines Events ist der Maßstab der eigene Score aus Match 1 desselben
   Events** (`matchscores.scores_in_teamevent`) — gleiche Strecken, also der einzige
   faire Vergleich; der eventübergreifende Schnitt aus `recent_scores` misst andere
@@ -418,17 +418,315 @@ Independently, the kilometre ranking is sized so a full roster stays inside one 
 otherwise silently start splitting the weekly ranking in two. As of now no bot command
 exceeds the limit, so the splitting is a net for lists that grow, not a live fix.
 
+### Leistungsrangliste (`stats perf`)
+
+`perf` ist die **einzige** Leistungsrangliste. `avg` und `rank` gab es daneben und sind
+entfernt: `avg` rief dieselbe Funktion mit denselben Argumenten auf wie `perf` (die
+Ausgaben waren byte-identisch), und `rank` war `perf --active` plus der Auffüllung, die
+jetzt `--no-skip` heißt. Drei Namen für eine Rechnung sind der Weg, auf dem zwei
+Wahrheiten entstehen — dieselbe Spielerin stand in `perf 64` mit 14,7k und in `rank 64`
+mit 14,3k, weil der Median einmal über 54 und einmal über 49 Spielerinnen lief.
+
+Die Rechnung ist überall dieselbe: mittlerer Abstand zum Match-Median, auf 4 Strecken
+normiert. Was die Flags ändern, ist **wer in die Liste kommt** — und damit auch, über
+wen der Median gebildet wird:
+
+- **Default: der aktive PLTE-Kader**, jede mit mindestens einem gefahrenen Match. Das
+  war bis 1.13.1 andersherum, und die Umkehr kam aus einer Beobachtung am Bot: der
+  schickte **nie** ein `--active`, also zeigte `.stats` im Discord immer die Liste
+  samt Ausgetretener — gefragt ist im laufenden Betrieb aber der Kader.
+- **`--inactive`**: nimmt alle anderen mit einer Zeile in der Saison dazu, inzwischen
+  Ausgetretene eingeschlossen. Nur so bleibt eine alte Saison lesbar, denn das damalige
+  Feld ist das, woraus der Median gebildet wurde. **Die 20%-Hürde hängt an diesem Flag**,
+  nicht mehr am Default: die Ein-Match-Einträge, gegen die sie gebaut ist, kommen genau
+  aus dieser Gruppe. `score`/`points` können das gar nicht, die filtern immer auf den
+  aktiven Kader. `--active` wird weiter angenommen und ist ein No-op, damit ein
+  getipptes Kommando nicht mit einer Usage-Zeile antwortet.
+- **`--no-skip`**: füllt die Liste mit den Spielerinnen des **heutigen** Kaders auf, die
+  in der Saison keine Wertung haben (`-`, 0 Matches). Grundmenge ist
+  `list_active_plte_players()`, also der Kader und nicht die Saison — deshalb
+  **schließt es `--inactive` aus**: sonst stünden Ausgetretene *mit* Wertung und
+  Neuzugänge *ohne* in einer Tabelle, zwei Grundmengen nebeneinander. In diesem Modus
+  gibt es kein
+  `PERF_TABLE_LIMIT`, denn abschneiden hieße genau die weglassen, für die das Flag da
+  ist. Der Name führt in die Irre: „skip" meint übersprungene *Spielerinnen* in der
+  Anzeige, nicht übersprungene *Matches* in der Rechnung, und hat mit
+  entschuldigt/unentschuldigt nichts zu tun.
+- **`--driven-only`**: lässt unentschuldigtes Fehlen aus der Rechnung. Ohne das Flag
+  zählt es als 0-Score, **und das ist Absicht** — nicht zu erscheinen soll die
+  Leistungszahl drücken. Das Flag beantwortet die andere Frage: wie fährt sie, wenn sie
+  fährt. An Saison 64 sind das bis zu +5,6k (Bisa, 3× unentschuldigt), und im unteren
+  Ende der Tabelle tauscht es Plätze.
+
+Der Bot übersetzt die Flags in Wortformen (`.stats perf 64 noskip inactive driven`), weil
+in Discord niemand `--` tippt. Vor der Konsolidierung schickte er ein `--no-skip`, das
+`perf` gar nicht kannte — die Antwort war die Usage-Zeile, mit Exit-Code 0.
+
+**`broom` rechnet die Leistung bewusst anders** als `stats perf`: dort sind die
+unentschuldigten Nullen draußen (`if row.score > 0`), weil das Fehlen in broom schon
+über die Zuverlässigkeit eingeht und sonst doppelt zählen würde. „Perf" in `stats` und
+„Leistung" in `broom` sind daher zwei verschiedene Zahlen, und das ist gewollt.
+
 ### Broom (Rauswurf-Kandidaten)
 
-`stats broom` rankt Kandidatinnen für einen Rauswurf über die letzten
-`broom.WINDOW_MATCHES` Matches (40, ≈10 Wochen) und begründet jede Zeile.
-`hcr2/services/broom.py` hält das Modell, `hcr2/output/broom.py` die Ausgabe,
-`hcr2/repositories/broom.py` das SQL. Im Bot gibt es zwei Einstiege, `.B` und
-`.stats broom`, die sich `bot.broom_call()` teilen — dort werden Discord-Argumente auf
-Flags übersetzt (`.B 10` → `--top 10`, `all` → `--all`, `leader` →
-`--include-leaders`), weil in Discord niemand Flags tippt. Eine Ziffer direkt hinter
-einem Flag ist dessen Wert und nicht das Top-Limit, sonst wird `.B --last 80` zu
-`--last --top 80`.
+`stats broom` rankt Kandidatinnen für einen Rauswurf über **die aktuelle Saison** und
+begründet jede Zeile. `hcr2/services/broom.py` hält das Modell,
+`hcr2/output/broom.py` die Ausgabe, `hcr2/repositories/broom.py` das SQL. Im Bot gibt
+es zwei Einstiege, `.B` und `.stats broom`, die sich `bot.broom_call()` teilen — dort
+werden Discord-Argumente auf Flags übersetzt (`.B 10` → `--top 10`, `s63` →
+`--season 63`, `leader` → `--include-leaders`), weil in Discord niemand Flags tippt.
+Eine Ziffer direkt hinter einem Flag ist dessen Wert und nicht das Top-Limit, sonst wird
+`.B --last 80` zu `--last --top 80`.
+
+**Unbekannte Argumente werden abgelehnt** (`_unknown_broom_args`), statt still zu
+verschwinden. Ohne die Prüfung liefert ein getipptes `--seson 64` kommentarlos die
+laufende Saison — ein Aufruf, der etwas anderes tut als das, was dasteht, ist in einer
+Rauswurfliste das Letzte, was man brauchen kann. `--all` und `.B all` sind damit
+**weggefallen**: das Flag steuerte, wie viele Begründungsblöcke gedruckt werden, und die
+gibt es nicht mehr — die Tabelle zeigt ohnehin den ganzen Topf. Ein Wort, das
+stillschweigend nichts tut, ist schlechter als keins.
+
+**`--include-leaders` steht in der Kopfzeile** (`· mit Leadern`). `leaders_skipped == 0`
+beantwortet die Frage nicht, denn das ist es auch ohne Leader im Kader; deshalb trägt
+`BroomResult.include_leaders` das Flag selbst. Ohne die Anzeige tut das Flag sichtbar
+nichts, solange kein Leader schwach genug für den Topf ist — an Saison 65 wächst
+`all_rated` von 41 auf 50, und die Tabelle bleibt Zeile für Zeile dieselbe.
+
+**Zwei Schritte, und bewusst nicht mehr als zwei** — Vorgabe der Teamleitung, und der
+Grund ist das Gespräch danach: ein Rauswurf muss in einem Satz begründbar sein.
+
+1. **Der Topf.** Wer in der Saison **einmal unentschuldigt gefehlt** hat, ist drin —
+   bedingungslos, egal wie gut sie fährt. Der Rest wird mit den Leistungsschwächsten auf
+   `SHORTLIST_SIZE` (10) aufgefüllt; Leistung ist der schlichte Abstand zum Match-Median
+   über die **tatsächlich gefahrenen** Matches. Die Zahl ist eine **Zielgröße fürs
+   Auffüllen, keine Obergrenze**: fehlen mehr als zehn unentschuldigt, wächst der Topf.
+2. **Die Reihung darin: Besenpunkte.** Ganze Zahlen, viele sind schlecht, und **jede
+   davon kann eine Spielerin selbst nachsehen** — das ist der ganze Zweck. Vier Achsen,
+   die sich zur Gesamtzahl addieren:
+
+   | Achse | Punkte | woher |
+   |---|---|---|
+   | `km/W` | 3 / 2 / 1 / 0 | Schnitt pro Woche über `KM_WINDOW_WEEKS` (5), Stufen bei 50 / 150 / 300 |
+   | `Perf` | 10 … 1 | Platz **im Topf**: Schwächste 10, Beste 1, jeder Wert genau einmal |
+   | `Fehlt` | +3 je Mal | gar nicht aufgetaucht, ohne Obergrenze |
+   | `Slot` | +5 je Mal | eingeloggt und nicht gefahren, ohne Obergrenze |
+   | `Matches` | 0 / −1 / −2 / −3 | gefahrene Matches, Stufen bei 15 / 50 / 150 |
+
+   **`Fehlt` und `Slot` sind zwei disjunkte Spalten.** Wer sich einloggt und nicht
+   fährt, steht in der DB als unentschuldigter Fehltermin *und* als Check-in — an der
+   echten DB ausnahmslos (31 von 31). In einer gemeinsamen Zelle sah das aus wie zwei
+   Vorfälle (`1+1`), obwohl es einer ist. Getrennt zählt jede Zeile genau einmal: unter
+   `Fehlt` stehen nur die Male, bei denen sie gar nicht aufgetaucht ist, unter `Slot`
+   die mit Check-in. Die 2 Punkte fürs Fehlen hängen dabei **an der Zeile, nicht an der
+   Spalte** und wandern deshalb mit in die Slot-Spalte — sonst addierten sich die beiden
+   nicht mehr zur Gesamtzahl. Ein Test pinnt genau das.
+
+   **Die Höhe ist an der echten Liste kalibriert, nicht geraten.** Die Perf-Achse
+   spannt 9 Punkte und ist damit breiter als der ganze beobachtete Topf von Saison 64
+   (3 bis 9) — bei den ursprünglichen 2 Punkten verpuffte das Fehlen darin: `Bisa` stand
+   dort mit **drei** unentschuldigten Fehlterminen auf derselben 9 wie `tina` und
+   `Dommas`, die nie gefehlt hatten. Sechs Punkte Strafe, durch fünf Plätze besseres
+   Fahren wieder hereingeholt — das Gegenteil der Vorgabe „der eine Fehler, über den
+   nicht verhandelt wird". Bei 3 wiegen **drei Fehltermine genau die volle
+   Leistungsspanne auf** (3 × 3 = 9). Das ist ein Satz, den man im Gespräch sagen kann,
+   und zufällig genau die Zahl, die im alten Modell als `UNEXCUSED_CAP` stand. Ein Test
+   pinnt die Gleichung gegen die Konstanten.
+
+   **Vorfälle werden nicht mehr zu Episoden zusammengefasst.** `BLOCKER_EPISODE_DAYS`
+   fasste zwei Check-in-No-Shows innerhalb weniger Tage zu einem zusammen, damit die
+   Veto-Stufe nicht bei einem einzigen Wochenende zuschlägt. Die Stufe ist weg, und mit
+   flachen Punkten je Spalte kehrte die Regel sich ins Gegenteil: zwei belegte Slots an
+   einem Wochenende hätten 5 gekostet, zwei schlichte Fehltermine aber 6 — wer da war
+   und nicht gefahren ist, käme billiger weg als wer gar nicht kam. Jetzt zählt jede
+   Zeile, und `blocker_rows` ist das einzige Feld. (An der echten DB betraf das
+   Zusammenfassen zwei Fälle in der gesamten Historie.)
+
+   **Das ersetzt seit 1.21 ein Risiko von 0-100 aus gewichteten Perzentilen.** Das war
+   genau und unbrauchbar: mit einer 53,4 kann in einem Rauswurfgespräch niemand etwas
+   anfangen, mit „du hast zwölf Besenpunkte, hier kommt jeder einzelne her" schon.
+   Gegengerechnet an S64 und S65 reiht das Punktemodell **fast identisch** zum
+   Risiko (Rangkorrelation ρ = 0,93–0,95), die Verständlichkeit kostet also nichts.
+   Mit den Perzentilen sind `_percentile`, die Kohorten-Verteilungen und die
+   MIN_COHORT-Warnung weggefallen.
+
+**Die Skala darf unter null gehen**, und das ist Absicht: wer viel fährt und lange
+dabei ist, steht im Minus (am echten Kader bis −2). Das alte Risiko schnitt bei null ab
+und warf damit die beste Nachricht weg, die diese Liste zu vergeben hat.
+
+**Die Treue bleibt ein Minus, sie wird nie ein Plus.** Gedreht reihte sie identisch —
+beide Formen unterscheiden sich nur um eine Konstante — aber der Satz im Gespräch
+kippt von „deine 777 Matches ziehen drei Punkte ab" zu „du hast nur 27 Matches, das
+sind drei Punkte gegen dich". Die Matchzahl ist fast dasselbe wie die Zugehörigkeitsdauer
+(7 bei der Neuesten, 797 bei der Ältesten), also hätte sie als Strafposten immer die
+Jüngsten nach oben gesetzt. Ein Test pinnt, dass `treue_points()` nie positiv wird.
+
+**Der Slot wiegt schwerer als das Fernbleiben** (`BLOCKER_POINTS` 3 > `UNEXCUSED_POINTS`
+2) — Vorgabe der Teamleitung: wer sich einloggt, hat gezeigt, dass er Zeit hatte, und
+greift die Event-Belohnung ab, ohne dafür zu fahren. **Außer sie ist abgemeldet**: dann
+zählt die Zeile gar nicht. An der echten DB ist der Fall noch nie eingetreten (31
+Check-in-No-Shows, keiner davon abgemeldet), die Regel steht trotzdem im Code, weil sie
+sonst beim ersten Mal falsch entscheidet.
+
+**Gleichstände löst die Saisonpunktzahl auf** (`points_total`, 0–300 pro Match). Ganze
+Zahlen erzeugen Gleichstände, wo das Risiko mit Nachkommastellen eine Trennung
+vortäuschte — an S64 standen sieben Ladys auf demselben Wert. Die Saisonpunkte machen
+daraus sechs Gruppen und trennen an der Schnittlinie in beiden gemessenen Saisons
+sauber. Sie stehen als **eigene Spalte** in der Tabelle, obwohl sie nicht mitreihen:
+bei Gleichstand entscheiden sie den Platz, und dann muss man sie sehen können, ohne
+die Liste zu verlassen. Der Spaltenkopf heißt `Punkte`, weil sie im Team so heißen —
+die Besen-Spalte daneben heißt `Besen` und nicht `Besenpunkte`, also stehen sich die
+beiden Wörter nicht im Weg.
+
+**Drei Achsen sind absolut, nur `Perf` ist eine Rangliste** — und das darf sie sein,
+weil der Bot die Zahl nach jedem Match öffentlich postet (`.stats` steht in
+`PUBLIC_COMMANDS`), jede also ihren Platz kennt. Die festen Schwellen halten, weil die
+Verteilungen über Saisons hinweg kaum wandern (km/Woche-Quartile S64 87/152/294, S65
+91/172/294).
+
+**`Perf` misst am Topf, nicht am Kader**: zehn Plätze, zehn Punktwerte, **jeder genau
+einmal**. Vorgabe der Teamleitung, und der Grund ist wieder das Gespräch danach — „du
+bist die Schwächste von den zehn" ist eine Aussage, „du liegst im 38. Perzentil des
+Kaders" ist keine. Deshalb stehen die Perf-Punkte im Code **nach** der Topf-Auswahl:
+vorher kann der Maßstab nicht feststehen. Der Preis ist bekannt und in Kauf genommen —
+die Skala ist damit **relativ zur Liste**, also verschiebt jede, die in den Topf kommt,
+die Punkte aller anderen darin (`--include-leaders` ändert sie, eine Neue, die sich
+hineinfährt, auch). Das geht nicht anders, wenn jede Zahl genau einmal vorkommen soll,
+und zwei Tests pinnen beide Hälften: dass die Werte 1…10 vollständig vergeben werden,
+und dass die drei absoluten Achsen dabei stehen bleiben. Gleichauf heißt gleiche Punkte
+— gezählt wird, wie viele im Topf *echt* schwächer fahren, nicht ein laufender Index,
+der je nach Sortierstabilität zwei gleiche Fahrerinnen verschieden bewertet hätte; bei
+echtem Gleichstand fällt ein Wert deshalb aus. Wächst der Topf über zehn hinaus, wird
+dieselbe Gerade über die größere Liste gelegt, dann wiederholen sich Werte.
+
+Wer **nicht** im Topf steht, bekommt `PERF_POINTS_MIN`: sie fährt per Konstruktion
+besser als die Schwächsten, über die geredet wird, und ihr Punktestand ist ohnehin keine
+Ranglistenzahl — er taucht nur in `all_rated` und im JSON auf, nie in der Liste.
+
+**Keine Zahl ist kein Freifahrtschein.** Fehlt die Kilometerwoche, kostet die Achse den
+Höchstsatz. Früher fiel sie als „unbewertet" heraus und ihr Gewicht wurde umgelegt — in
+einem Punktesystem gibt es nichts umzulegen.
+
+**Die Ausgabe ist Tabelle plus Punktesystem, sonst nichts** — keine Begründungsblöcke
+pro Person mehr, keine Kopfzeile mit Teamquote und Leaderzahl, keine Kadergröße und
+keine Zahl der zu schaffenden Plätze. Die Titelzeile trägt nur noch den Namen und den
+Zeitraum (`🧹 Besenliste – Saison 65 (5 Matches)`), weil eine Rangliste ohne ihren
+Zeitraum nicht überprüfbar ist und alles andere die Tabelle sagt. Die Ausgabe ist damit
+von ~3900 auf **~1550 Zeichen** gefallen und passt in **eine** Discord-Nachricht statt
+zwei; ein Test pinnt das.
+
+**Die Tabelle zeigt den echten Wert, die Punkte stehen in Klammern daneben.** Mit „124
+km/Woche" kann eine Leitung in ein Gespräch gehen, mit einer 2 nicht — deshalb führt der
+Wert. Die Klammer sorgt dafür, dass sich die Gesamtzahl trotzdem nachaddieren lässt
+(`2 +7 +5 -1 = 13`, zwei Tests pinnen es). Eine Achse ohne Wert und ohne Punkte zeigt
+nur `-`; `- (0)` wäre zehnmal dieselbe Null. `--top <n>` kürzt seit dem Wegfall der
+Blöcke die **Tabelle** (vorher die Blöcke) — die Lesart, die `.B 5` im Bot ohnehin
+nahelegt.
+
+`BroomFactor` trägt die Zahl weiter **zweimal**: `value` kurz für die Zelle (`124`,
+`-4.4k`, `1+1`), `detail` ausgeschrieben. `detail` und `_with_reasons()` werden nicht
+mehr gedruckt, aber weiter gerechnet und über `--json` ausgegeben — dort steht, was
+keine Achse abdeckt (Quote gegen den Teamschnitt, Vorfälle vor dem Fenster, Einbrüche,
+Gleichstand). Im Gespräch trägt die Zeile, für alles andere gibt es `--json`.
+
+**Der Ton ist sachlich, nicht wertend** — Vorgabe der Teamleitung, und der Grund ist
+wieder das Gespräch danach: die Liste geht in eine Unterhaltung, in der jemand erfährt,
+dass sie gehen soll. Wörter wie „die Schwächsten" kommen dort nicht an, und sie sind
+auch gar nicht gemeint — bewertet wird eine Fahrleistung in einem Zeitraum, kein Mensch.
+Deshalb steht in der Legende „+10 für die geringste Fahrleistung" statt „schwächste",
+„aufgefüllt nach der Fahrleistung der Saison" statt „mit den Schwächsten", und der
+Gleichstand wird von unten erklärt („wer mehr eingebracht hat, steht weiter unten")
+statt von oben. Ein Test hält eine Liste von Wörtern von der Ausgabe fern.
+
+**Die Ausgabe sagt „Ladys", nicht „Spielerinnen".** Das Team heißt Power Ladys, aber es
+fahren auch Männer mit — die weibliche Form wäre schlicht falsch, und „SpielerInnen"
+liest sich in einer Tabellenspalte wie ein Tippfehler. „Ladys" ist die Kurzform des
+Teamnamens und meint alle; so redet die Leitung auch im Channel.
+`pool_reason` (`"immediate"` / `"unexcused"` / `"performance"`) trägt den Eintrittsgrund,
+und die Ausgabe nennt ihn über der Tabelle — ohne ihn liest sich die Liste als
+Leistungsrangliste, und die guten Fahrerinnen darin wirken wie ein Fehler.
+
+**Die Legende am Ende ist eine Nachschlagetabelle, kein Fließtext** — vier Zeilen, eine
+je Achse, in derselben Reihenfolge wie die Spalten, damit man von einer Zelle geradeaus
+nach unten schauen kann. Vorher standen dort neunundzwanzig Zeilen Prosa, die dasselbe
+sagten. Jede Staffelgrenze und jeder Punktwert steht trotzdem da, weil die Ansage
+„rechne nach" sonst nicht einlösbar ist; ein Test pinnt jede einzelne Schwelle gegen die
+Konstanten — **mitsamt ihrem Vergleichszeichen**, denn die beiden Staffeln meinen es
+verschieden (Kilometer greifen bei `<=`, Matches bei `<`), und eine Legende, die das
+verwischt, ist genau an der Grenze falsch, an der jemand nachschaut.
+
+**Nichts unterhalb der Tabelle ist breiter als sie** (`_print_wrapped`, gegen `WIDTH`).
+Der Umbruch wird gerechnet und nicht von Hand gesetzt — sonst reicht ein Wort mehr in
+einer Schwelle, und die Erklärung steht über die Liste hinaus; in einem Discord-Codeblock
+heißt das, dass die Zeile seitlich wegläuft, während die Tabelle daneben ordentlich
+endet. Bei den Achsenzeilen rücken die Folgezeilen unter den Textanfang ein, damit eine
+Erklärung als Block stehen bleibt. Zeilen mit Emoji bekommen die Breite um eins
+reduziert: `textwrap` zählt Zeichen, ein Emoji belegt aber zwei Anzeigespalten. Ein Test
+misst **jede** Zeile in Anzeigebreite, über mehrere Ausgabeformen hinweg — und die
+Inhaltstests prüfen seitdem gegen den geglätteten Text (`_flat`), weil eine Phrase nach
+dem Umbruch mitten im Satz eine Zeilengrenze überqueren kann.
+
+Die Legende trägt außerdem, **wie viele Kilometerwochen tatsächlich eingetragen sind**,
+wenn das vom Fenster abweicht („letzten 5 Wochen (4 davon in der Truhe eingetragen)").
+Das stand früher in der Kopfzeile; die ist weg, die Einschränkung musste bleiben —
+„Schnitt aus fünf Wochen" wäre sonst eine Behauptung über Zahlen, die niemand
+eingetragen hat.
+
+**Es gibt keine Sofortfall-Stufe mehr, und auch keine Probezeit.** Beide sind mit dem
+Umstieg auf Besenpunkte weggefallen. Der Sofortfall stand erst *neben* dem Topf (und fiel
+damit samt seines unentschuldigten Fehlens aus der Rangliste, weil der Vorfilter vor der
+Fehlen-Regel lief), dann *im* Topf mit einer `!`-Markierung. Beides brauchte eine zweite
+Sprache auf der Seite, um zu erklären, warum über jemanden nicht mehr abgewogen wird —
+und die Punkte sagen dasselbe: eine Neue mit belegtem Slot zahlt 5 Punkte und bekommt
+null Treueabzug, steht also von allein oben, nach derselben Arithmetik wie alle anderen.
+`PROBATION_MATCHES` und `NEWCOMER_MATCHES` gibt es nicht mehr; die Treueachse steht
+unterhalb ihrer ersten Stufe (15 Matches) ohnehin auf null. Mit der Kopfzeile sind auch
+`slots_to_free`, `TEAM_CAPACITY` und `TARGET_FREE_SLOTS` weggefallen: die Zielzahl stand
+nur dort, und eine Zahl, die nirgends mehr auftaucht, ist nur noch Pflege. Wie viele
+gehen sollen, entscheidet die Leitung, nicht die Liste.
+
+**Der Zeitraum ist die Saison, weil die Saison die Einheit ist, in der entschieden
+wird.** Am Saisonende verabschiedet sich die Leitung von einer Handvoll
+Spielerinnen — Belege aus der Saison davor gehören nicht in diese Entscheidung.
+`broom_repo.current_season()` nimmt die Saison nach Datum (damit `broom` und der Rest
+von `stats` dasselbe unter „aktuell" verstehen) und fällt auf die Saison des neuesten
+Matches zurück, wenn die kalendarisch laufende noch kein Match hat. `--season <n>`
+liest eine abgeschlossene Saison, `--last <n>` ersetzt die Saison durch ein festes
+Matchfenster (`WINDOW_MATCHES` = 40 ist dessen Voreinstellung und die einzige
+verbliebene Rolle der Konstante) — beides zusammen wird **abgelehnt** statt still
+eines gewinnen zu lassen, denn welches gewonnen hätte, stünde nur im Kopf der Ausgabe.
+
+**Die Kohortenschwelle hängt am Fenster, nicht an einer festen Zahl**
+(`cohort_threshold()`): `MIN_MATCHES` = 10 ist auf eine volle Saison gemünzt, und in
+einer **laufenden** kann das niemand erreichen — nach vier Matches wäre die Kohorte
+leer. Deshalb ist die Schwelle `COHORT_SHARE` (70 %) des Fensters, gedeckelt auf
+`MIN_MATCHES`: bei 15 Matches bleibt es bei 10 wie bisher, bei 4 sind es 3. Seit dem
+Umstieg auf Besenpunkte trägt die Kohorte nur noch zwei Dinge: den Maßstab der
+`Perf`-Achse und die Teamquote im Kopf. Ist sie leer, kostet `Perf` für alle den
+Höchstsatz — ehrlicher als ein Maßstab aus dem Nichts, und die drei anderen Achsen
+reihen weiter.
+
+**Die Kilometer kommen aus den letzten `KM_WINDOW_WEEKS` (5) Wochen, nicht aus den
+Wochen der Saison** (`last_weeks()`) — und das ist seit 1.21 umgedreht. Der Grund ist
+die absolute Punktschwelle: die Saisonwochen sind zwischen einer und dreizehn breit,
+und an einer festen Stufe gemessen hieße derselbe Punktwert dann in jeder Saison etwas
+anderes. Fünf Wochen sind dabei **grob eine Saison** — die läuft im Schnitt 4,3 Wochen
+(S64 4,4, S63 4,4, S62 4,3) —, aber immer gleich breit.
+
+Der Stichtag ist das **Ende des Wertungszeitraums, nicht heute**: `--season 63` liest
+die letzten fünf Wochen *jener* Saison, sonst zöge eine abgeschlossene Saison die
+Kilometer von heute herein und wäre morgen nicht mehr reproduzierbar. Den Zeitraum
+liefert im Saisonmodus die `season`-Tabelle (eine laufende Saison endet heute), im
+`--last`-Modus das älteste bis neueste Match. Der Preis ist bekannt und in Kauf
+genommen: in der ersten Woche einer Saison stammen vier der fünf Wochen aus der
+Vorsaison — vertretbar, weil Kilometer eine Gewohnheit sind und keine
+Saisoneigenschaft.
+
+Weiterhin **nicht** der gleitende `DISTANCE_AVERAGE_WINDOW` (8 Wochen) von `player
+show` und der Kilometer-Rangliste: der folgt dem Tag, an dem er aufgerufen wird.
+`BroomResult.km_weeks` ist die Zahl der Wochen, für die es **Zahlen gibt**, nicht die
+Fensterbreite, und der Kopf nennt sie — eine fehlende Woche heißt, dass die Truhe nicht
+gelesen wurde, nicht dass jemand nichts gefahren ist. Gibt es gar keine, kostet die
+km-Achse den Höchstsatz und die Ausgabe sagt, dass die Zahlen fehlen.
 
 **Beide Einstiege sind leader-only, kommen aber unterschiedlich dahin.** `.B` steht
 einfach nicht in `PUBLIC_COMMANDS`, also greift die Kanal- und Rollenprüfung in
@@ -438,125 +736,72 @@ im User-Channel die Liste abrufen. Ein Test in `tests/test_bot_contract.py` pinn
 beide Hälften. `.b` ist bewusst frei geblieben: nach der Konvention (klein listet,
 groß zeigt Details) wäre das der Platz für eine Einzelansicht.
 
-Vier Entscheidungen, die gegen die echte DB gemessen sind und nicht aus Geschmack
-stammen:
+Entscheidungen, die gegen die echte DB gemessen sind und nicht aus Geschmack stammen:
 
-- **Zugehörigkeit schützt oben und belastet unten.** Anzahl Matches ist hier fast
-  dasselbe wie Zugehörigkeitsdauer (7 Matches bei der Neuesten, 797 bei der
-  Ältesten), also hätte sie als reiner Strafposten immer die fünf jüngsten
-  Mitglieder nach oben gesetzt — unabhängig davon, wie sie fahren. Ab
-  `PROBATION_MATCHES + 1` ist sie deshalb ein Multiplikator ≤ 1 (`LOYALTY_TIERS`,
-  Boden `LOYALTY_FLOOR`), der ein Risiko nur senken kann. **Innerhalb der Probezeit
-  gilt das Gegenteil** (`PROBATION_PENALTY`, ×1,30): wer noch nichts geleistet hat,
-  hat auch keinen Kredit. Das Fenster ist bewusst kurz — bei 11 gefahrenen Matches
-  ist eine Spielerin schon draußen, also kann der alte Fehlermodus („die Neuesten
-  stehen immer oben") nicht zurückkommen.
-- **Quoten werden gegen die Teamquote geschrumpft** (`SHRINKAGE`) — **außer in der
-  Probezeit**. Ohne Shrinkage kam die etablierte Neue über die Hintertür zurück:
-  1 unentschuldigtes Fehlen von 7 Matches sind 14 % und schlagen jeden
-  Veteranenwert. Für eine Spielerin in der Probezeit ist diese Begründung bewusst
-  umgekehrt — dort *ist* das Überreagieren auf die kleine Stichprobe die Regel, also
-  wird sie roh gemessen.
-- **Jede im Team wird bewertet, `MIN_MATCHES` ist keine Eintrittshürde.** Es
-  definiert nur die `cohort` — die Population, aus der Regression, Perzentile und
-  Teamquoten kommen. Wer eine Kaderzeile im Fenster hat, wird gereiht; die Faktoren,
-  die eine dünne Stichprobe nicht tragen, melden sich selbst ab
-  (`MIN_TREND_MATCHES` für Trend und Aussetzer, `MIN_CONTRIBUTION_ROWS` für den
-  Beitrag) und ihr Gewicht wird umgelegt. `BroomUnrated` bleibt nur für den Fall
-  „gar keine Kaderzeile im Fenster" — frisch aufgenommen, noch kein Match. Weil ein
-  kurzes Fenster damit eine Rangliste ohne Maßstab erzeugen kann, trägt
-  `BroomResult.cohort_size` die Kohortengröße und die Ausgabe warnt unter
-  `MIN_COHORT`: eine Liste, die auf zwei Faktoren beruht, sieht sonst genauso
-  belastbar aus wie eine auf sieben.
-- **Die Probezeit ist die Ausnahme von der Shrinkage.** Ein einzelnes
-  unentschuldigtes Fehlen ist dort schon ein Sofortfall, und im Sofortfall-Tier
-  stehen Probezeitfälle **vorn** — es gibt keine Historie dagegen abzuwägen.
-- **Rückkehrerinnen bekommen einen Bonus** (`RETURNER_BONUS`, ×0,90 auf den
-  Schutzfaktor), denn zurückzukommen *ist* Loyalität. `is_returner` erkennt sie an
-  gefahrenen Matches **außerhalb** des Fensters (≥ `MIN_MATCHES`) plus einer echten
-  Lücke darin (`rows <= window - MIN_MATCHES`) — nicht an Datumsfeldern. Am echten
-  Kader trennt das die Gruppen exakt: jede Neue hat 0 Matches Historie, jede
-  Rückkehrerin mindestens 19. Die zweite Bedingung ist die wichtige — die Historie
-  einer Veteranin ist ebenso groß, sie war nur das ganze Fenster über im Kader, und
-  ohne sie würde jede den Bonus einsammeln.
-- **Ein Check-in-No-Show vetoisiert eine Neue und reizt bei allen anderen die
-  Zuverlässigkeit aus.** `checkin = 1` heißt „in der Liste, Score `--`" — eingeloggt,
-  Slot belegt, nicht gefahren. Das passiert ~2,5× pro Monat im ganzen Kader, als rein
-  gewichtete Achse wäre es für fast alle null. Unter `NEWCOMER_MATCHES` gefahrenen
-  Matches beendet **eine** Episode die Diskussion. Bei einer Etablierten nicht:
-  `BLOCKER_FLOOR_EPISODES` Episoden setzen den Zuverlässigkeitsfaktor auf sein
-  Maximum, und der Rest des Modells entscheidet, wo sie damit landet. Eine Veteranin,
-  die das Team in Punkten trägt, wird deswegen nicht rausgeworfen — der reale Fall
-  (536 gefahrene Matches, 78,9 Punkte pro Kadermatch) liegt damit auf Platz 13 statt
-  als Sofortfall auf Platz 1. `blocker_episodes` fasst Vorkommen innerhalb
-  `BLOCKER_EPISODE_DAYS` zu einem Vorfall zusammen — ohne das wäre ein
-  Gründungsmitglied mit 782 gefahrenen Matches Sofortfall, weil zwei ihrer Vorkommen
-  zwei Tage auseinander lagen. Vorkommen außerhalb des Fensters erscheinen als
-  `blockers_earlier` und ranken nie.
-- **Der absolute Beitrag zählt, nicht nur der Vergleich pro Match.** Gemessen am
-  echten Kader holte eine Spielerin 56 Event-Punkte aus 38 gefahrenen Matches (1,4
-  pro Match), eine andere 2682 aus 32 (78,9) — jedes Match schlecht zu fahren bringt
-  dem Team weniger als gelegentlich richtig. `points_per_row` teilt durch die
-  **verfügbaren** Kadermatches (`available_rows = rows - excused`), aus zwei Gründen:
-  eine mitten im Fenster Beigetretene wird nicht für Matches bestraft, in denen sie
-  nicht dabei sein konnte, und entschuldigtes Fehlen kommt nicht durch die Hintertür
-  in die Wertung zurück — genau das hatte ein Test aufgedeckt. Unentschuldigte
-  Zeilen bleiben im Nenner, Abtauchen kostet also weiter. Das Gewicht ist bewusst
-  moderat: `corr(Punkte, perfΔ) = 0,78`, der Faktor wiederholt die Leistung zum
-  großen Teil und darf dieselbe Sache nicht zweimal zählen. Auffällig ist dagegen
-  `corr(Punkte, gefahrene Matches) = 0,19` — die Summe wird von der Qualität
-  bestimmt, nicht von der Teilnahme, was die Regel überhaupt erst rechtfertigt.
-- **Die GP-Korrektur wird gemessen, nicht gesetzt.** `_gp_slope` regressiert die
-  Leistungsdelta auf die Garage Power des aktuellen Kaders (live 1,09 Score pro
-  GP-Punkt, r = 0,28, also unter 10 % erklärte Varianz) — genau der kleine Anteil,
-  den die Korrektur haben soll, weil nur die *aktuelle* GP bekannt ist.
-
-**Alle Kohortenwerte — Regression, Perzentile, Teamquoten — laufen über den ganzen
-Kader, Leader eingeschlossen, aber nur über Spielerinnen mit mindestens
-`MIN_MATCHES` Fensterspielen; gefiltert wird erst bei der Ausgabe.** Wer gelistet
-wird, ist Policy; wie GP mit Score zusammenhängt, ist es nicht. Die Steigung ohne
-Leader zu schätzen schnitt das High-GP-Ende ab und drückte sie von 1,09 auf 0,37.
-Deshalb ändert `--include-leaders` nur, wer erscheint, nicht die Werte der anderen.
-`_percentile` gibt bei einer Kohorte ohne Streuung 0,5 zurück statt 1,0 — „wie viele
-liegen unter mir" ist bei lauter gleichen Werten 0 und hätte über `low_is_worse`
-den ganzen Kader als jeweils Schlechteste bewertet.
+- **Zugehörigkeit zieht feste Punkte ab, keinen Prozentsatz** (`TREUE_TIERS`, Maximum
+  `TREUE_MAX` = −3). Vorher war es ein Multiplikator, und das war schon damals eine
+  Korrektur: ein Faktor wirkt prozentual, also hing der Bonus daran, wie schlecht jemand
+  dasteht, statt daran, wie lange sie dabei ist. An der echten Liste bekam eine
+  Spielerin mit 304 Matches 16,4 Punkte geschenkt und eine mit **493** nur 14,8, weil
+  deren Rohrisiko niedriger war; und die in allen drei Achsen Schwächste kassierte den
+  größten Bonus überhaupt und landete damit auf Platz 6 statt 1. Feste Punkte hängen
+  allein an der Zugehörigkeit — und sind ein Satz, den man im Gespräch sagen kann.
+- **Die Probezeit braucht keine eigene Regel mehr.** Die Treueachse steht unterhalb der
+  ersten Stufe (15 Matches) ohnehin auf null: nichts verdient, also nichts abgezogen —
+  kein Schutz, aber auch keine Strafe. `PROBATION_MATCHES` und `PROBATION_DISCOUNT` sind
+  damit weggefallen, und die Schärfe, die sie hatten, entsteht jetzt aus der Rechnung
+  selbst: eine Neue mit einem Fehltermin zahlt dieselben Punkte wie eine Etablierte,
+  bekommt aber keinen Abzug dagegen.
+- **Der Rückkehrbonus ist weggefallen**, und mit ihm `RETURNER_BONUS` und
+  `is_returner`. Er gab −1 extra, denn zurückzukommen *ist* Loyalität, und erkannte
+  Rückkehrerinnen an gefahrenen Matches **außerhalb** des Fensters (≥ `MIN_MATCHES`)
+  plus einer echten Lücke darin (`rows <= window - MIN_MATCHES`). Die zweite Bedingung
+  war die eigentliche Arbeit — die Historie einer Veteranin ist ebenso groß, sie war nur
+  das ganze Fenster über im Kader. **Sie konnte aber nicht mehr zutreffen:**
+  `MIN_MATCHES` = 10 stammt aus der Zeit, als das Fenster 40 Matches breit war; seit der
+  Wertungszeitraum die Saison ist (5 bis 15 Matches), ist die Schwelle größer als ihr
+  eigenes Fenster. An Saison 65 hieß die Bedingung `window_rows <= −5`, und niemand hat
+  weniger als null Kaderzeilen — in beiden gemessenen Saisons griff die Regel bei 0 von
+  41 beziehungsweise 0 von 40. Die Legende versprach also etwas, das nie eintrat. Die
+  Matchzahl allein sagt dasselbe: eine Rückkehrerin hat mehr Matches als eine Neue und
+  bekommt darüber den größeren Abzug.
+- **Die Garage Power spielt keine Rolle.** Bis 1.12.x wurde die Leistungsdelta um sie
+  bereinigt; für einen freien Platz zählt aber, was eine Spielerin einfährt, nicht ob
+  ihre Ausrüstung mehr hergegeben hätte. An Saison 64 verschob die Korrektur ohnehin
+  nur eine von zehn Personen im Topf.
+- **Wer im Zeitraum gar nicht gefahren ist, steht vorn — außer sie war durchgehend
+  entschuldigt abgemeldet** (`_fills_the_pool`). Sonst käme entschuldigtes Fehlen über
+  die Topfauswahl als schwerster Vorwurf zurück, obwohl es im ganzen Modell keiner ist.
+- **Entschuldigte Abwesenheit ist kein Faktor.** Sie korreliert mit nichts (r = −0,03
+  gegen die Kilometer), sagt also nichts über Einsatz, sondern ist echtes Leben. Sie
+  erscheint als Kontextzeile mit „zählt nicht"; ein Test pinnt, dass sie die
+  Besenpunkte nicht bewegt.
 
 Die Begründungszeilen sind **deterministische Vorlagen**, kein Modelltext: gleiche
-Datenlage, gleiche Sätze. Sie können auch entlasten („durch GP erklärt"), und wenn
-keine Schwelle greift, nennt `_with_reasons` den stärksten Faktor — ein Name mit
-leerem Block darunter liest sich als Fehler. `--json` gibt dasselbe maschinenlesbar
-aus, als Andockpunkt für einen späteren Skill, der daraus ein Gespräch formuliert.
-Die Rechnung bleibt Code, weil der Bot kein Claude aufrufen kann und weil eine Liste,
-die sich zwischen zwei Läufen ändert, in einem Rauswurfgespräch nichts wert ist.
-
-Kilometer zählen als Motivation (`corr(km, Leistung) = +0,58`, doppelt so stark wie
-GP), überschneiden sich also mit der Leistung — beide Gewichte zusammen sind deshalb
-bewusst moderat.
-
-**Entschuldigte Abwesenheit ist kein Faktor.** Sie korreliert mit nichts
-(r = −0,03 gegen die Kilometer), sagt also nichts über Einsatz, sondern ist echtes
-Leben. `excused` bleibt im Modell und erscheint als Kontextzeile mit „zählt nicht",
-weil 15 % Abwesenheit im Fenster für ein Gespräch relevant ist — nur eben nicht als
-Vorwurf. Ein Test pinnt, dass sie das Risiko nicht bewegt.
+Datenlage, gleiche Sätze. Sie können auch entlasten („überdurchschnittlich"), und
+`--json` gibt dasselbe maschinenlesbar aus. Die Rechnung bleibt Code, weil der Bot kein
+Claude aufrufen kann und weil eine Liste, die sich zwischen zwei Läufen ändert, in
+einem Rauswurfgespräch nichts wert ist.
 
 **Die Ausgabe ist deutsch**, als einziges Modul unter `hcr2/output/` — der Text geht
-direkt an die Teamleitung. Jeder Faktor trägt in `FACTORS` Kürzel, Gewicht, Erklärung
-und Emoji beieinander, damit Tabellenkopf, Legende und Rechnung nicht auseinander
-laufen können; die Gewichte summieren auf 100 (auch das ein Test). Die Legende steht
-**am Ende**: die Standardausgabe ist ~3000 Zeichen und wird von `send_codeblock` auf
-zwei Nachrichten geteilt, und in die erste gehört die Rangliste mit ihren
-Begründungen, nicht die Spaltenerklärung.
+direkt an die Teamleitung. Die Legende steht **am Ende**: in die erste
+Discord-Nachricht gehört die Rangliste mit ihren Begründungen, nicht das Regelwerk.
 
-**Die Emoji-Spaltenköpfe sind Handarbeit, und zwei Tests halten sie zusammen.** Ein
-Emoji ist *zwei* Anzeigespalten breit, aber für `len()` ein Zeichen — deshalb wird
-die Kopfzelle als `icon + ICON_CELL` (zwei Leerzeichen) gebaut und nicht mit
-`f"{icon:>4}"` rechtsbündig gefüllt, was eine Spalte zu breit herauskäme. Die
-Datenzeilen enthalten kein Emoji und richten sich damit immer aneinander aus; nur der
-Kopf kann verrutschen. Ein Test prüft, dass Kopf, Trennlinie und Datenzeilen
-identische *Anzeige*breite haben (`WIDTH`), ein zweiter, dass jedes Icon ein einzelner
-Codepoint ohne Variation Selector ist — `🛡️` (U+1F6E1 U+FE0F), ZWJ-Sequenzen und
-Skin-Tones rendern je nach Client ein oder zwei Spalten breit, und eine Tabelle, die
-nur manchmal ausgerichtet ist, ist schlechter als eine ohne Emoji.
+Für die Kilometer trägt `fetch_km_for_weeks` **drei** Werte: Schnitt (daraus entstehen
+die Punkte, und er bleibt fair, wenn eine Spielerin weniger Wochen auf dem Konto hat),
+Wochenzahl (der Kopf muss sagen können, worauf der Schnitt ruht) und Summe (weil „495
+km in vier Wochen" greifbarer ist als ein Schnitt). Der **Teamschnitt steht nur im
+Kopf**, nicht in jedem Block — dort wäre er zehnmal dieselbe Zahl; das Verhältnis zu
+ihm überlebt als „überdurchschnittlich".
+
+**Die Spaltenköpfe sind Wörter, keine Emoji** (`Besen / km/W / Perf / Fehlt / Matches`),
+und sie tragen die **Einheit des echten Werts**, nicht den Namen der Achse: in der Zelle
+steht `124`, und `km/W` sagt, dass das Kilometer pro Woche sind. Ein Emoji ist *zwei*
+Anzeigespalten breit, für `len()` aber ein Zeichen, und ZWJ-Sequenzen, Variation
+Selectors und Skin-Tones rendern je nach Client ein oder zwei Spalten breit — eine
+Tabelle, die nur manchmal ausgerichtet ist, ist schlechter als eine ohne Symbole. Zwei
+Tests halten das: einer prüft, dass Kopf, Trennlinie und Datenzeilen identische Breite
+haben (`WIDTH`), der zweite, dass die Kopfzeile reines ASCII ist.
 
 ### Secrets
 

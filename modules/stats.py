@@ -24,9 +24,7 @@ def handle_command(cmd, args):
         return
 
     handlers: dict[str, Callable[[list[str]], None]] = {
-        "avg": _handle_avg,
         "alias": _handle_alias,
-        "rank": _handle_rank,
         "perf": _handle_perf,
         "scatter": _handle_scatter,
         "bdayplot": _handle_bdayplot,
@@ -57,15 +55,6 @@ def _single_optional_int_arg(args, usage: str) -> Optional[int]:
     return value
 
 
-def _handle_avg(args):
-    if args:
-        season_arg = _single_optional_int_arg(args, "Usage: stats avg [season]")
-        if season_arg is None:
-            return
-    else:
-        season_arg = None
-    show_average(season_arg)
-
 
 def _handle_alias(args):
     if args:
@@ -73,15 +62,6 @@ def _handle_alias(args):
         return
     show_plte_alias()
 
-
-def _handle_rank(args):
-    if args:
-        season_arg = _single_optional_int_arg(args, "Usage: stats rank [season]")
-        if season_arg is None:
-            return
-    else:
-        season_arg = None
-    rank_active_plte(season_arg)
 
 
 def _handle_perf(args):
@@ -169,19 +149,72 @@ def _handle_player(args):
     show_player_last_matches(player_id, last_n=last_n)
 
 USAGE_BROOM = (
-    "Usage: stats broom [--last <matches>] [--top <n>] [--all] "
+    "Usage: stats broom [--season <n>] [--last <matches>] [--top <n>] "
     "[--include-leaders] [--json]"
 )
 
 
+# Flags, die broom kennt, und ob sie einen Wert nach sich ziehen. Die Liste steht hier,
+# damit unbekannte Argumente auffallen können - siehe _handle_broom.
+BROOM_FLAGS = {
+    "--season": True,
+    "--last": True,
+    "--top": True,
+    "--include-leaders": False,
+    "--json": False,
+}
+
+
+def _unknown_broom_args(args) -> list[str]:
+    """Alles, was broom nicht kennt.
+
+    Ohne diese Prüfung verschwindet jedes unbekannte Argument stillschweigend: ein
+    getipptes ``--seson 64`` liefert kommentarlos die laufende Saison, und das
+    abgeschaffte ``all`` aus Discord täte so, als hätte es gewirkt. Ein Aufruf, der
+    etwas anderes tut als das, was dasteht, ist in einer Rauswurfliste das Letzte,
+    was man brauchen kann.
+    """
+    unknown: list[str] = []
+    expect_value = False
+    for arg in args:
+        if expect_value:
+            expect_value = False
+            continue
+        if arg in BROOM_FLAGS:
+            expect_value = BROOM_FLAGS[arg]
+            continue
+        unknown.append(arg)
+    return unknown
+
+
 def _handle_broom(args):
-    window = broom_service.WINDOW_MATCHES
-    limit = broom_output.DEFAULT_LIMIT
+    window = None            # None = die Saison ist das Fenster
+    season = None            # None = die aktuelle Saison
+    limit = None             # None = der ganze Topf; --top kürzt die Tabelle
+
+    unknown = _unknown_broom_args(args)
+    if unknown:
+        print(f"❌ Unbekannt: {' '.join(unknown)}")
+        print(USAGE_BROOM)
+        return
 
     raw_window = get_arg_value(args, "--last")
     if raw_window is not None:
         window = parse_int(raw_window, default=None)
         if window is None or window < 1:
+            print(USAGE_BROOM)
+            return
+
+    raw_season = get_arg_value(args, "--season")
+    if raw_season is not None:
+        season = parse_int(raw_season, default=None)
+        if season is None or season < 1:
+            print(USAGE_BROOM)
+            return
+        # Zwei Zeiträume in einem Aufruf: einer von beiden würde still gewinnen, und
+        # welcher, stünde nur im Kopf der Ausgabe.
+        if window is not None:
+            print("❌ --season und --last schließen sich aus.")
             print(USAGE_BROOM)
             return
 
@@ -193,23 +226,25 @@ def _handle_broom(args):
             return
 
     result = broom_service.rank(
+        season=season,
         window=window,
         include_leaders="--include-leaders" in args,
     )
     if "--json" in args:
         broom_output.print_json(result)
         return
-    broom_output.print_result(result, limit=limit, show_all="--all" in args)
+    broom_output.print_result(result, limit=limit)
 
 
 def print_help():
     print_command_help(
         usage="hcr2.py stats <command> [options]",
         commands=[
-            ("perf [season] [--active]", "Show performance ranking"),
-            ("avg [season]", "Show legacy averages for current or given season"),
+            (
+                "perf [season] [--inactive] [--no-skip] [--driven-only]",
+                "Show performance ranking",
+            ),
             ("alias", "Show aliases of active PLTE players sorted by rank"),
-            ("rank [season]", "Show legacy rank of all active PLTE players"),
             ("te <teamevent_id>", "Show rank stats for one team event"),
             ("te-user [n]", "Show relative team-event stats: 0=current, 1=last, 2=previous"),
             ("scatter [N]", "Show average score plot for the last N seasons"),
@@ -220,17 +255,42 @@ def print_help():
             ("score [season] [--skip|--no-skip]", "Show sum of scores per player in season"),
             ("points [season] [--skip|--no-skip]", "Show sum of points per player in season"),
             (
-                "broom [--last <matches>] [--top <n>] [--all] [--include-leaders] [--json]",
+                "broom [--season <n>] [--last <matches>] [--top <n>] "
+                "[--include-leaders] [--json]",
                 "Rank candidates for removal, with reasons (German output)",
             ),
         ],
+        options=[
+            (
+                "--inactive",
+                "perf: add everyone else with a row in that season, members who have\n"
+                "since left included - the only way an old season stays readable,\n"
+                "since the field back then is what the median came from. Brings the\n"
+                "20% minimum with it, because the one-match entries it filters all\n"
+                "come from that group. Without it the list is today's PLTE roster.",
+            ),
+            (
+                "--no-skip",
+                "perf/score/points: also list members who have no score in that\n"
+                "season at all, with '-' at the bottom. The base is TODAY's roster,\n"
+                "not the season, so it rules out --inactive. Skipped is the PLAYER\n"
+                "in the list, never a match in the calculation.",
+            ),
+            (
+                "--driven-only",
+                "perf: stop counting unexcused absence as a zero score. Counting it\n"
+                "is the default on purpose - not showing up is meant to hurt the\n"
+                "figure. This answers the other question: how does she drive when\n"
+                "she drives. broom always measures it this way.",
+            ),
+        ],
         notes=[
-            "perf defaults to players with at least 20% scored matches in season.",
-            "perf --active shows only active PLTE players with more than 0 scored matches.",
             "score and points default to scored active PLTE players.",
-            f"broom looks at the last {broom_service.WINDOW_MATCHES} matches, skips leaders",
-            "and needs at least "
-            f"{broom_service.MIN_MATCHES} driven matches per player to rate her.",
+            "broom looks at the current season, skips leaders, and needs at least",
+            f"{broom_service.MIN_MATCHES} driven matches per player for the yardstick "
+            "cohort.",
+            f"--last <matches> replaces the season with a fixed window "
+            f"(was {broom_service.WINDOW_MATCHES}).",
         ],
     )
 
@@ -286,16 +346,32 @@ def _print_perf_table(entries, limit=None):
 
 # ---------------------------------------------------------------------------
 
-def show_average(season_number=None, active_only=False):
+def show_average(season_number=None, include_inactive=False, list_all=False, driven_only=False):
     """
     Default:
-      - all players with at least 20% scored matches in the season
-      - regardless of whether they are still active / in PLTE
+      - only currently active PLTE players, every one of them with >0 scored matches.
+        This is what a running season is asked about, and it is what the bot shows.
 
-    --active:
-      - only currently active PLTE players
-      - then all with >0 scored matches
+    --inactive:
+      - adds everyone else who has a row in that season, members who have since left
+        included - the only way an old season stays readable, because the field back
+        then is what the median was built from. Brings the 20% minimum with it: the
+        one-match entries that need filtering all come from this group.
+
+    --no-skip (list_all):
+      - fills the list up with today's PLTE players who have no scored match in that
+        season, shown with "-" at the bottom. The base is the *current* roster, so it
+        rules out --inactive: former members with a score and newcomers without one
+        would otherwise share one table.
+
+    --driven-only:
+      - unexcused absence stops counting as a zero score. The default deliberately
+        counts it, because not showing up is meant to hurt the performance figure;
+        this flag answers the other question: how does she drive when she drives.
     """
+    if list_all:
+        include_inactive = False
+    active_only = not include_inactive
     if season_number is None:
         season_number = find_current_season(None)
     if not season_number:
@@ -305,7 +381,10 @@ def show_average(season_number=None, active_only=False):
     s_name, s_div = _get_season_meta(None, season_number)
     stats_output.print_perf_header(season_number, s_name, s_div)
 
-    if not active_only:
+    # Die 20%-Hürde gehört zu --inactive: die Ein-Match-Einträge, gegen die sie gebaut
+    # ist, kommen aus der Gruppe der Ausgetretenen. Im Kadermodus zählt jede mit einem
+    # gefahrenen Match, denn wer im Team ist, gehört in die Liste.
+    if include_inactive:
         total_matches, min_matches = _get_min_required_matches(None, season_number, ratio=0.20)
         stats_output.print_required_matches(total_matches, min_matches)
     else:
@@ -323,6 +402,11 @@ def show_average(season_number=None, active_only=False):
         if score is None or _is_absent(score, points, absent):
             continue
 
+        # --driven-only: nur tatsächlich gefahrene Matches. Ohne das Flag bleibt eine
+        # unentschuldigte Null im Schnitt - sie ist dort ausdrücklich eine Strafe.
+        if driven_only and score <= 0:
+            continue
+
         # Limit to current active PLTE players only for --active.
         if active_only and not _is_active_plte(active, team):
             continue
@@ -336,11 +420,36 @@ def show_average(season_number=None, active_only=False):
     player_scores, player_names, player_counts = _calculate_match_deltas(scores_by_match)
     entries = _build_delta_entries(player_scores, player_names, player_counts, min_matches)
 
-    if not entries:
+    if not entries and not list_all:
         stats_output.print_no_perf_entries(active_only=active_only, min_matches=min_matches)
         return
 
+    if list_all:
+        entries = _append_players_without_scores(entries, player_scores)
+        # Direkt an die Ausgabe, nicht über _print_perf_table: das sortiert erneut und
+        # stolpert über die "-"-Zeilen, die keinen Wert haben. Die Reihenfolge steht
+        # hier schon - Gewertete nach Leistung, der Rest alphabetisch dahinter.
+        # Kein Limit: abzuschneiden hieße, genau die wegzulassen, für die das Flag da ist.
+        stats_output.print_perf_table(entries, limit=None)
+        return
+
     _print_perf_table(entries, limit=PERF_TABLE_LIMIT)
+
+
+def _append_players_without_scores(entries, player_scores):
+    """Aktive PLTE-Ladys ohne Wertung in der Saison, alphabetisch ans Ende.
+
+    Grundmenge ist der *heutige* Kader, nicht die Saison - das Flag beantwortet
+    "wer aus dem Team fehlt hier", nicht "wer war damals dabei".
+    """
+    listed = {name for name, _, _ in entries}
+    without = [
+        (name, None, 0)
+        for pid, name in stats_repo.list_active_plte_players()
+        if pid not in player_scores and name not in listed
+    ]
+    without.sort(key=lambda entry: entry[0].lower())
+    return _sorted_delta_entries(entries) + without
 
 # ---------------------------------------------------------------------------
 
@@ -374,62 +483,16 @@ def show_plte_alias():
 
 # ---------------------------------------------------------------------------
 
-def rank_active_plte(season_number=None):
-    """
-    Rank ALL active PLTE players:
-    - Avg delta vs. median per match (scaled to 4 tracks), same as `avg`
-    - No 80% filter
-    - Players without scores at the end
-    """
-    if season_number is None:
-        season_number = find_current_season(None)
-    if not season_number:
-        stats_output.print_no_matching_season()
-        return
-
-    # All active PLTE players.
-    active_players = stats_repo.list_active_plte_players()
-    if not active_players:
-        stats_output.print_no_active_plte_players()
-        return
-    id_to_name = {pid: name for pid, name in active_players}
-
-    rows = _fetch_season_rows(None, season_number)
-
-    scores_by_match = {}
-    for pid, name, alias, team, active, score, points, absent, match_id, tracks, max_score in rows:
-        if team != "PLTE" or not active:
-            continue
-        if score is None or _is_absent(score, points, absent):
-            continue
-        _append_scored_match(scores_by_match, match_id, pid, name, score, tracks)
-
-    player_scores, _player_names, player_counts = _calculate_match_deltas(scores_by_match)
-
-    with_scores = []
-    without_scores = []
-    for pid, name in id_to_name.items():
-        deltas = player_scores.get(pid)
-        if deltas:
-            avg_delta = round(sum(deltas) / len(deltas))
-            count = player_counts.get(pid, 0)
-            with_scores.append((name, avg_delta, count))
-        else:
-            without_scores.append((name, None, 0))
-
-    with_scores_sorted = sorted(with_scores, key=lambda x: x[1], reverse=True)
-    without_scores_sorted = sorted(without_scores, key=lambda x: x[0].lower())
-    entries = with_scores_sorted + without_scores_sorted
-
-    stats_output.print_perf_table(entries)
-
 # ---------------------------------------------------------------------------
 # Wrapper: stats perf
 # ---------------------------------------------------------------------------
 
+USAGE_PERF = "Usage: stats perf [season] [--inactive] [--no-skip] [--driven-only]"
+
+
 def show_perf(args):
     """
-    stats perf [season] [--active]
+    stats perf [season] [--inactive] [--no-skip] [--driven-only]
 
     default:
       - all players with at least 20% matches in the season
@@ -440,19 +503,36 @@ def show_perf(args):
       - all with >0 matches
     """
     season_number = None
-    active_only = False
+    include_inactive = False
+    list_all = False
+    driven_only = False
 
     for a in args:
-        if a == "--active":
-            active_only = True
+        if a == "--inactive":
+            include_inactive = True
+        elif a == "--active":
+            # War bis 1.13.1 nötig und ist jetzt der Default - weiter angenommen,
+            # damit ein getipptes Kommando nicht mit einer Usage-Zeile antwortet.
+            include_inactive = False
+        elif a == "--no-skip":
+            list_all = True
+        elif a == "--skip":
+            list_all = False
+        elif a == "--driven-only":
+            driven_only = True
         else:
             try:
                 season_number = int(a)
             except ValueError:
-                print("Usage: stats perf [season] [--active]")
+                print(USAGE_PERF)
                 return
 
-    show_average(season_number, active_only=active_only)
+    show_average(
+        season_number,
+        include_inactive=include_inactive,
+        list_all=list_all,
+        driven_only=driven_only,
+    )
 
 # ---------------------------------------------------------------------------
 # Wrapper: stats score / stats points

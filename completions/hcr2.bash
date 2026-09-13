@@ -29,7 +29,7 @@ _hcr2_entity_commands()
         season) echo "list add delete" ;;
         match) echo "add edit show list delete" ;;
         matchscore) echo "add list list-short delete edit" ;;
-        stats) echo "perf avg alias rank te te-user scatter bdayplot battle absent player score points broom" ;;
+        stats) echo "perf alias te te-user scatter bdayplot battle absent player score points broom" ;;
         sheet) echo "create import player donations" ;;
         video) echo "list pull frames roster apply player chest" ;;
         distance) echo "list show weeks add delete" ;;
@@ -73,9 +73,9 @@ _hcr2_flags()
         matchscore:delete) echo "--id" ;;
         matchscore:edit) echo "--id --score --points --pid --absent --checkin" ;;
 
-        stats:perf) echo "--active" ;;
+        stats:perf) echo "--inactive --no-skip --driven-only" ;;
         stats:score|stats:points) echo "--skip --no-skip" ;;
-        stats:broom) echo "--last --top --all --include-leaders --json" ;;
+        stats:broom) echo "--season --last --top --include-leaders --json" ;;
 
         video:list|video:roster) echo "--match" ;;
         video:pull) echo "--match --file" ;;
