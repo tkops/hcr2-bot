@@ -27,7 +27,7 @@ _hcr2_entity_commands()
         player) echo "list list-active list-leader list-absent bday add edit activate deactivate delete show grep away back" ;;
         teamevent) echo "add list show edit delete" ;;
         season) echo "list add delete" ;;
-        match) echo "add edit show list delete" ;;
+        match) echo "add edit show recap list delete" ;;
         matchscore) echo "add list list-short delete edit" ;;
         stats) echo "perf alias te te-user scatter bdayplot battle absent player score points broom" ;;
         sheet) echo "create import player donations" ;;
@@ -66,6 +66,7 @@ _hcr2_flags()
         match:add) echo "--opponent --teamevent --season --start --score --scoreopp" ;;
         match:edit) echo "--id --teamevent --season --start --opponent --score --scoreopp" ;;
         match:show|match:delete) echo "--id" ;;
+        match:recap) echo "--id --json" ;;
         match:list) echo "--season --all" ;;
 
         matchscore:add) echo "--match --player --score --points --absent --checkin" ;;

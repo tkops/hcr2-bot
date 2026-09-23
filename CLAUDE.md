@@ -338,6 +338,60 @@ Die Punktsumme stimmt auch mitten im Match mit der Kopfsumme (an einem echten
 Zwischenstand geprüft: 46 Zeilen, exakt 589), taugt hier also weiter als
 Vollständigkeitsprobe — nur ist sie im Bericht eine Warnung, weil nichts geschrieben wird.
 
+### Podest und Recap nach dem Match
+
+Nach jedem eingetragenen Match gehen **zwei** Posts raus, in zwei Kanäle, die
+`bot.py` nie anfasst: das Siegerpodest in `PODIUM_CHANNEL_ID` und ein kurzer
+Text in `TEAMCHAT_CHANNEL_ID`. Beide stehen in `secrets_config.CONFIG` je Modus und
+sind wie `birthday` **reine Schreibkanäle** — `on_message` hört nur in `CHANNEL_IDS`
+und `ADMIN_CHANNEL_IDS`, ein Kommando unter so einem Post tut also nichts.
+Das Podest ist ein **eigener Bildschirm** der Aufnahme (beide Top 3 nebeneinander,
+Figuren auf Podesten, `TOUCH TO CONTINUE`), nicht der Endergebnis-Screen — er liegt
+zwischen Ergebnisliste und Belohnungen und dauert nur Sekunden.
+Geschrieben wird über `scripts/post_discord.py`, das dafür Anhänge gelernt hat
+(`--image`, multipart, 10 MB Deckel vor dem Request statt HTTP 413 danach).
+
+**Das Podest wird nicht doppelt gepostet.** `--skip-if-image-since <datum>` sieht vor
+dem Senden in den Kanal: liegt dort seit dem Match schon ein Bild — meist von Hand
+gepostet von der Person, die aufgenommen hat —, wird nichts gesendet, mit Exit-Code 0,
+denn das ist kein Fehlschlag. Ist der **Verlauf nicht lesbar**, wird dagegen **nicht**
+gepostet (Exit 1): „konnte nicht nachsehen" ist kein „da ist keins", und die Prüfung
+würde sonst genau den Doppelpost durchwinken, gegen den sie gebaut ist. Das braucht
+`Read Message History` im Zielkanal.
+
+**`--image` liest nie `stdin`**, auch nicht ohne Terminal. Die Bildunterschrift ist
+optional, und der alte Pfad („kein `--text`? dann eben `stdin`") hing genau in dem
+Fall, für den das Ganze gebaut ist: der Skill ruft das Skript ohne TTY auf.
+
+**`match recap --id <id>` liefert Fakten, keine Prosa** — und das ist das Gegenstück
+zu [[broom]], wo die Sätze absichtlich deterministische Vorlagen sind. Dort geht die
+Liste in ein Rauswurfgespräch und darf sich zwischen zwei Läufen nicht ändern; hier
+liest dasselbe Team alle zwei Tage denselben Kanal, und ein Template ist beim fünften
+Mal Tapete. Also: die **Rechnung** steht im Code (`hcr2/services/recap.py`), die
+**Formulierung** macht das Modell, und der Skill sagt, was es behaupten darf.
+
+Drei Maßstäbe, ohne die das Blatt nur Zahlen wäre:
+
+- **Ein Treppchenplatz sagt erst etwas neben der Frage, wie oft sie dort steht.**
+  `podiums_in_window` misst über `PODIUM_WINDOW` (20) Matches; an der echten DB steht
+  Turbo 20 von 20 mal oben und Lebe 4 von 20. Beide jedes Mal gleich zu feiern,
+  entwertet das Lob für die Seltene — deshalb trägt das Blatt `notable`
+  (`RARE_PODIUM_SHARE`, ein Viertel des Fensters) und `first_ever`, und die Ausgabe
+  schreibt `<- say this` bzw. „a regular up here" direkt an die Zeile.
+- **Steigerung wird gegen das Tempo des Teams gemessen**, wie im Zwischenstand: innerhalb
+  eines Events sind die späteren Matches systematisch besser, gegen glatte 100 %
+  „steigerte sich" die halbe Mannschaft. Dazu steht `vs_match_median` daneben — 1,5×
+  der eigenen Form kann immer noch weit unter dem Median liegen, das ist eine Erholung
+  und keine Spitzenleistung.
+- **Score-Summen vergleichen nur innerhalb eines Team-Events.** Andere Strecken, andere
+  Größenordnung: an derselben Mannschaft 2,27 Mio. im einen Event und 1,62 Mio. im
+  nächsten. Deshalb trägt nur `event_matches` die Summen, und nichts außerhalb.
+
+Was **nicht** in den Teamchat geht, steht im Skill: Namen von Fehlenden. Der Kanal ist
+öffentlich fürs Team, die Fehlzeiten gehören in `stats broom` im Leader-Channel. Das
+Faktenblatt trennt die Gründe trotzdem sauber (`away` / `checkin` / `no-show`), weil
+„alle sind gefahren" sonst nicht prüfbar wäre.
+
 ### Team screen video (player-video)
 
 `video player frames` / `video player apply` read `Ladys.mp4` from `Power-Ladys-Scores/Ladys/`
@@ -840,7 +894,9 @@ haben (`WIDTH`), der zweite, dass die Kopfzeile reines ASCII ist.
 ### Secrets
 
 `secrets_config.py` is gitignored and exports `CONFIG` (per-mode Discord token, channel and role IDs)
-and `NEXTCLOUD_AUTH` (`(user, password)`). `bot.py` and `hcr2/integrations/nextcloud.py` import it at
+and `NEXTCLOUD_AUTH` (`(user, password)`). Besides the channels the bot listens in, `CONFIG` carries
+the write-only ones: `BIRTHDAY_CHANNEL_ID`, `PODIUM_CHANNEL_ID` and `TEAMCHAT_CHANNEL_ID` — a missing
+one is reported by name, because those three are filled in by hand per server. `bot.py` and `hcr2/integrations/nextcloud.py` import it at
 module load, so those two fail on a fresh checkout without it. Tests avoid importing them.
 
 ## Conventions

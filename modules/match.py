@@ -5,10 +5,12 @@ from typing import Callable, Optional
 
 from dateutil.relativedelta import relativedelta
 
+from hcr2.output import recap as recap_output
 from hcr2.output.deletions import print_delete_blocked, print_delete_not_found
 from hcr2.output.matches import print_match_detail, print_match_list
 from hcr2.repositories import matches as match_repo
 from hcr2.services import deletions as deletions_service
+from hcr2.services import recap as recap_service
 from modules.common import (
     get_arg_value,
     is_help_request,
@@ -31,6 +33,7 @@ USAGE_EDIT = (
 )
 USAGE_SHOW = "Usage: match show <id> | --id <id>"
 USAGE_DELETE = "Usage: match delete <id> | --id <id>"
+USAGE_RECAP = "Usage: match recap <id> | --id <id> [--json]"
 
 
 def handle_command(cmd: str, args: list[str]) -> None:
@@ -43,6 +46,7 @@ def handle_command(cmd: str, args: list[str]) -> None:
         "list": _handle_list,
         "edit": _handle_edit,
         "show": _handle_show,
+        "recap": _handle_recap,
         "delete": _handle_delete,
     }
     handler = handlers.get(cmd)
@@ -60,6 +64,7 @@ def print_help() -> None:
             ("add <opponent> [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--score N] [--scoreopp N]", "Add one match"),
             ("edit --id ID [--teamevent ID] [--season NUM] [--start YYYY-MM-DD] [--opponent NAME] [--score N] [--scoreopp N]", "Edit one match"),
             ("show --id <id>", "Show one match"),
+            ("recap --id <id> [--json]", "Facts for a team-chat post about a finished match"),
             ("list [--season <n>|--all]", "List matches"),
             ("delete --id <id>", "Delete one match"),
         ],
@@ -68,6 +73,7 @@ def print_help() -> None:
             "Default --teamevent is the latest team event by ISO year/week.",
             "Default --season is the current season.",
             "Default --start is the last match date + 2 days, or the first day of the current month.",
+            "recap collects facts (podium, improvements, event context) - the text is written from them.",
             "Legacy positional aliases are still accepted for list, show and delete.",
         ],
     )
@@ -109,6 +115,24 @@ def _handle_show(args: list[str]) -> None:
         print(USAGE_SHOW)
         return
     show_match(match_id)
+
+
+def _handle_recap(args: list[str]) -> None:
+    match_id = _extract_match_id([arg for arg in args if arg != "--json"])
+    if match_id is None:
+        print(USAGE_RECAP)
+        return
+    result = recap_service.build_recap(match_id)
+    if result.status == "NO_MATCH":
+        recap_output.print_no_match(match_id)
+        return
+    if result.status == "NO_SCORES":
+        recap_output.print_no_scores(match_id)
+        return
+    if "--json" in args:
+        recap_output.print_json(result)
+        return
+    recap_output.print_recap(result)
 
 
 def _handle_delete(args: list[str]) -> None:

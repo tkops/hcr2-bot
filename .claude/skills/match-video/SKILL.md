@@ -1,6 +1,6 @@
 ---
 name: match-video
-description: Ergebnisse eines Team-Matches aus dem Standings-Video auslesen - beim Endstand als matchscore in die DB, beim Zwischenstand (Uhr läuft noch) als Bericht ohne Schreiben. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen", "Zwischenstand", "wer ist noch nicht gefahren", "wer kann sich noch steigern").
+description: Ergebnisse eines Team-Matches aus dem Standings-Video auslesen - beim Endstand als matchscore in die DB, beim Zwischenstand (Uhr läuft noch) als Bericht ohne Schreiben; danach das Siegerpodest-Bild und den Recap-Text nach Discord posten. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen", "Zwischenstand", "wer ist noch nicht gefahren", "wer kann sich noch steigern") - und ebenso, wenn nur gepostet werden soll ("Podest posten", "Siegerpodest", "Recap", "schreib was in den Teamchat", "Ergebnis ins Team posten").
 ---
 
 # Match-Video auswerten
@@ -189,6 +189,131 @@ bemerkt er nur, wenn dabei ein Score-Ausreißer entsteht.
 
 Kurz auflisten: unsichere Zuordnungen, 0/0-Fälle, und ob beide Gegenproben sauber waren.
 Danach die Auffälligkeiten aus Schritt 8 mit deiner Einschätzung.
+
+### 10. Siegerpodest posten
+
+Nach jedem eingetragenen Match geht das Siegerpodest in den Podest-Kanal. Das ist ein
+**eigener Bildschirm** in derselben Aufnahme, nicht der Endergebnis-Screen: oben Event,
+beide Teamnamen mit Summen und das `WINNER!`-Abzeichen, darunter die Top 3 **beider**
+Mannschaften nebeneinander, unten die Figuren auf ihren Podesten und
+`TOUCH TO CONTINUE`.
+
+Er steht **zwischen** dem ersten Aufschlagen der Endergebnisliste und den
+Belohnungsbildschirmen und ist nur wenige Sekunden lang zu sehen. Ihn im Kontaktbogen
+zu suchen ist billiger, als Frames einzeln zu öffnen:
+
+```bash
+ffmpeg -i "tmp/video/<id>/frames/frame_%04d.jpg" -vf "scale=320:-2,tile=5x8" -frames:v 1 kontakt.jpg
+```
+
+(Pfad zu ffmpeg über `resolve_ffmpeg()`, siehe Schritt 1.) Der Podest-Frame ist im
+Kontaktbogen sofort zu erkennen. Dann genau diesen Zeitpunkt in voller Auflösung
+nachschneiden — die Frames aus Schritt 1 sind zum Lesen heruntergerechnet und für
+einen Post zu grob:
+
+```bash
+python3 hcr2.py video frames --match <id> --start 00:00:09 --duration 1 --fps 1 --width 0
+```
+
+Das **überschreibt die Frames aus Schritt 1**, also erst machen, wenn die Lesung steht.
+
+- **Das Bild vor dem Posten mit dem Read-Tool ansehen.** Baut sich das Podest noch auf
+  (Figuren fehlen, Countdown statt `TOUCH TO CONTINUE`), ist es eine Sekunde zu früh.
+- **Nicht zuschneiden, außer der Nutzer will es.** `--crop` rechnet in den Pixeln der
+  Aufnahme, und die hängen am Gerät (hier 1170×2532, hochkant gedreht). Ein fester
+  Crop stimmt beim nächsten Handy nicht mehr.
+
+Posten:
+
+```bash
+python3 scripts/post_discord.py --mode <dev|prod> --channel podium \
+    --image tmp/video/<id>/frames/frame_0001.jpg \
+    --skip-if-image-since <matchdatum> --dry-run
+```
+
+(Nach dem Nachschneiden oben liegt dort genau ein Frame, deshalb `frame_0001.jpg`.)
+
+**`--skip-if-image-since` gehört immer dazu.** Das Podest postet meistens schon von
+Hand, wer die Aufnahme gemacht hat; ein zweites Bild ist nur Rauschen. Mit dem
+Matchdatum (aus `match show --id <id>`) schaut das Skript vorher in den Kanal und
+meldet `⏭️ … already posted a picture …`, wenn dort seit dem Match schon eines liegt —
+dann wird **nichts** gesendet, und das ist kein Fehler. Kann es den Verlauf nicht lesen
+(fehlende Berechtigung), bricht es mit ❌ ab statt zu posten: „konnte nicht nachsehen"
+ist kein „da ist keins".
+
+**`--mode` muss zum Checkout passen**, in dem du gerade arbeitest — dev-Checkout →
+`--mode dev`. dev und prod sind verschiedene Server, und ein Post lässt sich nicht
+zurückholen. Erst `--dry-run` zeigen, das Bild zeigen, **auf Bestätigung warten**, dann
+ohne `--dry-run` senden. Eine Bildunterschrift ist optional (`--text`), üblich ist keine
+— der Recap-Text aus Schritt 11 steht ohnehin woanders.
+
+### 11. Recap in den Teamchat
+
+In den internen Teamchat geht ein kurzer, **positiver** Text zum Match. Die Zahlen dafür
+kommen aus der DB, nicht aus dem Video und nicht aus dem Gedächtnis:
+
+```bash
+python3 hcr2.py match recap --id <id>
+```
+
+Das Faktenblatt (englisch) liefert Ergebnis und Abstand, Teilnahme, das Treppchen samt
+der Angabe **wie oft die drei sonst dort stehen**, Steigerungen gegen die eigene Form
+(das Tempo des ganzen Teams ist herausgerechnet), persönliche Bestleistungen, den
+Verlauf des Team-Events und frühere Begegnungen mit dem Gegner. `--json` gibt dasselbe
+maschinenlesbar.
+
+**Den Text schreibst du, nicht der Befehl** — er soll sich jedes Mal anders lesen. Was
+dabei gilt:
+
+- **Nur was im Faktenblatt steht.** Keine Zahl schätzen, keine Steigerung behaupten, die
+  dort nicht auftaucht. „Alle sind gefahren" nur, wenn das Blatt es sagt.
+- **Keine Namen von Fehlenden, keine Kritik, kein „leider".** Der Kanal ist der
+  Teamchat; wer nicht gefahren ist, wird dort nicht benannt — dafür gibt es
+  `stats broom` im Leader-Channel. Auch bei einer Niederlage bleibt der Ton positiv:
+  knapper Ausgang, starke Einzelleistungen, der Verlauf im Event.
+- **Das Treppchen kommt vor, aber gewichtet.** Wer selten oder zum ersten Mal oben
+  steht (`<- say this`), bekommt den eigenen Satz — steht dabei `match N for her`, ist
+  *das* die Geschichte („Platz 3 in ihrem vierten Match"). Die anderen beiden werden mit
+  Namen und Score genannt, mehr nicht. Das ist der Kern des Postings: Lob wird wertlos,
+  wenn es jedes Mal dieselbe Person trifft.
+- **Kein Geschlecht zuschreiben.** Das Team heißt Power Ladys, es fahren aber auch
+  Männer mit, und in der DB steht dazu nichts — jedes „sie" und jedes „ihr" wäre
+  geraten. Das Faktenblatt sagt deshalb „the player" und „their", und im Deutschen
+  hängt es an drei Stellen:
+  - **Possessivpronomen**: nicht „ihren Schnitt", sondern „den eigenen Schnitt"; nicht
+    „in ihrem vierten Match", sondern „erst das vierte Match".
+  - **Personalpronomen**: den Namen wiederholen oder den Satz umbauen — „Der Moment des
+    Abends gehört X" statt „sie hat …".
+  - **Bezeichnungen**: kein „die Neue", „der Neuzugang", „die Fahrerin"; „neu im Team"
+    oder „ganz vorne" sagt dasselbe.
+
+  „Ladys" bleibt als Kurzform des **Teamnamens** erlaubt und meint alle — so redet die
+  Leitung auch im Channel (dieselbe Regel wie in `stats broom`).
+- **Keine Etiketten für Personen.** „Das vertraute Duo", „die üblichen Verdächtigen",
+  „wie immer ganz oben" — solche Wendungen beschreiben nicht die Leistung, sondern
+  hängen jemandem ein Schild um, und das kann im Teamchat als Spitze ankommen. `regular`
+  im Faktenblatt ist eine Aussage über die *Liste*, keine Vokabel für den Text: Name,
+  Zahl, fertig. Dasselbe gilt für Vergleiche zwischen zwei Ladys.
+- **Eine bis drei Steigerungen**, mit absoluten Scores statt Prozenten. Steht bei einer
+  ein großer Abstand unter dem Match-Median dabei, ist es eine Erholung und keine
+  Spitzenleistung — dann entsprechend formulieren.
+- **Alte Zahlen nur, wenn sie etwas sagen.** Eine Bestleistung, eine Serie im Event, ein
+  Gegner, gegen den man zuletzt verloren hatte. Sonst weglassen. Score-**Summen** nur
+  innerhalb desselben Team-Events vergleichen — andere Strecken, andere Größenordnung.
+- **Kurz und abwechselnd.** Vier bis acht Sätze, unter 1200 Zeichen, kein Codeblock
+  (wird am Handy gelesen). Nicht jedes Mal mit dem Ergebnis anfangen — mal mit einer
+  Person, mal mit dem Event, mal mit dem Endspurt.
+
+Text in eine Datei schreiben und von dort posten, damit der Nutzer ihn vorher liest:
+
+```bash
+python3 scripts/post_discord.py --mode <dev|prod> --channel teamchat \
+    --file tmp/video/<id>/recap.md --dry-run
+```
+
+Wieder: Text zeigen, **auf Bestätigung warten**, dann ohne `--dry-run`. Wenn der Nutzer
+etwas anders haben will, wird der Text geändert und nicht nachträglich ein zweiter Post
+hinterhergeschickt.
 
 ## Modus Zwischenstand (die Uhr läuft noch)
 
