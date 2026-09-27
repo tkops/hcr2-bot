@@ -228,16 +228,25 @@ Posten:
 ```bash
 python3 scripts/post_discord.py --mode <dev|prod> --channel podium \
     --image tmp/video/<id>/frames/frame_0001.jpg \
-    --skip-if-image-since <matchdatum> --dry-run
+    --skip-if-image-since <matchende> --dry-run
 ```
 
 (Nach dem Nachschneiden oben liegt dort genau ein Frame, deshalb `frame_0001.jpg`.)
 
 **`--skip-if-image-since` gehört immer dazu.** Das Podest postet meistens schon von
 Hand, wer die Aufnahme gemacht hat; ein zweites Bild ist nur Rauschen. Mit dem
-Matchdatum (aus `match show --id <id>`) schaut das Skript vorher in den Kanal und
-meldet `⏭️ … already posted a picture …`, wenn dort seit dem Match schon eines liegt —
-dann wird **nichts** gesendet, und das ist kein Fehler. Kann es den Verlauf nicht lesen
+Matchende schaut das Skript vorher in den Kanal und meldet
+`⏭️ … already posted a picture …`, wenn dort seit dem Ende schon eines liegt — dann
+wird **nichts** gesendet, und das ist kein Fehler. **Sieh dir das gefundene Bild
+trotzdem an** (`scripts/read_discord.py --channel <podium-id> --json` liefert die
+Anhang-URL): stehen dort Event und Gegner dieses Matches?
+
+**Matchende = `Start` aus `match show --id <id>` + 2 Tage**, nicht das Startdatum. Ein
+Match läuft zwei Tage, das Podest entsteht erst am Ende — und das Ende des
+*vorigen* Matches ist genau der Start dieses. Mit dem Startdatum fällt das Podest
+des Vormatchs ins Fenster und dieses wird fälschlich übersprungen (so geschehen bei
+Match 822: das Bild vom 25.09. war Thrust Issues/Match 821). Die Beschriftung der
+Hand-Posts („25. September 2026") ist der Tag des Endes, nicht des Starts. Kann es den Verlauf nicht lesen
 (fehlende Berechtigung), bricht es mit ❌ ab statt zu posten: „konnte nicht nachsehen"
 ist kein „da ist keins".
 
