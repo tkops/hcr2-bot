@@ -664,6 +664,7 @@ def rank(
                 drops=drop_count,
                 worst_drop=worst_drop,
                 matches_since_driven=state.missed_since_driven,
+                has_discord=member.has_discord,
                 factors=[],
                 reasons=[],
             )

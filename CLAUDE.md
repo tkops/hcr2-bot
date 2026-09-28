@@ -702,6 +702,13 @@ zwei; ein Test pinnt das. Die Marge ist seit 1.24 dünn (1990 ist die Grenze): d
 Perf-Legende braucht als Staffel drei Zeilen statt einer. Wer dort noch etwas anfügt,
 kippt den Default in zwei Nachrichten.
 
+**Die letzte Spalte `DC` trägt ein `x`, wenn im Profil ein Discord-Name steht** (leer,
+nur Leerzeichen und `-` zählen nicht). Reine Info für die Leitung — ist sie über Discord
+erreichbar? —, sie zählt nirgends mit und steht deshalb **hinter** den Punkten, damit
+Besen und Achsen nachaddierbar nebeneinander bleiben. Die Spalte kostete ~50 Zeichen und
+schob S65 auf 2012; bezahlt ist das mit dem kürzeren Einleitungssatz der Legende
+(„je mehr, desto weiter oben"), seitdem **~1960 Zeichen**.
+
 **Die Tabelle zeigt den echten Wert, die Punkte stehen in Klammern daneben.** Mit „124
 km/Woche" kann eine Leitung in ein Gespräch gehen, mit einer 2 nicht — deshalb führt der
 Wert. Die Klammer sorgt dafür, dass sich die Gesamtzahl trotzdem nachaddieren lässt

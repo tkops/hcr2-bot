@@ -1222,14 +1222,47 @@ class BroomOutputTests(BroomTestCase):
         result = broom_service.rank()
         candidate = result.candidates[0]
         self.assertEqual(
-            int(broom_output._row(candidate, 1)[-1]), candidate.points_total
+            int(broom_output._row(candidate, 1)[-2]), candidate.points_total
         )
         text = self.capture_stdout(lambda: broom_output.print_result(result))
         header = next(l for l in text.splitlines() if "Lady" in l)
-        self.assertTrue(header.rstrip().endswith(broom_service.TIEBREAK_LABEL), header)
+        self.assertIn(f" {broom_service.TIEBREAK_LABEL} ", header)
         # Und die Legende sagt, in welche Richtung er wirkt.
         self.assertIn("Bei Gleichstand", text)
         self.assertIn("weiter unten", text)
+
+    def test_the_discord_column_marks_a_stored_discord_name(self) -> None:
+        """Ein ``x`` genau dann, wenn im Profil ein Discord-Name steht - leer, nur
+        Leerzeichen und der Anzeige-Platzhalter ``-`` zählen nicht als hinterlegt."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "UPDATE players SET discord_name = ? WHERE id = ?",
+                [("p.one", 101), ("  ", 102), ("-", 103)],
+            )
+        for player_id in (101, 102, 103, 104):
+            self._no_show(player_id, 3)
+        result = broom_service.rank()
+        marks = {
+            c.player_id: broom_output._row(c, 1)[-1].strip() for c in result.candidates
+        }
+        self.assertEqual(marks[101], "x")
+        for player_id in (102, 103, 104):
+            self.assertEqual(marks[player_id], "", player_id)
+        text = self.capture_stdout(lambda: broom_output.print_result(result))
+        header = next(l for l in text.splitlines() if "Lady" in l)
+        self.assertTrue(header.rstrip().endswith(broom_output.DISCORD_LABEL), header)
+        self.assertIn(f"{broom_output.DISCORD_LABEL}: x = Discord", text)
+
+    def test_the_discord_column_does_not_count(self) -> None:
+        """Reine Info für die Leitung: ein hinterlegter Discord-Name bewegt keinen
+        einzigen Besenpunkt."""
+        self._no_show(101, 3)
+        before = {c.player_id: c.besen for c in broom_service.rank().all_rated}
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE players SET discord_name = 'someone'")
+        after = broom_service.rank()
+        self.assertTrue(all(c.has_discord for c in after.all_rated))
+        self.assertEqual({c.player_id: c.besen for c in after.all_rated}, before)
 
     def test_the_points_in_the_table_add_up_to_the_total(self) -> None:
         """Die Klammern müssen sich zur Gesamtzahl nachaddieren lassen - das ist der

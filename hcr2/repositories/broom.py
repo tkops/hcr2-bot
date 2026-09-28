@@ -63,7 +63,8 @@ def fetch_roster() -> list[RosterMember]:
     with connect_dict_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, name, garage_power, is_leader
+            SELECT id, name, garage_power, is_leader,
+                   TRIM(COALESCE(discord_name, '')) NOT IN ('', '-') AS has_discord
             FROM players
             WHERE active = 1 AND UPPER(team) = 'PLTE'
             ORDER BY name COLLATE NOCASE
@@ -75,6 +76,7 @@ def fetch_roster() -> list[RosterMember]:
             name=row["name"],
             garage_power=int(row["garage_power"] or 0),
             is_leader=bool(row["is_leader"]),
+            has_discord=bool(row["has_discord"]),
         )
         for row in rows
     ]

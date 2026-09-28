@@ -1,6 +1,7 @@
-VERSION = "1.29.0"
+VERSION = "1.30.0"
 
 HISTORY = [
+    ("1.30.0", "2026-09-28", "broom: neue Spalte DC - x, wenn im Profil ein Discord-Name hinterlegt ist; zaehlt nicht mit"),
     ("1.29.0", "2026-09-23", "Nach dem Match zwei Posts: Siegerpodest-Bild in den Podest-Kanal (mit Pruefung, ob schon jemand eins gepostet hat) und ein Recap-Text in den Teamchat; match recap liefert dafuer die Fakten - Treppchen mit Haeufigkeit und Matchzahl, Steigerungen gegen das Teamtempo, Bestleistungen - und schreibt niemandem ein Geschlecht zu; post_discord.py kann Bilder anhaengen und kennt die Kanaele podium und teamchat"),
     ("1.28.0", "2026-09-13", "broom: Perf als absolute Staffel statt Platz im Topf, --top setzt die Topfgroesse (--top 50 = ganzer Kader), Leader immer dabei, --include-leaders entfaellt"),
     ("1.27.1", "2026-09-13", "broom: Erklaerungen unter der Tabelle brechen auf deren Breite um, statt seitlich wegzulaufen"),

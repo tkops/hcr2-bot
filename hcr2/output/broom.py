@@ -54,9 +54,16 @@ COLUMN_WIDTHS = {
 TIEBREAK_WIDTH = 6
 NAME_WIDTH = 13
 BESEN_WIDTH = 5
-# Neun Zellen (#, Name, Besen, fünf Achsen, Tiebreaker), also acht Trennzeichen.
+# Ob die Leitung sie über Discord erreicht: ein ``x``, wenn im Profil ein
+# Discord-Name steht. Die Spalte steht **hinter** den Punkten, weil sie nicht
+# mitzählt - zwischen Besen und den Achsen würde sie das Nachaddieren stören.
+DISCORD_LABEL = "DC"
+DISCORD_WIDTH = 2
+# Zehn Zellen (#, Name, Besen, fünf Achsen, Tiebreaker, Discord), also neun
+# Trennzeichen.
 WIDTH = (
-    2 + NAME_WIDTH + BESEN_WIDTH + sum(COLUMN_WIDTHS.values()) + TIEBREAK_WIDTH + 8
+    2 + NAME_WIDTH + BESEN_WIDTH + sum(COLUMN_WIDTHS.values()) + TIEBREAK_WIDTH
+    + DISCORD_WIDTH + 9
 )
 # Ein zu kurzes Fenster macht aus dem Anhang eine Kaderliste, die nichts sagt, was
 # die Kopfzeile nicht schon gesagt hat.
@@ -117,6 +124,7 @@ def print_result(result: BroomResult) -> None:
                 for key, label, _ in broom_service.FACTORS
             ],
             f"{broom_service.TIEBREAK_LABEL:>{TIEBREAK_WIDTH}}",
+            f"{DISCORD_LABEL:>{DISCORD_WIDTH}}",
         ],
         rows=[_row(candidate, index) for index, candidate in enumerate(rows, start=1)],
         width=WIDTH,
@@ -200,8 +208,8 @@ def _print_legend(result: BroomResult) -> None:
 
     print()
     _print_wrapped(
-        "Besenpunkte – je mehr Punkte, desto weiter oben steht man. In der Tabelle "
-        "steht der echte Wert, die Punkte daneben in Klammern. So kommen sie zusammen:"
+        "Besenpunkte – je mehr, desto weiter oben. In der Tabelle steht der echte "
+        "Wert, die Punkte in Klammern:"
     )
     for label, line in rows:
         _print_wrapped(line, first=f"  {label:<{label_width}}  ")
@@ -221,6 +229,7 @@ def _print_legend(result: BroomResult) -> None:
         f"Bei Gleichstand entscheiden die {svc.TIEBREAK_LABEL} der Saison – wer mehr "
         f"eingefahren hat, steht weiter unten."
     )
+    _print_wrapped(f"{DISCORD_LABEL}: x = Discord-Name im Profil hinterlegt.")
 
 
 def _print_wrapped(text: str, *, first: str = "", emoji: int = 0) -> None:
@@ -284,6 +293,7 @@ def _row(candidate: BroomCandidate, index: int) -> list[str]:
         f"{candidate.besen:>{BESEN_WIDTH}}",
         *[f"{cells.get(key, ''):>{COLUMN_WIDTHS[key]}}" for key in ORDER],
         f"{candidate.points_total:>{TIEBREAK_WIDTH}}",
+        f"{'x' if candidate.has_discord else '':>{DISCORD_WIDTH}}",
     ]
 
 
