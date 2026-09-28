@@ -24,6 +24,7 @@ class RosterMember:
     name: str
     garage_power: int
     is_leader: bool
+    has_discord: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,9 @@ class BroomCandidate:
     performance_rank: int = 0    # Platz im Kader nach Fahrleistung, 1 = schwächste
     in_pool: bool = False        # im Topf - über Fehltermin oder über Leistung
     pool_reason: str = ""        # "unexcused" | "performance" | "" 
+    # Discord-Name im Profil hinterlegt - reine Info für die Leitung (erreichbar oder
+    # nicht), zählt nirgends mit.
+    has_discord: bool = False
     factors: list[BroomFactor] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
