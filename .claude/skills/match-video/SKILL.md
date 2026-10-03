@@ -1,6 +1,6 @@
 ---
 name: match-video
-description: Ergebnisse eines Team-Matches aus dem Standings-Video auslesen - beim Endstand als matchscore in die DB, beim Zwischenstand (Uhr läuft noch) als Bericht ohne Schreiben; danach das Siegerpodest-Bild und den Recap-Text nach Discord posten. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen", "Zwischenstand", "wer ist noch nicht gefahren", "wer kann sich noch steigern") - und ebenso, wenn nur gepostet werden soll ("Podest posten", "Siegerpodest", "Recap", "schreib was in den Teamchat", "Ergebnis ins Team posten").
+description: Ergebnisse eines Team-Matches aus dem Standings-Video auslesen - beim Endstand als matchscore in die DB, beim Zwischenstand (Uhr läuft noch) als Bericht ohne Schreiben; danach das Siegerpodest-Bild samt Tabellenstand und Matchpunkten sowie den Recap-Text nach Discord posten. Immer nutzen, wenn zu einem Match Ergebnisse eingetragen, ausgewertet oder importiert werden sollen und kein Excel-Sheet genannt ist - egal wie es formuliert ist ("/match-video 801", "Video auswerten", "Ergebnisse aus dem Video", "schreib die Daten für Match 801 in die DB", "trag Match 801 ein", "Match 801 auswerten", "neues Video ist hochgeladen", "Zwischenstand", "wer ist noch nicht gefahren", "wer kann sich noch steigern") - und ebenso, wenn nur gepostet werden soll ("Podest posten", "Siegerpodest", "Recap", "schreib was in den Teamchat", "Ergebnis ins Team posten").
 ---
 
 # Match-Video auswerten
@@ -255,6 +255,55 @@ ist kein „da ist keins".
 zurückholen. Erst `--dry-run` zeigen, das Bild zeigen, **auf Bestätigung warten**, dann
 ohne `--dry-run` senden. Eine Bildunterschrift ist optional (`--text`), üblich ist keine
 — der Recap-Text aus Schritt 11 steht ohnehin woanders.
+
+### 10a. Tabellenstand und Matchpunkte unter das Podest
+
+Direkt unter das Podestfoto gehen in denselben Kanal **zwei** Textnachrichten, genau
+das, was der Bot auf `.stats` und `.x <id>` antworten würde:
+
+| Bot | CLI | Inhalt |
+|---|---|---|
+| `.stats` | `python3 hcr2.py stats perf <season>` | aktueller Tabellenstand der Saison |
+| `.x <id>` | `python3 hcr2.py matchscore list-short --match <id>` | Score und Punkte dieses Matches |
+
+**Die Saison immer ausdrücklich mitgeben**, und zwar die aus `match show --id <id>`.
+`.stats` ohne Zahl nimmt die Saison nach Kalender, und die kann schon weiter sein als
+die des Matches — wer am 1. ein Match vom Vormonat nachträgt, bekäme sonst die neue,
+noch leere Saison (`⚠️ No match scores found.`).
+
+**Die Saison folgt dem Startmonat, nicht dem Team-Event.** Ein Event kann über die
+Saisongrenze laufen: Match 824 war das dritte Light-the-Fuse-Match nach 822/823 aus
+Saison 65, startete aber am 01.10. und gehört zu Saison 66. Das Datum, das `match add`
+ableitet, nicht von Hand auf den Vormonat ziehen.
+
+**Ausnahme: nach dem ersten Match einer Saison geht nur `.x` raus.** Ein Tabellenstand
+über ein einziges Match sagt nichts. Ob es das erste ist, zeigt
+`python3 hcr2.py match list --season <season>` (`📊 1 matches in Season …`).
+
+Beide Ausgaben in je eine Datei schreiben, jeweils in einen Codeblock eingefasst
+(```` ``` ```` davor und danach). Discord-Clients richten Tabellen sonst nicht aus,
+und der Bot postet sie genauso:
+
+```bash
+{ echo '```'; python3 hcr2.py stats perf <season>; echo '```'; } > tmp/video/<id>/stats.md
+{ echo '```'; python3 hcr2.py matchscore list-short --match <id>; echo '```'; } > tmp/video/<id>/scores.md
+python3 scripts/post_discord.py --mode <dev|prod> --channel podium --file tmp/video/<id>/stats.md --dry-run
+python3 scripts/post_discord.py --mode <dev|prod> --channel podium --file tmp/video/<id>/scores.md --dry-run
+```
+
+- **Zwei Nachrichten, nicht eine mit `--split`.** Zusammen sind es ~3100 Zeichen
+  (S65: 1454 + 1637), jede für sich passt unter 2000. `--split` schneidet nur an
+  Zeilengrenzen und würde den Codeblock mitten in der Tabelle aufbrechen. Ist eine der
+  beiden Dateien allein länger als 1990 Zeichen, melden statt splitten.
+- **Reihenfolge: Podest, dann Tabelle, dann Matchpunkte.** Die Texte gehören unter das
+  Bild, also erst senden, wenn das Podest steht.
+- **Auch wenn das Podest übersprungen wurde** (`⏭️ already posted a picture`), weil es
+  schon von Hand gepostet ist: die Tabellen kommen trotzdem darunter, denn die postet
+  niemand von Hand. Vorher mit `scripts/read_discord.py --mode <mode> --channel <podium-id>
+  --since <matchende>` prüfen, dass dort nicht schon `Match <id> –` steht. Für
+  Textnachrichten gibt es keine eingebaute Doppelpost-Sperre.
+- Wie beim Bild: `--dry-run` zeigen, **auf Bestätigung warten**, dann senden. Eine
+  Bestätigung für Bild und beide Texte zusammen reicht.
 
 ### 11. Recap in den Teamchat
 
